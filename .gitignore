@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Secret key - regenerated on server
+secret_key.txt
+
+# Backups are large and machine-specific
+backups/
+
+# Database files - data lives in Turso cloud
+*.db
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>شاشة المطبخ</title>
+<link rel="stylesheet" href="/static/kitchen.css">
+</head>
+<body>
+
+<!-- شاشة تسجيل الدخول -->
+<div id="kitchen-login" class="k-login">
+  <div class="k-login-card">
+    <div class="k-login-emoji">🧑‍🍳</div>
+    <div class="k-login-title" data-i18n="kitchenScreen">شاشة المطبخ</div>
+    <div class="k-login-sub" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
+    <select id="k-emp" class="k-input"></select>
+    <input id="k-pin" type="password" class="k-input" data-i18n="enterPin" placeholder="🔒 أدخل PIN" inputmode="numeric" maxlength="6">
+    <div id="k-err" class="k-err"></div>
+    <button class="k-btn k-btn-primary" onclick="kLogin()" data-i18n="login">🔓 دخول</button>
+  </div>
+</div>
+
+<div id="kitchen-app" style="display:none">
+  <header class="k-head">
+    <div class="k-title">🧑‍🍳 <span data-i18n="kitchenScreen">شاشة المطبخ</span></div>
+    <div class="k-clock" id="k-clock"></div>
+    <div class="k-stats">
+      <div class="k-stat">⏳ <span data-i18n="cooking">التحضير:</span> <b id="k-cooking">0</b></div>
+      <div class="k-stat">✅ <span data-i18n="ready">جاهزة:</span> <b id="k-ready">0</b></div>
+      <div class="k-stat" id="k-conn">● <span data-i18n="connected">متصل</span></div>
+    </div>
+  </header>
+  <div class="k-grid" id="k-grid"></div>
+  <div class="k-empty" id="k-empty" style="display:none" data-i18n="noOrdersNow">لا توجد طلبات حالياً 🌿</div>
+</div>
+
+<script src="/static/lang.js"></script>
+<script src="/static/kitchen.js"></script>
+</body>
+</html>
