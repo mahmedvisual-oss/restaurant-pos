@@ -18,7 +18,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE, "restaurant.db")
 BACKUP_DIR = os.path.join(BASE, "backups")
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder="public", static_url_path="")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 
@@ -135,7 +135,10 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         table_num INTEGER,
@@ -1511,7 +1514,10 @@ def _dump_remote_to_file(dst_path):
 
 
 def make_backup(prefix="backup"):
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except Exception:
+        pass
     dest = os.path.join(BACKUP_DIR, f"{prefix}_{_stamp()}.db")
     if CLOUD_DB:
         _dump_remote_to_file(dest)
@@ -1630,7 +1636,10 @@ def api_backup_list():
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+    except Exception:
+        pass
     items = []
     for fn in sorted(os.listdir(BACKUP_DIR), reverse=True):
         if fn.endswith(".db"):
