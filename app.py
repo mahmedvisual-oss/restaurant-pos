@@ -135,7 +135,7 @@ def get_db():
 def _ensure_schema(conn, c, log=True):
     """أضف الأعمدة والجداول الجديدة بأمان (مكتفية ذاتياً؛ تُستدعى عند كل بداية وعند الحاجة)."""
     try:
-        ocols = [r[0] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+        ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
         for col, ddl in (
             ("kitchen_status", "ALTER TABLE orders ADD COLUMN kitchen_status TEXT"),
             ("transfer_ref", "ALTER TABLE orders ADD COLUMN transfer_ref TEXT"),
