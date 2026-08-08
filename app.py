@@ -707,7 +707,7 @@ def api_cancel_approve():
             return jsonify({"error": "هذا الإلغاء يتطلب PIN المدير"}), 403
     c.execute("UPDATE cancellation_requests SET status='approved', reviewed_by=?, reviewed_at=datetime('now','localtime') WHERE id=?",
               (u["name"], req_id))
-    c.execute("UPDATE orders SET status='cancelled' WHERE id=?", (row["order_id"],))
+    c.execute("UPDATE orders SET status='cancelled', kitchen_status='ready' WHERE id=?", (row["order_id"],))
     # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون المُخصوم تلقائياً
     if order and order["status"] == "completed":
         try:
@@ -2295,7 +2295,7 @@ def api_kitchen_orders():
     c = conn.cursor()
     rows = c.execute(
         "SELECT id, table_num, items, status, guests, employee, sent_at, date, paid, payment_method, kitchen_status "
-        "FROM orders WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status != 'completed') "
+        "FROM orders WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status IN ('sent','ready')) "
         "ORDER BY COALESCE(sent_at, date) ASC, id ASC").fetchall()
     conn.close()
     orders = []
@@ -2405,7 +2405,7 @@ def api_order_pay():
     if is_new:
         # في وضع التقسيم يُنشأ طلب جديد لكل فاتورة؛ أغلق أي طلب مفتوح قديم
         # على نفس الطاولة (قبل التقسيم) حتى لا يعود للأصناف عند إعادة اختيارها
-        c.execute("UPDATE orders SET status='closed' WHERE table_num=? AND status IN ('active','sent','ready') AND id != ?",
+        c.execute("UPDATE orders SET status='closed', kitchen_status='ready' WHERE table_num=? AND status IN ('active','sent','ready') AND id != ?",
                   (table_num, oid))
     # نظام الآجل: إذا المدفوع أقل من الإجمالي (والطريقة آجل) سجّل رصيداً مفتوحاً
     if payment_method == "آجل" and total > paid:
