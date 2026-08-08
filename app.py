@@ -465,6 +465,7 @@ def api_reorder_category():
         c.execute("INSERT OR REPLACE INTO category_order (category, sort_order) VALUES (?, ?)", (c_name, i))
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     return jsonify({"ok": True, "order": cat_list})
 
 
@@ -500,6 +501,7 @@ def api_menu_add():
     mid = c.lastrowid
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("menu_add", f"إضافة صنف: {name} ({price})")
     return jsonify({"ok": True, "id": mid})
 
@@ -523,6 +525,7 @@ def api_menu_update(mid):
               (data.get("emoji", "🍽️"), name, data.get("category", "").strip(), price, mid))
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("menu_edit", f"تعديل صنف #{mid}: {name} ({price})")
     return jsonify({"ok": True})
 
@@ -538,6 +541,7 @@ def api_menu_delete(mid):
     c.execute("UPDATE menu_items SET active=0 WHERE id=?", (mid,))
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("menu_delete", f"حذف صنف: {row['name'] if row else mid}")
     return jsonify({"ok": True})
 
@@ -771,6 +775,7 @@ def api_employees_add():
     eid = c.lastrowid
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("add_employee", f"إضافة موظف: {name} ({role})")
     return jsonify({"ok": True, "id": eid})
 
@@ -812,6 +817,7 @@ def api_employees_update(eid):
                   (name, role, int(active), eid))
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("update_employee", f"تعديل موظف #{eid}: {name}")
     return jsonify({"ok": True})
 
@@ -838,6 +844,7 @@ def api_employees_delete(eid):
     c.execute("UPDATE employees SET active=0 WHERE id=?", (eid,))
     conn.commit()
     conn.close()
+    _invalidate_boot_cache()
     audit("delete_employee", f"حذف موظف #{eid}: {row['name']}")
     return jsonify({"ok": True})
 
@@ -880,6 +887,7 @@ def api_settings_save():
         freq = str(data["backup_freq"])
         if freq in ("daily", "weekly"):
             set_setting("backup_freq", freq)
+    _invalidate_boot_cache()
     audit("settings", "تحديث الإعدادات")
     return jsonify({"ok": True, "tax_rate": get_tax_rate(),
                     "restaurant_name": get_setting("restaurant_name"),
@@ -888,59 +896,76 @@ def api_settings_save():
                     "backup_freq": get_setting("backup_freq", "daily")})
 
 
+_BOOT_TTL = 8
+_boot_cache = {"ts": 0.0, "payload": None}
+
+
+def _invalidate_boot_cache():
+    """يُطلب بعد أي تعديل على بيانات الإقلاع شبه الثابتة لتفريغ الكاش فوراً."""
+    _boot_cache["ts"] = 0.0
+
+
+def _bootstrap_static(conn):
+    """بيانات شبه ثابتة (إعدادات، منيو، أقسام، موظفون، مخزون منخفض، طلبات إلغاء)
+    تُستخرج في استعلام UNION واحد وتُخزَّن في الكاش بدل إعادتها مع كل إقلاع."""
+    c = conn.cursor()
+    branches = [
+        "SELECT 'setting' AS kind, key AS a, value AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM settings",
+        "SELECT 'catorder' AS kind, category AS a, CAST(sort_order AS TEXT) AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM category_order",
+        "SELECT 'employee' AS kind, CAST(id AS TEXT) AS a, name AS b, role AS c, '' AS d, '' AS e, '' AS f FROM employees WHERE active=1",
+        "SELECT 'menu' AS kind, CAST(id AS TEXT) AS a, emoji AS b, name AS c, category AS d, CAST(price AS TEXT) AS e, '' AS f FROM menu_items WHERE active=1",
+        "SELECT 'lowstock' AS kind, item_name AS a, CAST(quantity AS TEXT) AS b, unit AS c, CAST(min_stock AS TEXT) AS d, '' AS e, '' AS f FROM inventory WHERE quantity <= min_stock AND min_stock > 0",
+        "SELECT 'cancelcount' AS kind, CAST(COUNT(*) AS TEXT) AS a, '' AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM cancellation_requests WHERE status='pending'",
+    ]
+    rows = c.execute(" UNION ALL ".join(branches)).fetchall()
+    raw_settings = {}
+    menu = []
+    catorder = {}
+    employees = []
+    low_stock = []
+    cancel_count = 0
+    for r in rows:
+        kind = r["kind"]
+        v1, v2, v3, v4, v5, v6 = r["a"], r["b"], r["c"], r["d"], r["e"], r["f"]
+        if kind == "setting":
+            raw_settings[v1] = v2
+        elif kind == "catorder":
+            catorder[v1] = int(v2)
+        elif kind == "employee":
+            employees.append({"id": int(v1), "name": v2, "role": v3})
+        elif kind == "menu":
+            menu.append({"id": int(v1), "emoji": v2, "name": v3, "category": v4, "price": float(v5)})
+        elif kind == "lowstock":
+            low_stock.append({"item_name": v1, "quantity": float(v2), "unit": v3, "min_stock": float(v4)})
+        elif kind == "cancelcount":
+            cancel_count = int(v1)
+    try:
+        tax_rate = float(raw_settings.get("tax_rate", 0.15))
+    except (TypeError, ValueError):
+        tax_rate = 0.15
+    settings = {
+        "restaurant_name": raw_settings.get("restaurant_name", "مطعم الذوق الرفيع"),
+        "tax_rate": tax_rate,
+        "currency": raw_settings.get("currency", "ر.س"),
+        "auto_backup": raw_settings.get("auto_backup", "1") == "1",
+        "backup_freq": raw_settings.get("backup_freq", "daily"),
+    }
+    return (settings, menu, catorder, employees, low_stock, cancel_count)
+
+
 @app.route("/api/bootstrap")
 def api_bootstrap():
-    """بيانات الإقلاع موحّدة في طلب واحد لتسريع بدء التطبيق
-    (استعلامان فقط بدلاً من ~8 رحلات متتابعة إلى قاعدة البيانات)."""
+    """بيانات الإقلاع موحّدة في طلب واحد: استعلام مباشر واحد للطاولات فقط
+    + كاش قصير TTL للبيانات شبه الثابتة (بدلاً من ~8 رحلات متتابعة)."""
     u = require_user()
     conn = get_db()
     try:
         c = conn.cursor()
-        branches = [
-            "SELECT 'setting' AS kind, key AS a, value AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM settings",
-            "SELECT 'catorder' AS kind, category AS a, CAST(sort_order AS TEXT) AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM category_order",
-            "SELECT 'employee' AS kind, CAST(id AS TEXT) AS a, name AS b, role AS c, '' AS d, '' AS e, '' AS f FROM employees WHERE active=1",
-            "SELECT 'menu' AS kind, CAST(id AS TEXT) AS a, emoji AS b, name AS c, category AS d, CAST(price AS TEXT) AS e, '' AS f FROM menu_items WHERE active=1",
-            "SELECT 'lowstock' AS kind, item_name AS a, CAST(quantity AS TEXT) AS b, unit AS c, CAST(min_stock AS TEXT) AS d, '' AS e, '' AS f FROM inventory WHERE quantity <= min_stock AND min_stock > 0",
-        ]
-        if u and u.get("role") == "manager":
-            branches.append(
-                "SELECT 'cancelcount' AS kind, CAST(COUNT(*) AS TEXT) AS a, '' AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM cancellation_requests WHERE status='pending'")
-        rows = c.execute(" UNION ALL ".join(branches)).fetchall()
-
-        raw_settings = {}
-        menu = []
-        catorder = {}
-        employees = []
-        low_stock = []
-        cancel_count = 0
-        for r in rows:
-            kind = r["kind"]
-            v1, v2, v3, v4, v5, v6 = r["a"], r["b"], r["c"], r["d"], r["e"], r["f"]
-            if kind == "setting":
-                raw_settings[v1] = v2
-            elif kind == "catorder":
-                catorder[v1] = int(v2)
-            elif kind == "employee":
-                employees.append({"id": int(v1), "name": v2, "role": v3})
-            elif kind == "menu":
-                menu.append({"id": int(v1), "emoji": v2, "name": v3, "category": v4, "price": float(v5)})
-            elif kind == "lowstock":
-                low_stock.append({"item_name": v1, "quantity": float(v2), "unit": v3, "min_stock": float(v4)})
-            elif kind == "cancelcount":
-                cancel_count = int(v1)
-
-        try:
-            tax_rate = float(raw_settings.get("tax_rate", 0.15))
-        except (TypeError, ValueError):
-            tax_rate = 0.15
-        settings = {
-            "restaurant_name": raw_settings.get("restaurant_name", "مطعم الذوق الرفيع"),
-            "tax_rate": tax_rate,
-            "currency": raw_settings.get("currency", "ر.س"),
-            "auto_backup": raw_settings.get("auto_backup", "1") == "1",
-            "backup_freq": raw_settings.get("backup_freq", "daily"),
-        }
+        now = time.time()
+        if _boot_cache["payload"] is None or now - _boot_cache["ts"] > _BOOT_TTL:
+            _boot_cache["ts"] = now
+            _boot_cache["payload"] = _bootstrap_static(conn)
+        settings, menu, catorder, employees, low_stock, cancel_count = _boot_cache["payload"]
 
         tabs = c.execute(
             "SELECT t.id, t.num, t.section, t.pos_x, t.pos_y, t.capacity, t.shape, "
