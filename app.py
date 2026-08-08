@@ -2294,8 +2294,8 @@ def api_kitchen_orders():
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(
-        "SELECT id, table_num, items, status, guests, employee, sent_at, date, paid, payment_method "
-        "FROM orders WHERE kitchen_status='sent' "
+        "SELECT id, table_num, items, status, guests, employee, sent_at, date, paid, payment_method, kitchen_status "
+        "FROM orders WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status != 'completed') "
         "ORDER BY COALESCE(sent_at, date) ASC, id ASC").fetchall()
     conn.close()
     orders = []
@@ -2308,6 +2308,7 @@ def api_kitchen_orders():
             pass
         orders.append({
             "id": r["id"], "table_num": r["table_num"], "status": r["status"],
+            "kitchen_status": r["kitchen_status"] if "kitchen_status" in r.keys() else "sent",
             "guests": r["guests"] or 1, "employee": r["employee"],
             "sent_at": sent, "sent_ts": sent_ts, "items": _parse_items(r["items"]),
             "paid": r["paid"] or 0, "payment_method": r["payment_method"] or "",
