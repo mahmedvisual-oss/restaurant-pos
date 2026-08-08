@@ -891,42 +891,65 @@ def api_settings_save():
 @app.route("/api/bootstrap")
 def api_bootstrap():
     """بيانات الإقلاع موحّدة في طلب واحد لتسريع بدء التطبيق
-    (بدلاً من ~8 طلبات متتابعة لكل رحلة إلى قاعدة البيانات)."""
+    (استعلامان فقط بدلاً من ~8 رحلات متتابعة إلى قاعدة البيانات)."""
     u = require_user()
     conn = get_db()
-    c = conn.cursor()
     try:
-        raw = {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings").fetchall()}
+        c = conn.cursor()
+        branches = [
+            "SELECT 'setting' AS kind, key AS a, value AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM settings",
+            "SELECT 'catorder' AS kind, category AS a, CAST(sort_order AS TEXT) AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM category_order",
+            "SELECT 'employee' AS kind, CAST(id AS TEXT) AS a, name AS b, role AS c, '' AS d, '' AS e, '' AS f FROM employees WHERE active=1",
+            "SELECT 'menu' AS kind, CAST(id AS TEXT) AS a, emoji AS b, name AS c, category AS d, CAST(price AS TEXT) AS e, '' AS f FROM menu_items WHERE active=1",
+            "SELECT 'lowstock' AS kind, item_name AS a, CAST(quantity AS TEXT) AS b, unit AS c, CAST(min_stock AS TEXT) AS d, '' AS e, '' AS f FROM inventory WHERE quantity <= min_stock AND min_stock > 0",
+        ]
+        if u and u.get("role") == "manager":
+            branches.append(
+                "SELECT 'cancelcount' AS kind, CAST(COUNT(*) AS TEXT) AS a, '' AS b, '' AS c, '' AS d, '' AS e, '' AS f FROM cancellation_requests WHERE status='pending'")
+        rows = c.execute(" UNION ALL ".join(branches)).fetchall()
+
+        raw_settings = {}
+        menu = []
+        catorder = {}
+        employees = []
+        low_stock = []
+        cancel_count = 0
+        for r in rows:
+            kind = r["kind"]
+            v1, v2, v3, v4, v5, v6 = r["a"], r["b"], r["c"], r["d"], r["e"], r["f"]
+            if kind == "setting":
+                raw_settings[v1] = v2
+            elif kind == "catorder":
+                catorder[v1] = int(v2)
+            elif kind == "employee":
+                employees.append({"id": int(v1), "name": v2, "role": v3})
+            elif kind == "menu":
+                menu.append({"id": int(v1), "emoji": v2, "name": v3, "category": v4, "price": float(v5)})
+            elif kind == "lowstock":
+                low_stock.append({"item_name": v1, "quantity": float(v2), "unit": v3, "min_stock": float(v4)})
+            elif kind == "cancelcount":
+                cancel_count = int(v1)
+
         try:
-            tax_rate = float(raw.get("tax_rate", 0.15))
+            tax_rate = float(raw_settings.get("tax_rate", 0.15))
         except (TypeError, ValueError):
             tax_rate = 0.15
         settings = {
-            "restaurant_name": raw.get("restaurant_name", "مطعم الذوق الرفيع"),
+            "restaurant_name": raw_settings.get("restaurant_name", "مطعم الذوق الرفيع"),
             "tax_rate": tax_rate,
-            "currency": raw.get("currency", "ر.س"),
-            "auto_backup": raw.get("auto_backup", "1") == "1",
-            "backup_freq": raw.get("backup_freq", "daily"),
+            "currency": raw_settings.get("currency", "ر.س"),
+            "auto_backup": raw_settings.get("auto_backup", "1") == "1",
+            "backup_freq": raw_settings.get("backup_freq", "daily"),
         }
-        menu = [dict(r) for r in c.execute(
-            "SELECT id, emoji, name, category, price FROM menu_items WHERE active=1 ORDER BY id").fetchall()]
-        catorder = {r["category"]: r["sort_order"] for r in c.execute(
-            "SELECT category, sort_order FROM category_order ORDER BY sort_order").fetchall()}
-        employees = [dict(r) for r in c.execute(
-            "SELECT id, name, role FROM employees WHERE active=1 ORDER BY id").fetchall()]
-        tabs = c.execute("SELECT * FROM tables ORDER BY num").fetchall()
-        active = {r["table_num"]: r["cnt"] for r in c.execute(
-            "SELECT table_num, COUNT(*) AS cnt FROM orders WHERE status IN ('active','sent','ready') GROUP BY table_num").fetchall()}
+
+        tabs = c.execute(
+            "SELECT t.id, t.num, t.section, t.pos_x, t.pos_y, t.capacity, t.shape, "
+            "(SELECT COUNT(*) FROM orders o WHERE o.table_num = t.num AND o.status IN ('active','sent','ready')) AS active_cnt "
+            "FROM tables t ORDER BY t.num").fetchall()
         tables = [{"id": t["id"], "num": t["num"], "section": t["section"],
                    "pos_x": t["pos_x"], "pos_y": t["pos_y"],
                    "capacity": t["capacity"], "shape": t["shape"],
-                   "active": t["num"] in active, "orders": active.get(t["num"], 0)} for t in tabs]
-        low_stock = [dict(r) for r in c.execute(
-            "SELECT * FROM inventory WHERE quantity <= min_stock AND min_stock > 0 ORDER BY item_name").fetchall()]
-        cancel_count = 0
-        if u and u.get("role") == "manager":
-            cancel_count = c.execute(
-                "SELECT COUNT(*) AS cnt FROM cancellation_requests WHERE status='pending'").fetchone()["cnt"]
+                   "active": t["active_cnt"] > 0, "orders": t["active_cnt"]} for t in tabs]
     finally:
         conn.close()
     return jsonify({
