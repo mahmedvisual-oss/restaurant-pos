@@ -381,7 +381,7 @@ def audit(action, details=""):
 # ===== الواجهة =====
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", restaurant_name=get_setting("restaurant_name", "مطعم الذوق الرفيع"))
 
 
 @app.route("/api/menu")

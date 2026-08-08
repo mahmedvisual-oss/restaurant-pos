@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/style2.css?v=13">
+<link rel="stylesheet" href="/style2.css?v=14">
 </head>
 <body>
 
@@ -12,7 +12,7 @@
   <div class="logo">
     <span class="logo-emoji">🍽️</span>
     <div>
-      <div class="title" id="app-title">مطعم الذوق الرفيع</div>
+      <div class="title" id="app-title">{{ restaurant_name }}</div>
       <div class="subtitle" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
     </div>
   </div>
@@ -62,7 +62,7 @@
 <div id="login-overlay" class="login-overlay">
   <div class="login-card">
     <div class="login-emoji">🍽️</div>
-    <div class="login-title" id="login-title">مطعم الذوق الرفيع</div>
+    <div class="login-title" id="login-title">{{ restaurant_name }}</div>
     <div class="login-sub" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
     <select id="login-employee" class="login-select"></select>
     <input id="login-pin" type="password" class="login-input" data-i18n="enterPin" placeholder="🔒 أدخل PIN" inputmode="numeric" maxlength="6">
@@ -769,7 +769,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="/lang.js?v=72"></script>
-<script src="/app.js?v=72"></script>
+<script src="/lang.js?v=73"></script>
+<script src="/app.js?v=73"></script>
 </body>
 </html>

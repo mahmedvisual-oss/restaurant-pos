@@ -2811,6 +2811,7 @@ async function loadSettings() {
     TAX_RATE = d.tax_rate;
     RESTAURANT_NAME = d.restaurant_name;
     updateAutoBackupLabel();
+    applySettings();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
 
