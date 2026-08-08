@@ -3453,6 +3453,39 @@ document.getElementById("menu-list").addEventListener("click", function(e) {
 });
 
 // ===== التهيئة =====
+const POS_CACHE_KEY = "pos_cache_v1";
+
+function posCacheLoad() {
+  try {
+    return JSON.parse(localStorage.getItem(POS_CACHE_KEY) || "null");
+  } catch (e) { return null; }
+}
+
+function posCacheSave(b) {
+  try {
+    localStorage.setItem(POS_CACHE_KEY, JSON.stringify({
+      ts: Date.now(),
+      settings: b.settings, menu: b.menu, categoryOrder: b.category_order, employees: b.employees
+    }));
+  } catch (e) { /* تجاهل */ }
+}
+
+function applyBootstrapData(b) {
+  const s = b.settings || {};
+  TAX_RATE = s.tax_rate;
+  CURRENCY = s.currency;
+  RESTAURANT_NAME = s.restaurant_name;
+  applySettings();
+  MENU = b.menu || [];
+  CATEGORY_ORDER = b.category_order || {};
+  renderCats();
+  renderMenu();
+  const sel = document.getElementById("login-employee");
+  if (b.employees && sel) {
+    sel.innerHTML = b.employees.map(e => `<option value="${e.id}">${e.name} — ${e.role === "manager" ? t("managerRole") : t("cashierRole")}</option>`).join("");
+  }
+}
+
 async function checkLowStock() {
   try {
     const items = await api("/api/inventory/low");
@@ -3466,25 +3499,18 @@ async function checkLowStock() {
 async function init() {
   setLang(localStorage.getItem("pos_lang") || "id");
   applyUiPrefs();
+  const cache = posCacheLoad();
+  const cacheValid = !!(cache && cache.settings && (Date.now() - cache.ts) < 24 * 3600 * 1000);
+  if (cacheValid) {
+    try { applyBootstrapData(cache); } catch (e) { /* تجاهل */ }
+  }
   try {
     const b = await api("/api/bootstrap");
-    const s = b.settings || {};
-    TAX_RATE = s.tax_rate;
-    CURRENCY = s.currency;
-    RESTAURANT_NAME = s.restaurant_name;
-    applySettings();
-    MENU = b.menu || [];
-    CATEGORY_ORDER = b.category_order || {};
-    renderCats();
-    renderMenu();
+    applyBootstrapData(b);
     tableData = {};
     for (const t of (b.tables || [])) tableData[t.num] = t;
     renderTables();
     updateStats();
-    const sel = document.getElementById("login-employee");
-    if (b.employees && sel) {
-      sel.innerHTML = b.employees.map(e => `<option value="${e.id}">${e.name} — ${e.role === "manager" ? t("managerRole") : t("cashierRole")}</option>`).join("");
-    }
     if (b.user) {
       user = b.user;
       document.getElementById("login-overlay").style.display = "none";
@@ -3497,16 +3523,22 @@ async function init() {
     } else {
       document.getElementById("login-overlay").style.display = "flex";
     }
+    posCacheSave(b);
   } catch (e) {
-    document.getElementById("login-overlay").style.display = "flex";
-    loadEmployees();
-    try {
-      MENU = await api("/api/menu");
-      CATEGORY_ORDER = await api("/api/categories/order").catch(() => ({}));
-      renderCats();
-      renderMenu();
-    } catch (_e) { /* لا يهم */ }
-    loadTables();
+    if (!cacheValid) {
+      document.getElementById("login-overlay").style.display = "flex";
+      loadEmployees();
+      try {
+        MENU = await api("/api/menu");
+        CATEGORY_ORDER = await api("/api/categories/order").catch(() => ({}));
+        renderCats();
+        renderMenu();
+      } catch (_e) { /* لا يهم */ }
+      loadTables();
+    } else {
+      document.getElementById("login-overlay").style.display = "flex";
+      loadTables();
+    }
   }
 }
 
