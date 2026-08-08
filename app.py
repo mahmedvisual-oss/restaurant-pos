@@ -1256,7 +1256,8 @@ def api_credit_list():
     q = (request.args.get("q") or "").strip()
     status = request.args.get("status") or ""
     conn = get_db()
-    sql = "SELECT * FROM credit_ledger WHERE 1=1"
+    rows = []
+    sql = "SELECT id, customer_name, order_id, table_num, total, paid, status, created_at FROM credit_ledger WHERE 1=1"
     params = []
     if status in ("open", "settled"):
         sql += " AND status=?"
@@ -1265,9 +1266,30 @@ def api_credit_list():
         sql += " AND customer_name LIKE ?"
         params.append(f"%{q}%")
     sql += " ORDER BY id DESC"
-    rows = conn.execute(sql, params).fetchall()
+    for r in conn.execute(sql, params).fetchall():
+        d = dict(r)
+        d["src"] = "ledger"
+        rows.append(d)
+    # فواتير الآجل المسدّدة بالكامل غير المقيّدة في الدفتر: تُعرض أيضاً مع اسم الدائن
+    if status != "open":
+        osql = ("SELECT id, credit_name, table_num, total, paid, date FROM orders "
+                "WHERE payment_method='آجل' AND id NOT IN "
+                "(SELECT DISTINCT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
+        oparams = []
+        if q:
+            osql += " AND credit_name LIKE ?"
+            oparams.append(f"%{q}%")
+        osql += " ORDER BY id DESC"
+        for r in conn.execute(osql, oparams).fetchall():
+            rows.append({
+                "id": r["id"], "customer_name": r["credit_name"] or "",
+                "order_id": r["id"], "table_num": r["table_num"],
+                "total": r["total"] or 0, "paid": r["paid"] or 0,
+                "status": "settled", "created_at": r["date"], "src": "order",
+            })
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    rows.sort(key=lambda x: (x.get("created_at") or ""), reverse=True)
+    return jsonify(rows)
 
 
 @app.route("/api/credit/<int:lid>/payments")
@@ -1291,6 +1313,9 @@ def api_credit_summary():
         total_due = conn.execute("SELECT COALESCE(SUM(total),0) FROM credit_ledger WHERE status='open'").fetchone()[0]
         total_paid = conn.execute("SELECT COALESCE(SUM(paid),0) FROM credit_ledger WHERE status='open'").fetchone()[0]
         settled = conn.execute("SELECT COUNT(*) FROM credit_ledger WHERE status='settled'").fetchone()[0]
+        settled += conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE payment_method='آجل' AND id NOT IN "
+            "(SELECT DISTINCT order_id FROM credit_ledger WHERE order_id IS NOT NULL)").fetchone()[0]
         today = datetime.now().strftime("%Y-%m-%d")
         today_collected = conn.execute(
             "SELECT COALESCE(SUM(amount),0) FROM credit_payments WHERE date(date) = ?", (today,)).fetchone()[0]

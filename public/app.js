@@ -2726,13 +2726,14 @@ async function loadCreditReport() {
         <tr><th>#</th><th>${t("rptCustomer")}</th><th>${t("rptOrder")}</th><th>${t("rptStatus")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptPayments")}</th><th>${t("rptCollect")}</th></tr>
         ${rowsF.length ? rowsF.map(r => {
           const rem = r.total - r.paid;
+          const cname = (r.customer_name || "").trim();
           return `<tr>
-            <td>#${r.id}</td><td>${escapeHtml(r.customer_name)}</td>
+            <td>#${r.id}</td><td>${cname ? escapeHtml(cname) : '<span style="color:var(--muted)">—</span>'}</td>
             <td>#${r.order_id || "-"}</td>
             <td style="color:${r.status==='settled'?'var(--success)':'var(--info)'}">${r.status==='settled'?t("rptSettled"):'&nbsp;'}</td>
             <td>${fmtCur(r.total)}</td><td>${fmtCur(r.paid)}</td>
             <td style="color:${rem>0?'var(--danger)':'var(--muted)'}">${fmtCur(rem)}</td>
-            <td><button class="btn btn-sm" onclick="showCreditPayments(${r.id})">👁 ${t("rptPayments")}</button></td>
+            <td>${r.src==='ledger' ? `<button class="btn btn-sm" onclick="showCreditPayments(${r.id})">👁 ${t("rptPayments")}</button>` : '<span style="color:var(--muted)">—</span>'}</td>
             <td>
               ${r.status==='open' ? `<div style="display:flex;gap:4px">
                 <input type="number" id="credit-pay-${r.id}" class="login-input" style="width:90px;padding:4px;font-size:12px" placeholder="${t("rptAmount")}" min="0">
