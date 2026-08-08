@@ -2037,8 +2037,24 @@ async function updateReservation(id, status) {
 let chartInstances = {};
 
 function destroyCharts() {
-  Object.values(chartInstances).forEach(c => c.destroy());
+  if (!window.Chart) { chartInstances = {}; return; }
+  Object.values(chartInstances).forEach(c => { try { c.destroy(); } catch (e) {} });
   chartInstances = {};
+}
+
+let _chartJsPromise = null;
+function loadChartJs() {
+  if (window.Chart) return Promise.resolve();
+  if (_chartJsPromise) return _chartJsPromise;
+  _chartJsPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js";
+    sc.async = true;
+    sc.onload = () => resolve();
+    sc.onerror = () => { _chartJsPromise = null; reject(new Error("chart.js")); };
+    document.head.appendChild(sc);
+  });
+  return _chartJsPromise;
 }
 
 function renderDailyChart(rows) {
@@ -2058,8 +2074,8 @@ function renderTopItemsChart(rows) {
   const el = document.getElementById("chart-top-items");
   if (!rows.length) { el.style.display = "none"; return; }
   el.style.display = "block";
-  const labels = rows.map(r => r.item_name);
-  const values = rows.map(r => r.total_qty);
+  const labels = rows.map(r => r.name);
+  const values = rows.map(r => r.qty);
   const colors = ["#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"];
   chartInstances.topItems = new Chart(el, {
     type: "bar",
@@ -2925,12 +2941,14 @@ function renderTablesReport(c) {
 
 function renderCharts(d) {
   if (user.role !== "manager") return;
-  try {
-    renderDailyChart(d.daily || []);
-    renderTopItemsChart((d.top_items || []).slice(0, 6));
-    renderMethodChart(d.by_method || []);
-    renderHourChart(d.by_hour || []);
-  } catch (e) { /* تجاهل */ }
+  loadChartJs().then(() => {
+    try {
+      renderDailyChart(d.daily || []);
+      renderTopItemsChart((d.top_items || []).slice(0, 6));
+      renderMethodChart(d.by_method || []);
+      renderHourChart(d.by_hour || []);
+    } catch (e) { /* تجاهل */ }
+  }).catch(() => { /* تجاهل فشل تحميل مكتبة الرسوم */ });
 }
 
 function printReports() {
@@ -3449,29 +3467,46 @@ async function init() {
   setLang(localStorage.getItem("pos_lang") || "id");
   applyUiPrefs();
   try {
-    const s = await api("/api/settings");
+    const b = await api("/api/bootstrap");
+    const s = b.settings || {};
     TAX_RATE = s.tax_rate;
     CURRENCY = s.currency;
     RESTAURANT_NAME = s.restaurant_name;
     applySettings();
-  } catch (e) { /* لا يهم */ }
-  MENU = await api("/api/menu");
-  try { CATEGORY_ORDER = await api("/api/categories/order"); } catch(e) {}
-  renderCats();
-  renderMenu();
-  loadTables();
-  loadEmployees();
-  try {
-    const d = await api("/api/me");
-    if (d.user) {
-      user = d.user;
+    MENU = b.menu || [];
+    CATEGORY_ORDER = b.category_order || {};
+    renderCats();
+    renderMenu();
+    tableData = {};
+    for (const t of (b.tables || [])) tableData[t.num] = t;
+    renderTables();
+    updateStats();
+    const sel = document.getElementById("login-employee");
+    if (b.employees && sel) {
+      sel.innerHTML = b.employees.map(e => `<option value="${e.id}">${e.name} — ${e.role === "manager" ? t("managerRole") : t("cashierRole")}</option>`).join("");
+    }
+    if (b.user) {
+      user = b.user;
       document.getElementById("login-overlay").style.display = "none";
       updateUserBar();
-      checkLowStock();
-      checkCancelRequests();
+      if (b.low_stock && b.low_stock.length) {
+        const names = b.low_stock.map(i => `${i.item_name} (${i.quantity} ${i.unit})`).join(", ");
+        toast(`⚠️ ${t("lowStockWarning")}: ${names}`);
+      }
+      checkCancelRequests(b.cancel_count);
+    } else {
+      document.getElementById("login-overlay").style.display = "flex";
     }
   } catch (e) {
     document.getElementById("login-overlay").style.display = "flex";
+    loadEmployees();
+    try {
+      MENU = await api("/api/menu");
+      CATEGORY_ORDER = await api("/api/categories/order").catch(() => ({}));
+      renderCats();
+      renderMenu();
+    } catch (_e) { /* لا يهم */ }
+    loadTables();
   }
 }
 
@@ -3574,18 +3609,22 @@ async function rejectCancel(id) {
 }
 
 let cancelPollInterval = null;
-async function checkCancelRequests() {
+async function checkCancelRequests(preCount) {
   if (!user || user.role !== "manager") {
     document.getElementById("btn-cancel-notify").style.display = "none";
     if (cancelPollInterval) { clearInterval(cancelPollInterval); cancelPollInterval = null; }
     return;
   }
   try {
-    const d = await api("/api/cancel-count");
+    let count = preCount;
+    if (count == null) {
+      const d = await api("/api/cancel-count");
+      count = d.count;
+    }
     const badge = document.getElementById("cancel-notify-badge");
     const btn = document.getElementById("btn-cancel-notify");
-    badge.textContent = d.count;
-    btn.style.display = d.count > 0 ? "" : "none";
+    badge.textContent = count;
+    btn.style.display = count > 0 ? "" : "none";
   } catch (e) {}
   if (!cancelPollInterval) {
     cancelPollInterval = setInterval(checkCancelRequests, 15000);

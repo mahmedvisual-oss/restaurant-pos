@@ -342,21 +342,42 @@ def require_user():
     return session.get("user")
 
 
-def get_setting(key, default=""):
+_SETTINGS_CACHE = {}
+_SETTINGS_CACHE_TS = 0.0
+_SETTINGS_CACHE_TTL = 5.0
+
+
+def _load_settings():
     conn = get_db()
     c = conn.cursor()
-    row = c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    rows = c.execute("SELECT key, value FROM settings").fetchall()
     conn.close()
-    return row["value"] if row and row["value"] is not None else default
+    return {r["key"]: r["value"] for r in rows}
+
+
+def get_setting(key, default=""):
+    """إعدادات بكاش قصير الأمد: قراءة واحدة لجميع الإعدادات بدل رحلة لكل مفتاح."""
+    global _SETTINGS_CACHE, _SETTINGS_CACHE_TS
+    now = time.time()
+    if not _SETTINGS_CACHE or now - _SETTINGS_CACHE_TS > _SETTINGS_CACHE_TTL:
+        try:
+            _SETTINGS_CACHE = _load_settings()
+            _SETTINGS_CACHE_TS = now
+        except Exception:
+            pass
+    v = _SETTINGS_CACHE.get(key)
+    return v if v is not None else default
 
 
 def set_setting(key, value):
+    global _SETTINGS_CACHE
     conn = get_db()
     c = conn.cursor()
     c.execute("INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=?",
               (key, value, value))
     conn.commit()
     conn.close()
+    _SETTINGS_CACHE[key] = value
 
 
 def get_tax_rate():
@@ -865,6 +886,59 @@ def api_settings_save():
                     "currency": get_setting("currency"),
                     "auto_backup": get_setting("auto_backup", "1") == "1",
                     "backup_freq": get_setting("backup_freq", "daily")})
+
+
+@app.route("/api/bootstrap")
+def api_bootstrap():
+    """بيانات الإقلاع موحّدة في طلب واحد لتسريع بدء التطبيق
+    (بدلاً من ~8 طلبات متتابعة لكل رحلة إلى قاعدة البيانات)."""
+    u = require_user()
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        raw = {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings").fetchall()}
+        try:
+            tax_rate = float(raw.get("tax_rate", 0.15))
+        except (TypeError, ValueError):
+            tax_rate = 0.15
+        settings = {
+            "restaurant_name": raw.get("restaurant_name", "مطعم الذوق الرفيع"),
+            "tax_rate": tax_rate,
+            "currency": raw.get("currency", "ر.س"),
+            "auto_backup": raw.get("auto_backup", "1") == "1",
+            "backup_freq": raw.get("backup_freq", "daily"),
+        }
+        menu = [dict(r) for r in c.execute(
+            "SELECT id, emoji, name, category, price FROM menu_items WHERE active=1 ORDER BY id").fetchall()]
+        catorder = {r["category"]: r["sort_order"] for r in c.execute(
+            "SELECT category, sort_order FROM category_order ORDER BY sort_order").fetchall()}
+        employees = [dict(r) for r in c.execute(
+            "SELECT id, name, role FROM employees WHERE active=1 ORDER BY id").fetchall()]
+        tabs = c.execute("SELECT * FROM tables ORDER BY num").fetchall()
+        active = {r["table_num"]: r["cnt"] for r in c.execute(
+            "SELECT table_num, COUNT(*) AS cnt FROM orders WHERE status IN ('active','sent','ready') GROUP BY table_num").fetchall()}
+        tables = [{"id": t["id"], "num": t["num"], "section": t["section"],
+                   "pos_x": t["pos_x"], "pos_y": t["pos_y"],
+                   "capacity": t["capacity"], "shape": t["shape"],
+                   "active": t["num"] in active, "orders": active.get(t["num"], 0)} for t in tabs]
+        low_stock = [dict(r) for r in c.execute(
+            "SELECT * FROM inventory WHERE quantity <= min_stock AND min_stock > 0 ORDER BY item_name").fetchall()]
+        cancel_count = 0
+        if u and u.get("role") == "manager":
+            cancel_count = c.execute(
+                "SELECT COUNT(*) AS cnt FROM cancellation_requests WHERE status='pending'").fetchone()["cnt"]
+    finally:
+        conn.close()
+    return jsonify({
+        "user": u,
+        "settings": settings,
+        "menu": menu,
+        "category_order": catorder,
+        "tables": tables,
+        "employees": employees,
+        "low_stock": low_stock,
+        "cancel_count": cancel_count,
+    })
 
 
 @app.route("/api/promo/list")
