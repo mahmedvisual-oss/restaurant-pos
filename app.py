@@ -103,8 +103,8 @@ TAX_RATE = 0.03
 
 
 # ===== وضع السحابة (Turso) =====
-TURSO_URL = (os.environ.get("TURSO_URL") or os.environ.get("LIBSQL_URL") or "").strip()
-TURSO_AUTH_TOKEN = (os.environ.get("TURSO_AUTH_TOKEN") or os.environ.get("LIBSQL_AUTH_TOKEN") or "").strip()
+TURSO_URL = (os.environ.get("TURSO_URL") or os.environ.get("LIBSQL_URL") or "").strip().lstrip("\ufeff")
+TURSO_AUTH_TOKEN = (os.environ.get("TURSO_AUTH_TOKEN") or os.environ.get("LIBSQL_AUTH_TOKEN") or "").strip().lstrip("\ufeff")
 
 try:
     import turso_serverless as _ts
