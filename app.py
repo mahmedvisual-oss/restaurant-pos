@@ -132,6 +132,51 @@ def get_db():
     return conn
 
 
+def _ensure_schema(conn, c, log=True):
+    """أضف الأعمدة والجداول الجديدة بأمان (مكتفية ذاتياً؛ تُستدعى عند كل بداية وعند الحاجة)."""
+    try:
+        ocols = [r[0] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+        for col, ddl in (
+            ("kitchen_status", "ALTER TABLE orders ADD COLUMN kitchen_status TEXT"),
+            ("transfer_ref", "ALTER TABLE orders ADD COLUMN transfer_ref TEXT"),
+            ("transfer_name", "ALTER TABLE orders ADD COLUMN transfer_name TEXT"),
+        ):
+            if col not in ocols:
+                c.execute(ddl)
+        c.execute("UPDATE orders SET kitchen_status='sent' WHERE kitchen_status IS NULL AND status='sent'")
+        c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
+    except Exception as e:
+        if log:
+            print("ENSURE ORDERS ERR:", repr(e))
+    try:
+        c.execute("SELECT 1 FROM refund_receipts LIMIT 1").fetchone()
+    except Exception:
+        try:
+            c.execute('''CREATE TABLE IF NOT EXISTS refund_receipts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receipt_no TEXT UNIQUE,
+                order_id INTEGER NOT NULL,
+                items TEXT,
+                subtotal REAL DEFAULT 0,
+                tax REAL DEFAULT 0,
+                discount REAL DEFAULT 0,
+                total REAL DEFAULT 0,
+                refund_method TEXT DEFAULT 'نقدي',
+                refund_ref TEXT,
+                reason TEXT DEFAULT '',
+                requested_by TEXT,
+                approved_by TEXT,
+                date TEXT DEFAULT (datetime('now','localtime'))
+            )''')
+        except Exception as e:
+            if log:
+                print("ENSURE REFUNDS ERR:", repr(e))
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -148,35 +193,7 @@ def init_db():
             seed = 0
         if seed > 0:
             # مهاجرة خفيفة للأعمدة الجديدة دون إعادة بناء الجداول
-            try:
-                ocols = [r[0] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
-                if "kitchen_status" not in ocols:
-                    c.execute("ALTER TABLE orders ADD COLUMN kitchen_status TEXT")
-                    c.execute("UPDATE orders SET kitchen_status='sent' WHERE status='sent'")
-                    c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
-                if "transfer_ref" not in ocols:
-                    c.execute("ALTER TABLE orders ADD COLUMN transfer_ref TEXT")
-                if "transfer_name" not in ocols:
-                    c.execute("ALTER TABLE orders ADD COLUMN transfer_name TEXT")
-                c.execute("""CREATE TABLE IF NOT EXISTS refund_receipts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    receipt_no TEXT UNIQUE,
-                    order_id INTEGER NOT NULL,
-                    items TEXT,
-                    subtotal REAL DEFAULT 0,
-                    tax REAL DEFAULT 0,
-                    discount REAL DEFAULT 0,
-                    total REAL DEFAULT 0,
-                    refund_method TEXT DEFAULT 'نقدي',
-                    refund_ref TEXT,
-                    reason TEXT DEFAULT '',
-                    requested_by TEXT,
-                    approved_by TEXT,
-                    date TEXT DEFAULT (datetime('now','localtime'))
-                )""")
-                conn.commit()
-            except Exception:
-                pass
+            _ensure_schema(conn, c)
             conn.close()
             return
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
@@ -732,6 +749,7 @@ def api_cancel_approve():
         return jsonify({"error": "request_id مطلوب"}), 400
     conn = get_db()
     c = conn.cursor()
+    _ensure_schema(conn, c)
     row = c.execute("SELECT * FROM cancellation_requests WHERE id=? AND status='pending'", (req_id,)).fetchone()
     if not row:
         conn.close()
@@ -2462,6 +2480,7 @@ def api_order_pay():
     items_str = _serialize_items(items)
     conn = get_db()
     c = conn.cursor()
+    _ensure_schema(conn, c)
     is_new = bool(data.get("new_order"))
     oid = _open_order_id(c, table_num, order_id, is_new)
     # الآجل الجزئي: سجّل الرصيد المتأخر في credit_ledger
@@ -2881,6 +2900,7 @@ def api_refunds():
     to_d = (request.args.get("to") or "").strip()
     conn = get_db()
     c = conn.cursor()
+    _ensure_schema(conn, c)
     where = "1=1"
     params = []
     if from_d:
