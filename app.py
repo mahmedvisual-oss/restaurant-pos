@@ -2521,6 +2521,7 @@ def api_reports_orders():
             "table_num": r["table_num"],
             "employee": r["employee"] or "",
             "payment_method": r["payment_method"] or "",
+            "credit_name": r["credit_name"] if "credit_name" in r.keys() else None,
             "subtotal": round(r["subtotal"] or 0, 2),
             "discount": round(r["discount"] or 0, 2),
             "tax": round(r["tax"] or 0, 2),

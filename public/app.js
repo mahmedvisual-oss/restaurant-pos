@@ -2322,7 +2322,7 @@ function renderReportDetail() {
         ${shown.length ? shown.map(o => `
           <tr class="report-order-row" onclick="toggleReportOrderDetail(${o.id})" title="${t("rptDrillHint")}">
             <td>#${o.id}</td><td>${o.date}</td><td>${o.table_num || "-"}</td>
-            <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}</td>
+            <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}${o.credit_name ? ` <span style="color:#d97706">· ${escapeHtml(o.credit_name)}</span>` : ""}</td>
             <td>${(o.items || []).map(i => `${i.qty || 1}× ${escapeHtml(i.name)}`).join(", ")}</td>
             <td>${fmtCur(o.total)}</td>
           </tr>
