@@ -139,6 +139,16 @@ def init_db():
         os.makedirs(BACKUP_DIR, exist_ok=True)
     except Exception:
         pass
+    if CLOUD_DB:
+        # المسار السريع للسحابة: القاعدة ممتلئة ومهاجرة بالفعل، ففحص واحد يكفي
+        # بدلاً من ~25 رحلة HTTP بطيئة (كانت تتسبب بأخطاء عند كل بداية باردة).
+        try:
+            seed = c.execute("SELECT COUNT(*) FROM menu_items").fetchone()[0]
+        except Exception:
+            seed = 0
+        if seed > 0:
+            conn.close()
+            return
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         table_num INTEGER,
