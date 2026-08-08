@@ -97,22 +97,23 @@ function render(orders) {
   empty.style.display = "none";
   let c = 0, r = 0;
   orders.forEach(o => {
-    if (o.status === "sent") c++; else r++;
+    c++;
     const elapsed = fmtTime(o.sent_ts);
     const warn = o.sent_ts && (Date.now() / 1000 - o.sent_ts) > 900;
+    const paid = o.paid > 0 || o.status === "completed";
     const rows = o.items.map(i =>
       `<div class="k-item"><span class="k-item-qty">${i.qty}</span><span class="k-item-name">${i.emoji || ""} ${i.name}</span></div>`).join("");
     grid.innerHTML += `
-      <div class="k-order ${o.status === "ready" ? "ready" : ""}" data-id="${o.id}">
+      <div class="k-order ${paid ? "paid" : ""}" data-id="${o.id}">
         <div class="k-order-head">
           <span class="k-order-table">🪑 ${t("table")} ${o.table_num}</span>
           <span class="k-order-time ${warn ? "warn" : ""}">⏱ ${elapsed}</span>
           <span class="k-order-guests">👥 ${o.guests}</span>
-          <span class="k-order-status">${o.status === "ready" ? t("readyLabel") + " ✅" : t("cookingLabel") + " ⏳"}</span>
+          <span class="k-order-status">${paid ? '<span style="color:var(--success, #22c55e);font-weight:700">💰 ' + t("paidLabel") + '</span>' : t("cookingLabel") + " ⏳"}</span>
         </div>
         <div class="k-items">${rows}</div>
         <div class="k-order-foot">
-          <button class="k-ready-btn" ${o.status === "ready" ? "disabled" : ""} onclick="markReady(${o.id})">✅ ${t("readyLabel")}</button>
+          <button class="k-ready-btn" onclick="markReady(${o.id})">✅ ${t("readyLabel")}</button>
           <span class="k-emp">${o.employee || ""}</span>
         </div>
       </div>`;

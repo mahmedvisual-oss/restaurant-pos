@@ -147,6 +147,16 @@ def init_db():
         except Exception:
             seed = 0
         if seed > 0:
+            # مهاجرة خفيفة للأعمدة الجديدة دون إعادة بناء الجداول
+            try:
+                ocols = [r[0] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+                if "kitchen_status" not in ocols:
+                    c.execute("ALTER TABLE orders ADD COLUMN kitchen_status TEXT")
+                    c.execute("UPDATE orders SET kitchen_status='sent' WHERE status='sent'")
+                    c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
+                    conn.commit()
+            except Exception:
+                pass
             conn.close()
             return
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
@@ -265,6 +275,10 @@ def init_db():
         c.execute("ALTER TABLE orders ADD COLUMN paid REAL DEFAULT 0")
     if "sent_at" not in cols:
         c.execute("ALTER TABLE orders ADD COLUMN sent_at TEXT")
+    if "kitchen_status" not in cols:
+        c.execute("ALTER TABLE orders ADD COLUMN kitchen_status TEXT")
+        c.execute("UPDATE orders SET kitchen_status='sent' WHERE status='sent'")
+        c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)")]
     if c.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0:
         c.execute("INSERT INTO employees (name, pin, role) VALUES (?,?,?)",
@@ -2220,13 +2234,13 @@ def api_order_save():
     c = conn.cursor()
     oid = _open_order_id(c, table_num, order_id, bool(data.get("new_order")))
     if oid:
-        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, employee=?, date=? WHERE id=?",
+        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, employee=?, date=?, kitchen_status='sent' WHERE id=?",
                   (items_str, discount, guests, now, u["name"], now, oid))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, sent_at, date) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, sent_at, date, kitchen_status) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (table_num, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now,
-                   now))
+                   now, "sent"))
         oid = c.lastrowid
     conn.commit()
     conn.close()
@@ -2253,12 +2267,12 @@ def api_order_send():
     c = conn.cursor()
     oid = _open_order_id(c, table_num, order_id, bool(data.get("new_order")))
     if oid:
-        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, date=?, employee=? WHERE id=?",
+        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, date=?, employee=?, kitchen_status='sent' WHERE id=?",
                   (items_str, discount, guests, now, now, u["name"], oid))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, date, sent_at) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (table_num, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now, now))
+        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, date, sent_at, kitchen_status) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (table_num, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now, now, "sent"))
         oid = c.lastrowid
     conn.commit()
     conn.close()
@@ -2280,8 +2294,9 @@ def api_kitchen_orders():
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(
-        "SELECT id, table_num, items, status, guests, employee, sent_at, date FROM orders "
-        "WHERE status IN ('sent','ready') ORDER BY COALESCE(sent_at, date) ASC, id ASC").fetchall()
+        "SELECT id, table_num, items, status, guests, employee, sent_at, date, paid, payment_method "
+        "FROM orders WHERE kitchen_status='sent' "
+        "ORDER BY COALESCE(sent_at, date) ASC, id ASC").fetchall()
     conn.close()
     orders = []
     for r in rows:
@@ -2295,6 +2310,7 @@ def api_kitchen_orders():
             "id": r["id"], "table_num": r["table_num"], "status": r["status"],
             "guests": r["guests"] or 1, "employee": r["employee"],
             "sent_at": sent, "sent_ts": sent_ts, "items": _parse_items(r["items"]),
+            "paid": r["paid"] or 0, "payment_method": r["payment_method"] or "",
         })
     return jsonify({"orders": orders})
 
@@ -2306,7 +2322,9 @@ def api_kitchen_ready(oid):
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE orders SET status='ready' WHERE id=? AND status='sent'", (oid,))
+    c.execute("UPDATE orders SET kitchen_status='ready', "
+              "status=CASE WHEN status='sent' THEN 'ready' ELSE status END "
+              "WHERE id=? AND kitchen_status='sent'", (oid,))
     conn.commit()
     conn.close()
     audit("kitchen_ready", f"طلب #{oid} جاهز")
