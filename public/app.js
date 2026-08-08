@@ -2487,26 +2487,94 @@ function renderCashFlow(c) {
 }
 
 async function renderAR(c) {
+  const from = document.getElementById("report-from").value;
+  const to = document.getElementById("report-to").value;
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptARTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
-    const d = await api("/api/reports/ar");
-    const el = c.querySelector(".report-section");
-    el.innerHTML = `
-      <div class="report-section-title">${t("rptARTitle")}</div>
-      <div class="report-kpi">
-        <div class="report-kpi-item"><div class="report-kpi-value">${d.items.length}</div><div class="report-kpi-label">${t("rptDebtorCount")}</div></div>
-        <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(d.total_due)}</div><div class="report-kpi-label">${t("rptTotalAR")}</div></div>
+    const d = await api("/api/reports/ar?from=" + encodeURIComponent(from || "") + "&to=" + encodeURIComponent(to || ""));
+    const s = d.summary;
+    const recon = s.total_invoiced - (s.total_paid + s.total_open_due);
+    const agingRows = [
+      { k: "current", lbl: t("rptAgingCurrent") },
+      { k: "31_60", lbl: t("rptAging31_60") },
+      { k: "61_90", lbl: t("rptAging61_90") },
+      { k: "90_plus", lbl: t("rptAging90") },
+    ];
+    const aging = {};
+    (d.aging || []).forEach(a => { aging[a.bucket] = a; });
+    c.innerHTML = `
+      <div class="report-section">
+        <div class="report-section-title">${t("rptARTitle")} <span style="font-weight:400;font-size:11px;color:var(--muted)">${t("rptAsOf")} ${d.as_of}</span></div>
+        <div class="report-kpi">
+          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(s.total_invoiced)}</div><div class="report-kpi-label">${t("rptTotalInvoiced")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(s.total_paid)}</div><div class="report-kpi-label">${t("rptTotalCollected")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(s.total_open_due)}</div><div class="report-kpi-label">${t("rptOpenDue")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${s.open_count}</div><div class="report-kpi-label">${t("rptOpenAccounts")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${s.settled_count}</div><div class="report-kpi-label">${t("rptSettledAccounts")}</div></div>
+        </div>
+        <div class="report-kpi">
+          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.period_new)}</div><div class="report-kpi-label">${t("rptPeriodNew")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(d.period_collected)}</div><div class="report-kpi-label">${t("rptPeriodCollected")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:${s.overpaid_count ? "var(--danger)" : "var(--muted)"}">${s.overpaid_count}${s.overpaid_amount ? " · " + fmtCur(s.overpaid_amount) : ""}</div><div class="report-kpi-label">${t("rptOverpaid")}</div></div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${t("rptReconNote")}: ${fmtCur(s.total_invoiced)} = ${fmtCur(s.total_paid)} + ${fmtCur(s.total_open_due)}${Math.abs(recon) > 0.01 ? ` <b style="color:${recon > 0 ? "var(--danger)" : "var(--warning)"}">(${t("rptDifference")}: ${fmtCur(recon)})</b>` : ""}</div>
       </div>
-      <table class="report-table">
-        <tr><th>#</th><th>${t("rptCustomer")}</th><th>${t("rptOrder")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptInvoice")}</th></tr>
-        ${d.items.length ? d.items.map(x => `<tr>
-          <td>#${x.id}</td><td>${escapeHtml(x.customer_name)}</td><td>#${x.order_id || "-"}</td>
-          <td>${fmtCur(x.total)}</td><td>${fmtCur(x.paid)}</td>
-          <td style="color:var(--danger);font-weight:bold">${fmtCur(x.due)}</td>
-          <td style="font-size:11px;color:var(--muted)">${x.created_at}</td>
-        </tr>`).join("") : `<tr><td colspan="7" style="text-align:center;color:var(--muted)">${t("rptNoAR")}</td></tr>`}
-      </table>`;
+
+      <div class="report-section">
+        <div class="report-section-title">${t("rptAgingTitle")}</div>
+        <table class="report-table">
+          <tr><th>${t("rptAgingBucket")}</th><th>${t("rptAccounts")}</th><th>${t("rptRemaining")}</th></tr>
+          ${agingRows.map(a => { const v = aging[a.k] || { count: 0, total: 0 }; return `<tr><td>${a.lbl}</td><td>${v.count}</td><td style="color:var(--danger)">${fmtCur(v.total)}</td></tr>`; }).join("")}
+          <tr class="total-row"><td>${t("rptTotal")}</td><td>${s.open_count}</td><td>${fmtCur(s.total_open_due)}</td></tr>
+        </table>
+      </div>
+
+      <div class="report-section">
+        <div class="report-section-title">${t("rptAccountsByCustomer")} (${d.customers.length})</div>
+        <table class="report-table">
+          <tr><th>#</th><th>${t("rptCustomer")}</th><th>${t("rptInvoice")}</th><th>${t("rptDate")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptDays")}</th><th>${t("rptStatus")}</th><th></th></tr>
+          ${d.customers.length ? d.customers.map(x => `
+            <tr class="report-order-row" onclick="toggleArStatement(${x.id})">
+              <td>#${x.id}</td>
+              <td>${escapeHtml(x.customer_name)}</td>
+              <td>#${x.order_id || "-"}</td>
+              <td style="font-size:11px">${x.created_at}</td>
+              <td>${fmtCur(x.total)}</td>
+              <td style="color:var(--success)">${fmtCur(x.paid)}</td>
+              <td style="color:${x.due > 0 ? "var(--danger)" : "var(--muted)"};font-weight:bold">${fmtCur(x.due)}</td>
+              <td>${x.days_open}</td>
+              <td style="color:${x.status === "open" ? "var(--danger)" : "var(--success)"}">${x.status === "open" ? t("rptOpen") : t("rptSettled")}</td>
+              <td><button class="btn btn-sm" onclick="event.stopPropagation();toggleArStatement(${x.id})">${t("rptStatement")}</button></td>
+            </tr>
+            <tr id="ar-statement-${x.id}" class="report-order-detail" style="display:none">
+              <td colspan="10">
+                ${x.payments && x.payments.length ? `
+                  <div style="font-weight:bold;margin-bottom:6px;font-size:12px">${t("rptPaymentOpsFor")}: ${escapeHtml(x.customer_name)}</div>
+                  <table class="report-table report-table-sub">
+                    <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th></tr>
+                    ${x.payments.map(p => `<tr><td>#${p.id}</td><td>${p.date}</td><td style="color:var(--success)">+${fmtCur(p.amount)}</td><td>${methodName(p.method)}</td><td>${escapeHtml(p.employee || "")}</td></tr>`).join("")}
+                    <tr class="total-row"><td colspan="2">${t("rptTotalCollected")}</td><td>${fmtCur(x.paid)}</td><td colspan="2">${t("rptBalance")}: ${fmtCur(x.due)}</td></tr>
+                  </table>
+                  <div style="font-size:11px;color:var(--muted);margin-top:4px">${t("rptReconNote")}: ${fmtCur(x.total)} = ${fmtCur(x.paid)} + ${fmtCur(x.due)}</div>` :
+                  `<div style="font-size:11px;color:var(--muted)">${t("rptNoPayments")}</div>`}
+              </td>
+            </tr>`).join("") : `<tr><td colspan="10" style="text-align:center;color:var(--muted)">${t("rptNoAR")}</td></tr>`}
+        </table>
+      </div>
+
+      <div class="report-section">
+        <div class="report-section-title">${t("rptPaymentOps")} (${d.payments.length})</div>
+        <table class="report-table">
+          <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptCustomer")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th></tr>
+          ${d.payments.length ? d.payments.map(p => `<tr><td>#${p.id}</td><td>${p.date}</td><td>${escapeHtml(p.customer_name || "")}</td><td style="color:var(--success)">${fmtCur(p.amount)}</td><td>${methodName(p.method)}</td><td>${escapeHtml(p.employee || "")}</td></tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">${t("rptNoPaymentsPeriod")}</td></tr>`}
+        </table>
+      </div>`;
   } catch (e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
+}
+
+function toggleArStatement(id) {
+  const el = document.getElementById("ar-statement-" + id);
+  if (el) el.style.display = (el.style.display === "none") ? "" : "none";
 }
 
 async function renderCancelled(c) {

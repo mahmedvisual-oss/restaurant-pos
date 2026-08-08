@@ -2507,19 +2507,104 @@ def api_reports_advanced():
 
 @app.route("/api/reports/ar")
 def api_reports_ar():
+    """تقرير آجل/ذمم مدينة بمستوى محاسب ومراجع حسابات: كشوف عملاء،
+    تحليل أعمار الذمم، سجل الدفعات، وتسوية الفوارق (الفاتورة = المدفوع + المتبقي)."""
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
+    from_d = (request.args.get("from") or "").strip()
+    to_d = (request.args.get("to") or "").strip()
     conn = get_db()
     c = conn.cursor()
-    rows = c.execute("""
-        SELECT l.id, l.customer_name, l.order_id, l.table_num, l.total, l.paid, c.phone,
-               (l.total - l.paid) AS due, l.created_at
-        FROM credit_ledger l LEFT JOIN customers c ON c.phone = l.phone
-        WHERE l.status='open' ORDER BY due DESC""").fetchall()
-    total_due = c.execute("SELECT COALESCE(SUM(total-paid),0) FROM credit_ledger WHERE status='open'").fetchone()[0]
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    rows = c.execute("SELECT * FROM credit_ledger ORDER BY id DESC").fetchall()
+    paymap = {}
+    for p in c.execute("SELECT * FROM credit_payments ORDER BY date ASC, id ASC").fetchall():
+        paymap.setdefault(p["ledger_id"], []).append(dict(p))
+
+    pmt_where = "1=1"
+    pmt_params = []
+    if from_d:
+        pmt_where += " AND date(p.date) >= ?"
+        pmt_params.append(from_d)
+    if to_d:
+        pmt_where += " AND date(p.date) <= ?"
+        pmt_params.append(to_d)
+    payments = c.execute(
+        f"SELECT p.id, p.ledger_id, p.amount, p.method, p.employee, p.date, l.customer_name "
+        f"FROM credit_payments p LEFT JOIN credit_ledger l ON l.id=p.ledger_id "
+        f"WHERE {pmt_where} ORDER BY p.date ASC, p.id ASC", pmt_params).fetchall()
+
+    summary = {"open_count": 0, "settled_count": 0, "total_invoiced": 0.0, "total_paid": 0.0,
+               "total_open_due": 0.0, "overpaid_count": 0, "overpaid_amount": 0.0}
+    aging = {"current": [0, 0.0], "31_60": [0, 0.0], "61_90": [0, 0.0], "90_plus": [0, 0.0]}
+    customers = []
+    for r in rows:
+        rec = dict(r)
+        total = rec["total"] or 0
+        paid = rec["paid"] or 0
+        due = round(total - paid, 2)
+        is_open = rec["status"] == "open"
+        summary["total_invoiced"] += total
+        summary["total_paid"] += paid
+        if is_open:
+            summary["open_count"] += 1
+            summary["total_open_due"] += due
+        else:
+            summary["settled_count"] += 1
+        if paid > total + 0.001:
+            summary["overpaid_count"] += 1
+            summary["overpaid_amount"] += paid - total
+        days = 0
+        if rec["created_at"]:
+            try:
+                days = (datetime.strptime(today, "%Y-%m-%d")
+                        - datetime.strptime((rec["created_at"] or "")[:10], "%Y-%m-%d")).days
+            except Exception:
+                days = 0
+        if is_open:
+            if days <= 30:
+                aging["current"][0] += 1; aging["current"][1] += due
+            elif days <= 60:
+                aging["31_60"][0] += 1; aging["31_60"][1] += due
+            elif days <= 90:
+                aging["61_90"][0] += 1; aging["61_90"][1] += due
+            else:
+                aging["90_plus"][0] += 1; aging["90_plus"][1] += due
+        rec["due"] = due
+        rec["days_open"] = max(days, 0)
+        rec["payments"] = paymap.get(rec["id"], [])
+        customers.append(rec)
+
+    period_collected = round(sum(p["amount"] for p in payments), 2)
+    if from_d and to_d:
+        period_new = round(c.execute(
+            "SELECT COALESCE(SUM(total),0) FROM credit_ledger WHERE date(created_at)>=? AND date(created_at)<=?",
+            (from_d, to_d)).fetchone()[0], 2)
+    else:
+        period_new = round(summary["total_invoiced"], 2)
+
     conn.close()
-    return jsonify({"items": [dict(r) for r in rows], "total_due": round(total_due, 2)})
+    return jsonify({
+        "as_of": today, "from": from_d, "to": to_d,
+        "summary": {"open_count": summary["open_count"], "settled_count": summary["settled_count"],
+                    "total_invoiced": round(summary["total_invoiced"], 2),
+                    "total_paid": round(summary["total_paid"], 2),
+                    "total_open_due": round(summary["total_open_due"], 2),
+                    "overpaid_count": summary["overpaid_count"],
+                    "overpaid_amount": round(summary["overpaid_amount"], 2)},
+        "aging": [
+            {"bucket": "current", "count": aging["current"][0], "total": round(aging["current"][1], 2)},
+            {"bucket": "31_60", "count": aging["31_60"][0], "total": round(aging["31_60"][1], 2)},
+            {"bucket": "61_90", "count": aging["61_90"][0], "total": round(aging["61_90"][1], 2)},
+            {"bucket": "90_plus", "count": aging["90_plus"][0], "total": round(aging["90_plus"][1], 2)},
+        ],
+        "customers": customers,
+        "payments": [dict(p) for p in payments],
+        "period_collected": period_collected,
+        "period_new": period_new,
+    })
 
 
 @app.route("/api/reports/cancelled")
