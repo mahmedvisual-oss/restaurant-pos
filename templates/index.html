@@ -190,6 +190,12 @@
         <div class="pay-label" data-i18n="creditNameLabel">📝 اسم صاحب الآجل:</div>
         <input id="credit-name" type="text" class="pay-input" data-i18n="creditNamePh" placeholder="اكتب الاسم هنا..." maxlength="50" style="text-transform:none">
       </div>
+      <div id="transfer-row" style="display:none;margin-top:8px">
+        <div class="pay-label">🏦 رقم مرجع التحويل <span style="color:var(--danger)">*</span>:</div>
+        <input id="transfer-ref" type="text" class="pay-input" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+        <div class="pay-label">👤 اسم المحوّل:</div>
+        <input id="transfer-name" type="text" class="pay-input" placeholder="اختياري" maxlength="50" style="text-transform:none">
+      </div>
       <div class="pay-label" data-i18n="paidAmount">المبلغ المدفوع:</div>
       <input id="paid" type="number" class="pay-input" value="0">
       <div class="change" id="change">المتبقي: Rp 0</div>
@@ -739,6 +745,35 @@
 <button id="btn-cancel-notify" class="btn btn-danger" style="position:fixed;top:60px;left:16px;z-index:999;display:none;border-radius:50%;width:44px;height:44px;font-size:18px;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.3)" onclick="showCancelRequests()" title="طلبات الإلغاء المعلقة">
   🔔 <span id="cancel-notify-badge" style="position:absolute;top:-2px;right:-2px;background:#fbbf24;color:#000;font-size:11px;font-weight:700;border-radius:50%;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg)">0</span>
 </button>
+
+<!-- سند مردودات: طريقة الرد عند إلغاء فاتورة مدفوعة -->
+<div id="modal-refund" class="modal">
+  <div class="modal-content" style="width:420px;max-width:94vw">
+    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span>🧾 سند المردودات — إلغاء فاتورة مدفوعة</span>
+      <span class="modal-x" onclick="closeModal('modal-refund')">✕</span>
+    </div>
+    <div class="modal-body">
+      <div id="refund-info" style="font-size:13px;color:var(--muted);margin-bottom:10px"></div>
+      <div class="pay-label">طريقة الرد:</div>
+      <select id="refund-method" class="pay-input" onchange="toggleRefundRef()" style="margin-bottom:10px">
+        <option value="نقدي">💵 نقدي</option>
+        <option value="BCA">🏦 تحويل BCA</option>
+        <option value="مانديري">💳 تحويل مانديري</option>
+        <option value="كيروس">🧾 كيروس</option>
+      </select>
+      <div id="refund-ref-row" style="display:none;margin-bottom:10px">
+        <div class="pay-label">رقم مرجع التحويل <span style="color:var(--danger)">*</span>:</div>
+        <input id="refund-ref" type="text" class="pay-input" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+      </div>
+      <div class="pay-label">صرف المبلغ: إرجاع نقداً للعميل / إعادة تحويل للمحوّل</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-refund')" data-i18n="cancel">✕ إلغاء</button>
+      <button class="btn btn-success" onclick="confirmRefundModal()">✅ تأكيد الرد وإنشاء السند</button>
+    </div>
+  </div>
+</div>
 
 <!-- شريط اختصارات لوحة المفاتيح -->
 <div class="shortcut-bar" id="shortcut-bar" style="display:none">

@@ -150,6 +150,8 @@ const METHOD_NAMES = {
   "كيروس": { ar: "كيروس", en: "Kiros", id: "Kiros" },
 };
 
+const TRANSFER_METHODS = new Set(["BCA", "مانديري", "كيروس"]);
+
 function methodName(m) {
   if (!m) return "—";
   const e = METHOD_NAMES[m];
@@ -1485,6 +1487,9 @@ function showPayment() {
   }
   calcChange();
   setPayMethod(document.querySelector('#pay-methods .pay-method.selected') || null);
+  const tr = document.getElementById("transfer-ref"), tn = document.getElementById("transfer-name");
+  if (tr) tr.value = "";
+  if (tn) tn.value = "";
   openModal("pay-modal");
 }
 
@@ -1495,6 +1500,14 @@ function setPayMethod(el) {
   el.classList.add("selected");
   const creditRow = document.getElementById("credit-name-row");
   if (creditRow) creditRow.style.display = payMethod === "آجل" ? "" : "none";
+  const transferRow = document.getElementById("transfer-row");
+  if (transferRow) transferRow.style.display = TRANSFER_METHODS.has(payMethod) ? "" : "none";
+}
+
+function toggleRefundRef() {
+  const m = document.getElementById("refund-method").value;
+  const row = document.getElementById("refund-ref-row");
+  if (row) row.style.display = TRANSFER_METHODS.has(m) ? "" : "none";
 }
 
 function calcChange() {
@@ -1522,13 +1535,19 @@ async function confirmPayment() {
     const creditName = (document.getElementById("credit-name").value || "").trim();
     if (!creditName) { toast("⚠️ اكتب اسم صاحب الآجل"); document.getElementById("credit-name").focus(); return; }
   }
+  let transferRef = null, transferName = null;
+  if (TRANSFER_METHODS.has(payMethod)) {
+    transferRef = (document.getElementById("transfer-ref").value || "").trim();
+    if (!transferRef) { toast("⚠️ اكتب رقم مرجع التحويل البنكي"); document.getElementById("transfer-ref").focus(); return; }
+    transferName = (document.getElementById("transfer-name").value || "").trim() || null;
+  }
   const guests = parseInt(document.getElementById("guests").value) || 1;
   const creditName = payMethod === "آجل" ? (document.getElementById("credit-name").value || "").trim() : null;
   try {
     const res = await api("/api/order/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_num: selectedTable, items: cart, paid, discount: discount + promoDiscount, payment_method: payMethod, guests, credit_name: creditName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_num: selectedTable, items: cart, paid, discount: discount + promoDiscount, payment_method: payMethod, guests, credit_name: creditName, transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     closeModal("pay-modal");
     toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
@@ -1614,6 +1633,7 @@ function printReceipt(o) {
       <tr><td class="right">${t("table")}: ${o.table_num}</td><td class="left">${t("cashier")}: ${o.employee}</td></tr>
       <tr><td class="right">${t("guestsLabel")} ${o.guests || 1}</td><td class="left">${t("paymentMethod")} ${o.payment_method}</td></tr>
       ${o.credit_name ? `<tr><td class="right" style="color:#d97706;font-weight:bold">📝 صاحب الآجل</td><td class="left" style="font-weight:bold">${o.credit_name}</td></tr>` : ""}
+      ${o.transfer_ref ? `<tr><td class="right" style="color:#2563eb;font-weight:bold">🏦 مرجع التحويل</td><td class="left" style="font-weight:bold">${escapeHtml(o.transfer_ref)}${o.transfer_name ? " (" + escapeHtml(o.transfer_name) + ")" : ""}</td></tr>` : ""}
     </table>
     <div class="dash"></div>
     <table>${rows}</table>
@@ -1639,7 +1659,75 @@ function printReceipt(o) {
   w.close();
 }
 
-// ===== الخصم =====
+// ===== سند مردودات (استرداد) =====
+function printRefundReceipt(r) {
+  const name = RESTAURANT_NAME;
+  const rows = (r.items || []).map(i => {
+    const mods = (i.modifiers && i.modifiers.length)
+      ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>`
+      : "";
+    return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}</td><td class="left">${fmtCur((i.price||0) * (i.qty||1))}</td></tr>`;
+  }).join("");
+  const dir = document.documentElement.dir;
+  const w = window.open("", "_blank", "width=340,height=700");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  const methodName = METHOD_NAMES[r.refund_method] ? (METHOD_NAMES[r.refund_method][currentLang] || METHOD_NAMES[r.refund_method].ar) : (r.refund_method || "نقدي");
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>سند مردودات ${r.receipt_no}</title><style>
+    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
+    h3{margin:4px 0}.muted{font-size:11px;color:#555}
+    .dash{border-top:1px dashed #000;margin:6px 0}
+    table{width:100%;border-collapse:collapse}td{padding:2px 0}
+    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
+    .logo{font-size:24px;margin:4px 0}
+    .badge{background:#ef4444;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
+    .summary-box{background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;padding:8px;margin:6px 0}
+    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
+    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
+  </style></head><body>
+    <div class="logo">🍽️</div>
+    <h3>${name}</h3>
+    <div class="muted">${t("appSubtitle")}</div>
+    <div class="badge">🧾 سند مردودات (استرداد)</div>
+    <div class="muted">رقم السند: <b>${r.receipt_no}</b></div>
+    <div class="dash"></div>
+    <table>
+      <tr><td class="right">الفاتورة الأصلية</td><td class="left">#${r.order_id}</td></tr>
+      <tr><td class="right">الطاولة</td><td class="left">${r.table_num || "—"}</td></tr>
+      <tr><td class="right">التاريخ</td><td class="left">${r.date}</td></tr>
+      <tr><td class="right">الأصناف المرتجعة:</td></tr>
+    </table>
+    <div class="dash"></div>
+    <table>${rows}</table>
+    <div class="dash"></div>
+    <div class="summary-box">
+      <table>
+        <tr><td class="right">المجموع الفرعي</td><td class="left">${fmtCur(r.subtotal)}</td></tr>
+        <tr><td class="right">الضريبة</td><td class="left">${fmtCur(r.tax)}</td></tr>
+        ${r.discount > 0 ? `<tr><td class="right" style="color:#d97706">الخصم</td><td class="left" style="color:#d97706">-${fmtCur(r.discount)}</td></tr>` : ""}
+        <tr class="tot"><td class="right">إجمالي المردود</td><td class="left" style="color:#dc2626">${fmtCur(r.total)}</td></tr>
+      </table>
+    </div>
+    <table>
+      <tr><td class="right">طريقة الرد</td><td class="left">${methodName}</td></tr>
+      ${r.refund_ref ? `<tr><td class="right">مرجع الرد</td><td class="left">${escapeHtml(r.refund_ref)}</td></tr>` : ""}
+      ${r.reason ? `<tr><td class="right">سبب الرد</td><td class="left">${escapeHtml(r.reason)}</td></tr>` : ""}
+      <tr><td class="right">الكاشير</td><td class="left">${escapeHtml(r.requested_by || "")}</td></tr>
+      <tr><td class="right">المعتمد (المدير)</td><td class="left">${escapeHtml(r.approved_by || "")}</td></tr>
+    </table>
+    <div class="dash"></div>
+    <div class="sig">
+      <div>توقيع المستلم<div class="line">العميل</div></div>
+      <div>الكاشير<div class="line">الكاشير</div></div>
+      <div>المراجع/المدير<div class="line">المدير</div></div>
+    </div>
+    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
+    <div class="muted">${new Date().toLocaleString()}</div>
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
 function toggleDiscountDropdown() {
   document.getElementById("discount-menu").classList.toggle("show");
 }
@@ -2599,12 +2687,15 @@ async function renderCancelled(c) {
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptCancelledTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
     const d = await api("/api/reports/cancelled?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to));
+    let refunds = { items: [], total: 0 };
+    try { refunds = await api("/api/refunds?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)); } catch (e) {}
     const el = c.querySelector(".report-section");
     el.innerHTML = `
       <div class="report-section-title">${t("rptCancelledTitle")}</div>
       <div class="report-kpi">
         <div class="report-kpi-item"><div class="report-kpi-value">${d.count}</div><div class="report-kpi-label">${t("rptCancelledOrders")}</div></div>
         <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(d.total)}</div><div class="report-kpi-label">${t("rptCancelledValue")}</div></div>
+        <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(refunds.total)}</div><div class="report-kpi-label">${t("rptRefunds")}</div></div>
       </div>
       <table class="report-table">
         <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptTotal")}</th><th>${t("rptReason")}</th></tr>
@@ -2613,7 +2704,19 @@ async function renderCancelled(c) {
           <td>${escapeHtml(x.employee||"")}</td><td style="color:var(--danger)">${fmtCur(x.total||0)}</td>
           <td>${x.cancel_reason || escapeHtml(x.credit_name||"") || "—"}</td>
         </tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">${t("rptNoCancelled")}</td></tr>`}
-      </table>`;
+      </table>
+      <div class="report-section-title" style="margin-top:18px">🧾 سندات المردودات (استرداد بعد الدفع)</div>
+      ${refunds.items.length ? `<table class="report-table">
+        <tr><th>رقم السند</th><th>${t("rptDate")}</th><th>الفاتورة</th><th>طريقة الرد</th><th>المرجع</th><th>المبلغ</th><th></th></tr>
+        ${refunds.items.map(rr => `<tr>
+          <td><b>${rr.receipt_no}</b></td><td>${rr.date}</td><td>#${rr.order_id}</td>
+          <td>${methodName(rr.refund_method)}</td>
+          <td>${escapeHtml(rr.refund_ref||"") || "—"}</td>
+          <td style="color:var(--danger)">${fmtCur(rr.total)}</td>
+          <td><button class="btn btn-sm" onclick="printRefundReceipt(${JSON.stringify(rr).replace(/"/g, "&quot;")})">🖨️ طباعة السند</button></td>
+        </tr>`).join("")}
+        <tr class="total-row"><td colspan="5">${t("rptTotal")}</td><td style="color:var(--danger)">${fmtCur(refunds.total)}</td><td></td></tr>
+      </table>` : `<p style="color:var(--muted);font-size:12px">لا توجد سندات مردودات في الفترة</p>`}`;
   } catch (e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
 }
 
@@ -3601,7 +3704,7 @@ async function showCancelRequests() {
           <div style="font-size:12px;color:var(--muted);margin-bottom:8px">الأصناف: ${itemsList || '—'}</div>
           ${sensitive ? `<div style="font-size:11px;color:var(--danger);background:rgba(239,68,68,.1);border-radius:6px;padding:4px 8px;margin-bottom:8px">🔒 حماية الإلغاء: يتطلب PIN المدير (الطلب بدرجة جاهز/مدفوع)</div>` : ""}
           <div style="display:flex;gap:8px">
-            <button class="btn btn-success btn-sm" onclick="approveCancel(${r.id},${sensitive?1:0})">✅ موافقة</button>
+            <button class="btn btn-success btn-sm" onclick="approveCancel(${r.id},${sensitive?1:0},${r.o_status === "completed" ? 1 : 0})">✅ موافقة</button>
             <button class="btn btn-danger btn-sm" onclick="rejectCancel(${r.id})">✕ رفض</button>
           </div>
         </div>`;
@@ -3612,23 +3715,54 @@ async function showCancelRequests() {
   } catch (e) { toast(e.message); }
 }
 
-async function approveCancel(id, sensitive) {
+let pendingRefund = null;
+
+async function approveCancel(id, sensitive, isPaid) {
+  if (isPaid) {
+    pendingRefund = { request_id: id, sensitive, refund: null };
+    const info = document.getElementById("refund-info");
+    if (info) info.innerHTML = "هذه الفاتورة مدفوعة — سيسجّل النظام <b>سند مردودات</b> مرقّماً عند الإلغاء. حدّد طريقة رد المبلغ للعميل:";
+    document.getElementById("refund-method").value = "نقدي";
+    document.getElementById("refund-ref").value = "";
+    toggleRefundRef();
+    openModal("modal-refund");
+    return;
+  }
+  approveCancelNext(id, sensitive, null);
+}
+
+function confirmRefundModal() {
+  if (!pendingRefund) return;
+  const method = document.getElementById("refund-method").value;
+  const ref = (document.getElementById("refund-ref").value || "").trim();
+  if (TRANSFER_METHODS.has(method) && !ref) { toast("⚠️ اكتب رقم مرجع التحويل للرد"); document.getElementById("refund-ref").focus(); return; }
+  const { request_id, sensitive } = pendingRefund;
+  pendingRefund = null;
+  closeModal("modal-refund");
+  approveCancelNext(request_id, sensitive, { refund_method: method, refund_ref: ref });
+}
+
+function approveCancelNext(id, sensitive, refund) {
   if (sensitive) {
-    managerCallback = () => approveCancelNow(id);
+    managerCallback = () => doApproveCancel(id, refund);
     document.getElementById("manager-pin-action-info").innerHTML = t("cancelSensitiveTitle") || "🔒 إلغاء بحماية المدير";
     document.getElementById("manager-pin-input").value = "";
     document.getElementById("manager-pin-error").textContent = "";
     openModal("modal-manager-pin");
     return;
   }
-  approveCancelNow(id);
+  doApproveCancel(id, refund);
 }
 
-async function approveCancelNow(id) {
+async function doApproveCancel(id, refund) {
   try {
-    const res = await api("/api/cancel-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: id, pin: managerPinEntered }) });
+    const res = await api("/api/cancel-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: id, pin: managerPinEntered, refund_method: refund ? refund.refund_method : undefined, refund_ref: refund ? refund.refund_ref : undefined }) });
     managerPinEntered = "";
-    if (res.ok) { toast("✅ تمت الموافقة على الإلغاء" + (res.sensitive ? " (بحماية PIN)" : "")); showCancelRequests(); loadTables(); checkCancelRequests(); }
+    if (res.ok) {
+      toast("✅ تمت الموافقة على الإلغاء" + (res.sensitive ? " (بحماية PIN)" : "") + (res.refund_receipt ? " — سند مردودات " + res.refund_receipt.receipt_no : ""));
+      if (res.refund_receipt) printRefundReceipt(res.refund_receipt);
+      showCancelRequests(); loadTables(); checkCancelRequests();
+    }
     else toast("❌ " + (res.error || "خطأ"));
   } catch (e) { toast(e.message); }
 }

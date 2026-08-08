@@ -154,7 +154,27 @@ def init_db():
                     c.execute("ALTER TABLE orders ADD COLUMN kitchen_status TEXT")
                     c.execute("UPDATE orders SET kitchen_status='sent' WHERE status='sent'")
                     c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
-                    conn.commit()
+                if "transfer_ref" not in ocols:
+                    c.execute("ALTER TABLE orders ADD COLUMN transfer_ref TEXT")
+                if "transfer_name" not in ocols:
+                    c.execute("ALTER TABLE orders ADD COLUMN transfer_name TEXT")
+                c.execute("""CREATE TABLE IF NOT EXISTS refund_receipts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    receipt_no TEXT UNIQUE,
+                    order_id INTEGER NOT NULL,
+                    items TEXT,
+                    subtotal REAL DEFAULT 0,
+                    tax REAL DEFAULT 0,
+                    discount REAL DEFAULT 0,
+                    total REAL DEFAULT 0,
+                    refund_method TEXT DEFAULT 'نقدي',
+                    refund_ref TEXT,
+                    reason TEXT DEFAULT '',
+                    requested_by TEXT,
+                    approved_by TEXT,
+                    date TEXT DEFAULT (datetime('now','localtime'))
+                )""")
+                conn.commit()
             except Exception:
                 pass
             conn.close()
@@ -280,6 +300,26 @@ def init_db():
         c.execute("UPDATE orders SET kitchen_status='sent' WHERE status='sent'")
         c.execute("UPDATE orders SET kitchen_status='ready' WHERE kitchen_status IS NULL AND status IN ('ready','completed','closed','cancelled')")
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)")]
+    if "transfer_ref" not in cols:
+        c.execute("ALTER TABLE orders ADD COLUMN transfer_ref TEXT")
+    if "transfer_name" not in cols:
+        c.execute("ALTER TABLE orders ADD COLUMN transfer_name TEXT")
+    c.execute('''CREATE TABLE IF NOT EXISTS refund_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        receipt_no TEXT UNIQUE,
+        order_id INTEGER NOT NULL,
+        items TEXT,
+        subtotal REAL DEFAULT 0,
+        tax REAL DEFAULT 0,
+        discount REAL DEFAULT 0,
+        total REAL DEFAULT 0,
+        refund_method TEXT DEFAULT 'نقدي',
+        refund_ref TEXT,
+        reason TEXT DEFAULT '',
+        requested_by TEXT,
+        approved_by TEXT,
+        date TEXT DEFAULT (datetime('now','localtime'))
+    )''')
     if c.execute("SELECT COUNT(*) FROM employees").fetchone()[0] == 0:
         c.execute("INSERT INTO employees (name, pin, role) VALUES (?,?,?)",
                   ("مدير", hash_pin("9999"), "manager"))
@@ -697,7 +737,7 @@ def api_cancel_approve():
         conn.close()
         return jsonify({"error": "طلب غير موجود أو تمت معالجته"}), 404
     # حماية الإلغاء: الطلبات الجاهزة/المدفوعة تحتاج PIN المدير
-    order = c.execute("SELECT status, items, table_num FROM orders WHERE id=?", (row["order_id"],)).fetchone()
+    order = c.execute("SELECT * FROM orders WHERE id=?", (row["order_id"],)).fetchone()
     sensitive = bool(order and order["status"] in ("sent", "ready", "completed"))
     if sensitive:
         pin = str(data.get("pin") or "")
@@ -708,18 +748,46 @@ def api_cancel_approve():
     c.execute("UPDATE cancellation_requests SET status='approved', reviewed_by=?, reviewed_at=datetime('now','localtime') WHERE id=?",
               (u["name"], req_id))
     c.execute("UPDATE orders SET status='cancelled', kitchen_status='ready' WHERE id=?", (row["order_id"],))
-    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون المُخصوم تلقائياً
+    refund_receipt = None
+    was_paid = bool(order and order["status"] == "completed")
+    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون المُخصوم تلقائياً وأنشئ سند مردودات
     if order and order["status"] == "completed":
         try:
             items = _parse_items(order["items"])
             _restore_inventory(c, items)
         except Exception:
+            items = []
+        refund_method = str(data.get("refund_method") or order["payment_method"] or "نقدي")
+        refund_ref = str(data.get("refund_ref") or "").strip() or None
+        c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+                  (row["order_id"], order["items"], order["subtotal"] or 0, order["tax"] or 0, order["discount"] or 0,
+                   order["total"] or 0, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))
+        rid = c.lastrowid
+        receipt_no = "SR-%d-%05d" % (datetime.now().year, rid)
+        c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))
+        refund_receipt = {
+            "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],
+            "table_num": order["table_num"], "items": _parse_items(order["items"]),
+            "subtotal": order["subtotal"] or 0, "tax": order["tax"] or 0,
+            "discount": order["discount"] or 0, "total": order["total"] or 0,
+            "refund_method": refund_method, "refund_ref": refund_ref,
+            "reason": row["reason"] or "", "requested_by": row["requested_by"],
+            "approved_by": u["name"], "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "payment_method": order["payment_method"] or "",
+        }
+    # إلغاء فاتورة آجل: أغلق رصيد الدفتر المرتبط بها
+    if order and (order["payment_method"] or "").strip() == "آجل":
+        try:
+            c.execute("UPDATE credit_ledger SET status='closed', updated_at=datetime('now','localtime') WHERE order_id=? AND status='open'",
+                      (row["order_id"],))
+        except Exception:
             pass
     conn.commit()
     conn.close()
     audit("cancel_approve", f"موافقة على إلغاء طلب #{row['order_id']} (طاولة {row['table_num']}) من {u['name']}"
-          + (" مع PIN" if sensitive else ""))
-    return jsonify({"ok": True, "sensitive": sensitive})
+          + (" مع PIN" if sensitive else "") + (f" - مردود {refund_receipt['total']:.2f} ({refund_receipt['receipt_no']})" if refund_receipt else ""))
+    return jsonify({"ok": True, "sensitive": sensitive, "refund_receipt": refund_receipt})
 
 
 @app.route("/api/cancel-reject", methods=["POST"])
@@ -2053,6 +2121,8 @@ def _order_payload(c, oid):
         "payment_method": row["payment_method"], "table_num": row["table_num"],
         "guests": row["guests"] or 1, "employee": row["employee"],
         "credit_name": row["credit_name"] if "credit_name" in row.keys() else None,
+        "transfer_ref": row["transfer_ref"] if "transfer_ref" in row.keys() else None,
+        "transfer_name": row["transfer_name"] if "transfer_name" in row.keys() else None,
         "items": [{"name": i["name"], "qty": i["qty"], "price": float(i["price"]),
                    "subtotal": round(float(i["price"]) * int(i["qty"]), 2), "emoji": i.get("emoji", "")}
                   for i in items],
@@ -2374,6 +2444,11 @@ def api_order_pay():
     payment_method = str(data.get("payment_method", "نقدي"))
     guests = int(data.get("guests", 1) or 1)
     credit_name = str(data.get("credit_name") or "").strip() or None
+    transfer_ref = str(data.get("transfer_ref") or "").strip() or None
+    transfer_name = str(data.get("transfer_name") or "").strip() or None
+    # التحويل البنكي يتطلب مرجعاً لتسوية كشف البنك
+    if payment_method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
+        return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
     subtotal = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
     tax = round(subtotal * get_tax_rate(), 2)
     max_discount = round(subtotal + tax, 2)
@@ -2393,14 +2468,14 @@ def api_order_pay():
     credit_name = (credit_name or "").strip() or None
     if oid:
         c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
-                  "status='completed', guests=?, employee=?, date=?, credit_name=? WHERE id=?",
+                  "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=? WHERE id=?",
                   (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
-                   datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name, oid))
+                   datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name, transfer_ref, transfer_name, oid))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (table_num, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
-                   "completed", guests, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name))
+                   "completed", guests, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name, transfer_ref, transfer_name))
         oid = c.lastrowid
     if is_new:
         # في وضع التقسيم يُنشأ طلب جديد لكل فاتورة؛ أغلق أي طلب مفتوح قديم
@@ -2795,6 +2870,36 @@ def api_reports_cancelled():
     cancelled_total = round(sum(r["total"] or 0 for r in rows), 2)
     conn.close()
     return jsonify({"items": [dict(r) for r in rows], "count": len(rows), "total": cancelled_total})
+
+
+@app.route("/api/refunds")
+def api_refunds():
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    from_d = (request.args.get("from") or "").strip()
+    to_d = (request.args.get("to") or "").strip()
+    conn = get_db()
+    c = conn.cursor()
+    where = "1=1"
+    params = []
+    if from_d:
+        where += " AND date(date) >= ?"
+        params.append(from_d)
+    if to_d:
+        where += " AND date(date) <= ?"
+        params.append(to_d)
+    rows = c.execute(f"SELECT rr.*, o.table_num AS o_table FROM refund_receipts rr "
+                     f"LEFT JOIN orders o ON rr.order_id=o.id WHERE {where} ORDER BY rr.id DESC", params).fetchall()
+    refunded_total = round(sum(r["total"] or 0 for r in rows), 2)
+    conn.close()
+    items_out = []
+    for r in rows:
+        d = dict(r)
+        d["items"] = _parse_items(r["items"])
+        d["table_num"] = r["o_table"]
+        items_out.append(d)
+    return jsonify({"items": items_out, "count": len(items_out), "total": refunded_total})
 
 
 @app.route("/api/reports/income")
