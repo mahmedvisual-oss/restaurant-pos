@@ -2302,15 +2302,8 @@ def api_reports_cashier_daily():
     })
 
 
-@app.route("/api/reports/advanced")
-def api_reports_advanced():
-    u, err, code = require_manager()
-    if err:
-        return jsonify({"error": err}), code
-    conn = get_db()
-    c = conn.cursor()
-    from_d = request.args.get("from", "")
-    to_d = request.args.get("to", "")
+def _report_filtered(c, from_d, to_d, args):
+    """يعيد طلبات status='completed' ضمن الفترة مع تطبيق فلاتر التفاصيل."""
     where = "status='completed'"
     params = []
     if from_d:
@@ -2320,6 +2313,89 @@ def api_reports_advanced():
         where += " AND date(date) <= ?"
         params.append(to_d)
     rows = c.execute(f"SELECT * FROM orders WHERE {where} ORDER BY date", params).fetchall()
+
+    method = (args.get("method") or "").strip()
+    employee = (args.get("employee") or "").strip()
+    item = (args.get("item") or "").strip()
+    table = (args.get("table") or "").strip()
+    day = (args.get("day") or "").strip()
+    month = (args.get("month") or "").strip()
+    hour = (args.get("hour") or "").strip()
+    filtered = []
+    for r in rows:
+        if method and (r["payment_method"] or "") != method:
+            continue
+        if employee and (r["employee"] or "") != employee:
+            continue
+        if table and str(r["table_num"] or "") != table:
+            continue
+        date_str = r["date"] or ""
+        if day and date_str[:10] != day:
+            continue
+        if month and date_str[:7] != month:
+            continue
+        if hour:
+            try:
+                h = int(date_str[11:13])
+            except Exception:
+                h = None
+            if h != int(hour):
+                continue
+        if item:
+            names = [str(i.get("name", "")).strip() for i in _parse_items(r["items"])]
+            if not any(item.lower() in n.lower() for n in names):
+                continue
+        filtered.append(r)
+
+    section = (args.get("section") or "").strip()
+    if section:
+        nums = [str(x[0]) for x in c.execute("SELECT num FROM tables WHERE section=?", (section,))]
+        if nums:
+            filtered = [r for r in filtered if str(r["table_num"] or "") in nums]
+    return filtered
+
+
+@app.route("/api/reports/orders")
+def api_reports_orders():
+    """تفاصيل الفواتير الفعلية خلف أي تجميع (مع فلاتر التفاصيل)."""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    c = conn.cursor()
+    from_d = request.args.get("from", "")
+    to_d = request.args.get("to", "")
+    rows = _report_filtered(c, from_d, to_d, request.args)
+    orders = []
+    for r in rows:
+        orders.append({
+            "id": r["id"],
+            "date": r["date"] or "",
+            "table_num": r["table_num"],
+            "employee": r["employee"] or "",
+            "payment_method": r["payment_method"] or "",
+            "subtotal": round(r["subtotal"] or 0, 2),
+            "discount": round(r["discount"] or 0, 2),
+            "tax": round(r["tax"] or 0, 2),
+            "total": round(r["total"] or 0, 2),
+            "paid": round(r["paid"] or 0, 2),
+            "guests": r["guests"] or 1,
+            "items": _parse_items(r["items"]),
+        })
+    conn.close()
+    return jsonify({"count": len(orders), "orders": orders})
+
+
+@app.route("/api/reports/advanced")
+def api_reports_advanced():
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    c = conn.cursor()
+    from_d = request.args.get("from", "")
+    to_d = request.args.get("to", "")
+    rows = _report_filtered(c, from_d, to_d, request.args)
 
     total = round(sum(r["total"] or 0 for r in rows), 2)
     count = len(rows)

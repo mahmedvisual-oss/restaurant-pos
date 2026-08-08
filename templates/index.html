@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/style2.css?v=14">
+<link rel="stylesheet" href="/style2.css?v=15">
 </head>
 <body>
 
@@ -228,17 +228,30 @@
         <button class="report-tab" data-i18n="tabCancelled" onclick="switchReportTab('cancelled')">🔄 الإلغاءات</button>
       </div>
 
-      <!-- فلتر التاريخ -->
+      <!-- فلتر التاريخ والتفاصيل -->
       <div class="report-filter" id="report-filter">
         <label data-i18n="rptFrom">من:</label>
         <input type="date" id="report-from" class="login-input" style="width:auto;padding:5px 8px;font-size:12px">
         <label data-i18n="rptTo">إلى:</label>
         <input type="date" id="report-to" class="login-input" style="width:auto;padding:5px 8px;font-size:12px">
+        <label data-i18n="rptMethod">الطريقة:</label>
+        <select id="filter-method" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="setReportFilter('method', this.value)"></select>
+        <label data-i18n="rptEmployee">الموظف:</label>
+        <select id="filter-employee" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="setReportFilter('employee', this.value)"></select>
+        <label data-i18n="rptItem">الصنف:</label>
+        <select id="filter-item" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="setReportFilter('item', this.value)"></select>
+        <label data-i18n="rptTable">الطاولة:</label>
+        <select id="filter-table" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="setReportFilter('table', this.value)"></select>
         <button class="btn btn-sm btn-info" data-i18n="rptSearch" onclick="loadReportData()">🔍 بحث</button>
+        <button class="btn btn-sm" data-i18n="rptClearFilters" onclick="clearReportFilters()">🗑 مسح الفلاتر</button>
       </div>
+      <div id="report-drill-hint" style="display:none;font-size:11px;color:var(--muted);padding:4px 2px 0" data-i18n="rptDrillHint">👆 انقر على أي صف في التقارير لفلترة تفاصيله أدناه</div>
 
       <!-- محتوى التقارير -->
       <div id="report-content"></div>
+
+      <!-- تفاصيل الفواتير (فلتر المحتوى) -->
+      <div id="report-detail"></div>
 
       <!-- الرسوم البيانية -->
       <div id="report-charts" style="display:none">
@@ -769,7 +782,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="/lang.js?v=73"></script>
-<script src="/app.js?v=73"></script>
+<script src="/lang.js?v=74"></script>
+  <script src="/app.js?v=74"></script>
 </body>
 </html>

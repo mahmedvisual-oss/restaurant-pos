@@ -2201,25 +2201,141 @@ async function loadCashierReport() {
 
 let currentReportTab = "overview";
 let reportData = {};
+let reportOrders = [];
+let reportFilters = { method: "", employee: "", item: "", table: "", day: "", month: "", hour: "", section: "" };
 let creditFilterStatus = "open";
 let creditSearchVal = "";
 
 function escq(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+
+function buildReportQuery() {
+  const p = [];
+  const from = document.getElementById("report-from").value;
+  const to = document.getElementById("report-to").value;
+  if (from) p.push("from=" + encodeURIComponent(from));
+  if (to) p.push("to=" + encodeURIComponent(to));
+  for (const k of ["method", "employee", "item", "table", "day", "month", "hour", "section"]) {
+    const v = reportFilters[k];
+    if (v !== "") p.push(k + "=" + encodeURIComponent(v));
+  }
+  return p.join("&");
+}
+
+function getActiveFilterLabel() {
+  const parts = [];
+  if (reportFilters.method) parts.push(t("rptMethod") + ": " + methodName(reportFilters.method));
+  if (reportFilters.employee) parts.push(t("rptEmployee") + ": " + reportFilters.employee);
+  if (reportFilters.item) parts.push(t("rptItem") + ": " + reportFilters.item);
+  if (reportFilters.table) parts.push(t("rptTable") + ": " + reportFilters.table);
+  if (reportFilters.day) parts.push(t("rptDate") + ": " + reportFilters.day);
+  if (reportFilters.month) parts.push(t("rptMonth") + ": " + reportFilters.month);
+  if (reportFilters.hour !== "") parts.push(t("rptHour") + ": " + reportFilters.hour + ":00");
+  if (reportFilters.section) parts.push(t("rptSection") + ": " + reportFilters.section);
+  return parts.join(" · ");
+}
+
+function setReportFilter(k, v) {
+  reportFilters[k] = v || "";
+  loadReportData();
+}
+
+function applyReportDrill(k, v) {
+  reportFilters[k] = v || "";
+  const map = { method: "filter-method", employee: "filter-employee", item: "filter-item", table: "filter-table" };
+  const id = map[k];
+  if (id) { const el = document.getElementById(id); if (el) el.value = v || ""; }
+  loadReportData();
+}
+
+function clearReportFilters() {
+  reportFilters = { method: "", employee: "", item: "", table: "", day: "", month: "", hour: "", section: "" };
+  ["filter-method", "filter-employee", "filter-item", "filter-table"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+  loadReportData();
+}
+
+function fillSelect(id, values, selected) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = `<option value="">${t("rptAll")}</option>` + values.map(v =>
+    `<option value="${escq(v)}" ${String(v) === String(selected) ? "selected" : ""}>${escapeHtml(v)}</option>`
+  ).join("");
+}
+
+function populateReportFilters() {
+  const d = reportData;
+  fillSelect("filter-method", (d.by_method || []).map(m => m.method), reportFilters.method);
+  fillSelect("filter-employee", (d.by_employee || []).map(e => e.employee), reportFilters.employee);
+  fillSelect("filter-item", (d.top_items || []).map(i => i.name), reportFilters.item);
+  const nums = [...new Set(Object.values(tableData).map(t => String(t.num)))].sort((a, b) => Number(a) - Number(b));
+  fillSelect("filter-table", nums, reportFilters.table);
+  const hint = document.getElementById("report-drill-hint");
+  if (hint) hint.style.display = "";
+}
+
+async function loadReportData() {
+  try {
+    reportData = await api("/api/reports/advanced?" + buildReportQuery());
+    renderReportTab();
+    populateReportFilters();
+    await loadReportDetail();
+  } catch (e) { toast(e.message); }
+}
+
+async function loadReportDetail() {
+  const box = document.getElementById("report-detail");
+  if (!box) return;
+  try {
+    const d = await api("/api/reports/orders?" + buildReportQuery());
+    reportOrders = d.orders || [];
+    renderReportDetail();
+  } catch (e) { box.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
+}
+
+function renderReportDetail() {
+  const box = document.getElementById("report-detail");
+  const orders = reportOrders;
+  const label = getActiveFilterLabel();
+  const max = 200;
+  const shown = orders.slice(0, max);
+  box.innerHTML = `
+    <div class="report-section" style="margin-top:10px">
+      <div class="report-section-title">${t("rptDetailsTitle")} (${orders.length})</div>
+      ${label ? `<div class="report-filter-badge">🔎 ${label} <button class="btn btn-sm" onclick="clearReportFilters()">${t("rptClearFilters")}</button></div>` : ""}
+      <table class="report-table">
+        <tr><th>#</th><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptMethod")}</th><th>${t("rptItems")}</th><th>${t("rptTotal")}</th></tr>
+        ${shown.length ? shown.map(o => `
+          <tr class="report-order-row" onclick="toggleReportOrderDetail(${o.id})" title="${t("rptDrillHint")}">
+            <td>#${o.id}</td><td>${o.date}</td><td>${o.table_num || "-"}</td>
+            <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}</td>
+            <td>${(o.items || []).map(i => `${i.qty || 1}× ${escapeHtml(i.name)}`).join(", ")}</td>
+            <td>${fmtCur(o.total)}</td>
+          </tr>
+          <tr id="order-detail-${o.id}" class="report-order-detail" style="display:none">
+            <td colspan="7">
+              <table class="report-table report-table-sub">
+                <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptPrice")}</th><th>${t("rptAmount")}</th></tr>
+                ${(o.items || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td>${i.qty || 1}</td><td>${fmtCur(i.price)}</td><td>${fmtCur(i.subtotal != null ? i.subtotal : (i.price * (i.qty || 1)))}</td></tr>`).join("")}
+                ${o.discount ? `<tr><td>${t("rptDiscountsGiven")}</td><td colspan="2"></td><td class="report-loss">-${fmtCur(o.discount)}</td></tr>` : ""}
+                ${o.tax ? `<tr><td>${t("rptTaxCollected")}</td><td colspan="2"></td><td>${fmtCur(o.tax)}</td></tr>` : ""}
+                <tr class="total-row"><td colspan="3">${t("rptTotal")}</td><td>${fmtCur(o.total)}</td></tr>
+              </table>
+            </td>
+          </tr>`).join("") : `<tr><td colspan="7" style="text-align:center;color:var(--muted)">${t("rptNoOrdersMatch")}</td></tr>`}
+      </table>
+      ${orders.length > max ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${t("rptShowingFirst", { n: max, total: orders.length })}</div>` : ""}
+    </div>`;
+}
+
+function toggleReportOrderDetail(id) {
+  const el = document.getElementById("order-detail-" + id);
+  if (el) el.style.display = (el.style.display === "none") ? "" : "none";
+}
 
 async function switchReportTab(tab) {
   currentReportTab = tab;
   document.querySelectorAll(".report-tab").forEach(t => t.classList.remove("active"));
   event.target.classList.add("active");
   await loadReportData();
-}
-
-async function loadReportData() {
-  const from = document.getElementById("report-from").value;
-  const to = document.getElementById("report-to").value;
-  try {
-    reportData = await api(`/api/reports/advanced?from=${from}&to=${to}`);
-    renderReportTab();
-  } catch (e) { toast(e.message); }
 }
 
 function renderReportTab() {
@@ -2261,7 +2377,7 @@ function renderOverview(c) {
         <tr><th>${t("rptMethod")}</th><th>${t("rptOrders")}</th><th>${t("rptAmount")}</th><th>${t("rptPercent")}</th></tr>
         ${(d.by_method || []).map(m => {
           const pct = d.total_sales > 0 ? ((m.total / d.total_sales) * 100).toFixed(1) : 0;
-          return `<tr><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td><td>${pct}%</td></tr>`;
+          return `<tr class="report-drill" onclick="applyReportDrill('method', '${escq(m.method)}')" title="${t("rptDrillHint")}"><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td><td>${pct}%</td></tr>`;
         }).join("")}
       </table>
     </div>
@@ -2269,7 +2385,7 @@ function renderOverview(c) {
       <div class="report-section-title">${t("rptTopItems")}</div>
       <table class="report-table">
         <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptRevenue")}</th></tr>
-        ${(d.top_items || []).slice(0, 10).map(i => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${fmtCur(i.revenue)}</td></tr>`).join("")}
+        ${(d.top_items || []).slice(0, 10).map(i => `<tr class="report-drill" onclick="applyReportDrill('item', '${escq(i.name)}')" title="${t("rptDrillHint")}"><td>${i.name}</td><td>${i.qty}</td><td>${fmtCur(i.revenue)}</td></tr>`).join("")}
       </table>
     </div>`;
   renderCharts(d);
@@ -2288,7 +2404,7 @@ function renderDaily(c) {
         <tr><th>${t("rptDate")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
         ${(d.daily || []).map(day => {
           const avg = day.count > 0 ? day.total / day.count : 0;
-          return `<tr><td>${day.date}</td><td>${day.count}</td><td>${fmtCur(day.total)}</td><td>${fmtCur(avg)}</td></tr>`;
+          return `<tr class="report-drill" onclick="applyReportDrill('day', '${day.date}')" title="${t("rptDrillHint")}"><td>${day.date}</td><td>${day.count}</td><td>${fmtCur(day.total)}</td><td>${fmtCur(avg)}</td></tr>`;
         }).join("")}
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
@@ -2312,7 +2428,7 @@ function renderMonthly(c) {
         <tr><th>${t("rptMonth")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
         ${months.map(([m, v]) => {
           const avg = v.count > 0 ? v.total / v.count : 0;
-          return `<tr><td>${m}</td><td>${v.count}</td><td>${fmtCur(v.total)}</td><td>${fmtCur(avg)}</td></tr>`;
+          return `<tr class="report-drill" onclick="applyReportDrill('month', '${m}')" title="${t("rptDrillHint")}"><td>${m}</td><td>${v.count}</td><td>${fmtCur(v.total)}</td><td>${fmtCur(avg)}</td></tr>`;
         }).join("")}
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
@@ -2439,7 +2555,7 @@ function renderTax(c) {
             months[month].sales += day.total;
           });
           return Object.entries(months).sort((a, b) => b[0].localeCompare(a[0])).map(([m, v]) =>
-            `<tr><td>${m}</td><td>${fmtCur(v.tax)}</td><td>${fmtCur(v.sales)}</td></tr>`
+            `<tr class="report-drill" onclick="applyReportDrill('month', '${m}')" title="${t("rptDrillHint")}"><td>${m}</td><td>${fmtCur(v.tax)}</td><td>${fmtCur(v.sales)}</td></tr>`
           ).join("");
         })()}
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${fmtCur(d.total_tax)}</td><td>${fmtCur(d.total_sales)}</td></tr>
@@ -2456,7 +2572,7 @@ function renderEmployees(c) {
         <tr><th>${t("rptEmployee")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
         ${(d.by_employee || []).map(e => {
           const avg = e.count > 0 ? e.total / e.count : 0;
-          return `<tr><td>${e.employee}</td><td>${e.count}</td><td>${fmtCur(e.total)}</td><td>${fmtCur(avg)}</td></tr>`;
+          return `<tr class="report-drill" onclick="applyReportDrill('employee', '${escq(e.employee)}')" title="${t("rptDrillHint")}"><td>${e.employee}</td><td>${e.count}</td><td>${fmtCur(e.total)}</td><td>${fmtCur(avg)}</td></tr>`;
         }).join("")}
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
@@ -2686,7 +2802,7 @@ async function renderIncome(c) {
         <div class="report-section-title">${t("rptSalesByPayMethod")}</div>
         <table class="report-table">
           <tr><th>${t("rptMethod")}</th><th>${t("rptOrders")}</th><th>${t("rptReceived")}</th><th>${t("rptInvoices")}</th></tr>
-          ${d.by_method.length ? d.by_method.map(m => `<tr><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.paid)}</td><td>${fmtCur(m.total)}</td></tr>`).join("") : `<tr><td colspan="4" style="text-align:center;color:var(--muted)">${t("rptNoSales")}</td></tr>`}
+          ${d.by_method.length ? d.by_method.map(m => `<tr class="report-drill" onclick="applyReportDrill('method', '${escq(m.method)}')" title="${t("rptDrillHint")}"><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.paid)}</td><td>${fmtCur(m.total)}</td></tr>`).join("") : `<tr><td colspan="4" style="text-align:center;color:var(--muted)">${t("rptNoSales")}</td></tr>`}
         </table>
       </div>`;
   } catch (e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
@@ -2707,7 +2823,7 @@ function renderPeak(c) {
             const v = hourMap[h];
             const label = h.toString().padStart(2, "0") + ":00";
             if (!v) return `<tr><td>${label}</td><td>0</td><td>0</td></tr>`;
-            return `<tr><td>${label}</td><td>${v.count}</td><td>${fmtCur(v.total)}</td></tr>`;
+            return `<tr class="report-drill" onclick="applyReportDrill('hour', '${h}')" title="${t("rptDrillHint")}"><td>${label}</td><td>${v.count}</td><td>${fmtCur(v.total)}</td></tr>`;
           }).join("");
         })()}
       </table>
@@ -2733,7 +2849,7 @@ function renderTablesReport(c) {
         ${TABLE_SECTIONS.map(sec => {
           const secTables = tables.filter(t => t.section === sec.id);
           const secOcc = secTables.filter(t => t.active).length;
-          return `<tr><td>${sec.icon} ${sec.id}</td><td>${secTables.length}</td><td>${secOcc}</td><td>${secTables.length - secOcc}</td></tr>`;
+          return `<tr class="report-drill" onclick="applyReportDrill('section', '${sec.id}')" title="${t("rptDrillHint")}"><td>${sec.icon} ${sec.id}</td><td>${secTables.length}</td><td>${secOcc}</td><td>${secTables.length - secOcc}</td></tr>`;
         }).join("")}
       </table>
     </div>`;
@@ -2753,7 +2869,9 @@ function printReports() {
   const w = window.open("", "_blank", "width=800,height=600");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
   const dir = document.documentElement.dir;
-  const content = document.getElementById("report-content").innerHTML;
+  let content = document.getElementById("report-content").innerHTML;
+  const detail = document.getElementById("report-detail");
+  if (detail) content += detail.innerHTML;
   w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
     <style>
       body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; direction: ${dir}; font-size: 12px; }
@@ -2778,6 +2896,31 @@ function printReports() {
     <script>window.onload=function(){window.print();}<\/script>
   </body></html>`);
   w.document.close();
+}
+
+function exportCSV() {
+  if (!user || user.role !== "manager") return;
+  const tables = document.querySelectorAll("#report-content table, #report-detail table");
+  let csv = "";
+  tables.forEach((tbl, ti) => {
+    if (ti > 0) csv += "\n\n";
+    tbl.querySelectorAll("tr").forEach(tr => {
+      const cells = [];
+      tr.querySelectorAll("th, td").forEach(td => {
+        let txt = (td.textContent || "").trim().replace(/\s+/g, " ");
+        if (txt.startsWith("📦")) txt = txt.replace(/^\S+\s*/, "");
+        cells.push('"' + txt.replace(/"/g, '""') + '"');
+      });
+      csv += cells.join(",") + "\n";
+    });
+  });
+  if (!csv) { toast("⚠️ " + t("rptNoOrdersMatch")); return; }
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "report.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ===== قائمة المدير =====

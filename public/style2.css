@@ -901,6 +901,20 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 .report-profit { color: var(--success); }
 .report-loss { color: var(--danger); }
+.report-table tr.report-drill { cursor: pointer; }
+.report-table tr.report-drill td { border-left: 2px solid transparent; }
+.report-table tr.report-drill:hover td { border-left: 2px solid var(--info); background: rgba(99,102,241,.08); }
+.report-order-row { cursor: pointer; }
+.report-order-detail td { background: var(--card); padding: 8px; }
+.report-table-sub { margin: 0; }
+.report-filter-badge {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: rgba(99,102,241,.12); border: 1px solid rgba(99,102,241,.3);
+  color: var(--info); border-radius: 6px; padding: 5px 10px;
+  font-size: 11px; margin-bottom: 8px;
+}
+.report-filter select { max-width: 140px; }
+.report-filter { flex-wrap: wrap; }
 
 /* تأثيرات إضافية */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
