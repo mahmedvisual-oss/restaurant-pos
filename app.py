@@ -831,6 +831,54 @@ def api_cancel_reject():
     return jsonify({"ok": True})
 
 
+@app.route("/api/admin/delete-order/<int:oid>", methods=["POST"])
+def api_admin_delete_order(oid):
+    """أداة صيانة (PIN المدير): حذف نهائي لطلب تجريبي/مكرر مع ما يتعلق به وسجل تدقيق."""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    data = request.json or {}
+    pin = str(data.get("pin") or "")
+    conn = get_db()
+    c = conn.cursor()
+    managers = c.execute("SELECT pin FROM employees WHERE active=1 AND role='manager'").fetchall()
+    if not any(verify_pin(pin, m["pin"]) for m in managers):
+        conn.close()
+        return jsonify({"error": "يتطلب PIN المدير"}), 403
+    row = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "طلب غير موجود"}), 404
+    # أعد المخزون المُخصوم إن كان الطلب مدفوعاً
+    if row["status"] == "completed":
+        try:
+            _restore_inventory(c, _parse_items(row["items"]))
+        except Exception:
+            pass
+    # احذف سندات المردودات وطلبات الإلغاء المرتبطة
+    try:
+        c.execute("DELETE FROM refund_receipts WHERE order_id=?", (oid,))
+    except Exception:
+        pass
+    try:
+        c.execute("DELETE FROM cancellation_requests WHERE order_id=?", (oid,))
+    except Exception:
+        pass
+    # احذف أرصدة/تحصيلات الآجل المرتبطة
+    try:
+        ledgers = c.execute("SELECT id FROM credit_ledger WHERE order_id=?", (oid,)).fetchall()
+        for lg in ledgers:
+            c.execute("DELETE FROM credit_payments WHERE ledger_id=?", (lg["id"],))
+        c.execute("DELETE FROM credit_ledger WHERE order_id=?", (oid,))
+    except Exception:
+        pass
+    c.execute("DELETE FROM orders WHERE id=?", (oid,))
+    conn.commit()
+    audit("admin_delete_order", f"حذف نهائي لطلب #{oid} (طاولة {row['table_num']}) من {u['name']} - صيانة")
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/cancel-count")
 def api_cancel_count():
     u = require_user()
