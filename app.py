@@ -2441,7 +2441,8 @@ def api_reservation_list():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
-    rows = conn.execute("SELECT * FROM reservations WHERE date >= date('now') ORDER BY date, time").fetchall()
+    today = _now().strftime("%Y-%m-%d")
+    rows = conn.execute("SELECT * FROM reservations WHERE date >= ? ORDER BY date, time", (today,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -3755,12 +3756,15 @@ def api_reports():
     c = conn.cursor()
     c.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS tot FROM orders WHERE status='completed'")
     row = c.fetchone()
-    c.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS tot FROM orders WHERE status='completed' AND date(date) = date('now')")
-    today = c.fetchone()
+    today = _now().strftime("%Y-%m-%d")
+    c.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS tot FROM orders WHERE status='completed' AND date(date) = ?", (today,))
+    row_today = c.fetchone()
     conn.close()
+    today_count = row_today["cnt"]
+    today_total = row_today["tot"]
     return jsonify({
         "count": row["cnt"], "total": row["tot"],
-        "today_count": today["cnt"], "today_total": today["tot"],
+        "today_count": today_count, "today_total": today_total,
     })
 
 
