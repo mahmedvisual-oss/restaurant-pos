@@ -3523,7 +3523,7 @@ def api_kitchen_clear():
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE orders SET kitchen_status='ready' "
+    c.execute("UPDATE orders SET kitchen_status='ready', status=CASE WHEN status IN ('sent','ready') THEN 'closed' ELSE status END "
               "WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status IN ('sent','ready'))")
     cleared = c.rowcount
     conn.commit()
