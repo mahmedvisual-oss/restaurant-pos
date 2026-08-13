@@ -1,4 +1,4 @@
-const POLL_MS = 4000;
+const POLL_MS = 12000;
 let knownIds = new Set();
 let kUser = null;
 
@@ -107,7 +107,7 @@ function render(orders) {
     grid.innerHTML += `
       <div class="k-order ${isReady ? "ready" : ""} ${paid ? "paid" : ""}" data-id="${o.id}">
         <div class="k-order-head">
-          <span class="k-order-table">🪑 ${t("table")} ${o.table_num}</span>
+          <span class="k-order-table">🪑 ${t("table")} ${o.table_num}${o.table_section && o.table_section !== "hall" ? ` (${t(o.table_section)})` : ""}</span>
           <span class="k-order-time ${warn ? "warn" : ""}">⏱ ${elapsed}</span>
           <span class="k-order-guests">👥 ${o.guests}</span>
           <span class="k-order-status">${isReady ? t("readyLabel") + " ✅" : (paid ? '<span style="color:var(--success, #22c55e);font-weight:700">💰 ' + t("paidLabel") + '</span>' : t("cookingLabel") + " ⏳")}</span>
@@ -126,6 +126,14 @@ function render(orders) {
 async function markReady(id) {
   try {
     await api("/api/kitchen/order/" + id + "/ready", { method: "POST" });
+    poll();
+  } catch (e) { /* تجاهل */ }
+}
+
+async function clearKitchen() {
+  if (!confirm(t("kitchenClearConfirm") || "إزالة جميع الطلبات من الشاشة؟")) return;
+  try {
+    await api("/api/kitchen/clear", { method: "POST" });
     poll();
   } catch (e) { /* تجاهل */ }
 }

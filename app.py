@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sqlite3
 import socket
 import hashlib
@@ -17,22 +17,118 @@ from flask import Flask, render_template, request, jsonify, session, Response, s
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE, "restaurant.db")
 BACKUP_DIR = os.path.join(BASE, "backups")
+# على Vercel مجلد المشروع للقراءة فقط؛ نستخدم /tmp القابل للكتابة للنسخ
+_ON_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
+if _ON_VERCEL:
+    BACKUP_DIR = os.path.join(tempfile.gettempdir(), "restaurant_backups")
+
+# المنطقة الزمنية للمطعم (مهم لمطابقة اليومية والتقارير مع وقت العمل الفعلي)
+TZ_NAME = os.environ.get("POS_TZ", "Asia/Jakarta")
+os.environ["TZ"] = TZ_NAME
+try:
+    time.tzset()
+except Exception:
+    pass
+TZ_OFFSET_HOURS = 7.0  # Asia/Jakarta = UTC+7 (قابل للتغيير عبر POS_TZ_OFFSET)
+try:
+    TZ_OFFSET_HOURS = float(os.environ.get("POS_TZ_OFFSET", "7"))
+except (TypeError, ValueError):
+    pass
+_tz = None
+try:
+    from zoneinfo import ZoneInfo
+    _tz = ZoneInfo(TZ_NAME)
+except Exception:
+    try:
+        import pytz
+        _tz = pytz.timezone(TZ_NAME)
+    except Exception:
+        _tz = None
+
+
+def _now():
+    """التاريخ/الوقت المحلي للمطعم موحّداً في كل النظام (يعمل حتى بدون مكتبات مناطق)."""
+    if _tz is not None:
+        try:
+            return datetime.fromtimestamp(time.time(), _tz).replace(tzinfo=None)
+        except Exception:
+            pass
+    return datetime.utcnow() + timedelta(hours=TZ_OFFSET_HOURS)
+
+
+def _now_sql():
+    """صيغة datetime سلسلة للـ DB (نص محلي بدون فرق توقيت)."""
+    return _now().strftime("%Y-%m-%d %H:%M:%S")
+
+METHOD_SYNONYMS = {
+    "نقداً": "نقدي",
+    "تحويل BCA": "BCA",
+    "تحويل مانديري": "مانديري",
+    "Transfer BCA": "BCA",
+    "Transfer Mandiri": "مانديري",
+}
+
+def _canon_method(m):
+    return METHOD_SYNONYMS.get(m, m)
 
 app = Flask(__name__, static_folder="public", static_url_path="")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")
+_asset_hash_cache = {}
+
+
+@app.context_processor
+def _inject_static_versions():
+    def asset_ver(name):
+        try:
+            if name in _asset_hash_cache:
+                return _asset_hash_cache[name]
+            h = "0"
+            # Try direct file read first (works locally)
+            for path in [
+                os.path.join(app.static_folder or "", name),
+                os.path.join(_STATIC_DIR, name),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), name),
+                os.path.join(os.getcwd(), "public", name),
+            ]:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        h = hashlib.md5(f.read()).hexdigest()[:10]
+                    break
+            else:
+                # Vercel serves /public via its own static pipeline;
+                # self-fetch once to derive a stable content hash.
+                try:
+                    import urllib.request
+                    host = request.headers.get("X-Forwarded-Host") or request.host
+                    scheme = request.headers.get("X-Forwarded-Proto") or request.scheme
+                    url = f"{scheme}://{host}/{name}"
+                    with urllib.request.urlopen(url, timeout=3) as resp:
+                        h = hashlib.md5(resp.read()).hexdigest()[:10]
+                except Exception:
+                    h = "0"
+            _asset_hash_cache[name] = h
+            return h
+        except Exception:
+            return "0"
+    return {"asset_ver": asset_ver}
 
 
 @app.after_request
 def _no_cache(resp):
     path = request.path
-    if path.endswith(".css") or path.endswith(".js") or path in ("/", "/kitchen"):
+    if path in ("/", "/kitchen"):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
     return resp
 
+_SECRET_KEY_ENV = os.environ.get("SECRET_KEY", "").strip()
 sk_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "secret_key.txt")
-if os.path.exists(sk_path):
+if _SECRET_KEY_ENV:
+    app.secret_key = _SECRET_KEY_ENV
+elif os.path.exists(sk_path):
     app.secret_key = open(sk_path).read().strip()
 else:
     app.secret_key = secrets.token_hex(32)
@@ -41,6 +137,12 @@ else:
             f.write(app.secret_key)
     except Exception:
         pass
+
+# جلسة دائمة تنتهي بعد 12 ساعة، وكوكي آمن على الإنتاج (HTTPS)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = _ON_VERCEL
 
 PIN_HASH_PREFIX = "$hs$"
 
@@ -116,6 +218,53 @@ except Exception:
 CLOUD_DB = bool(TURSO_URL) and _TS_AVAILABLE
 DB_INTEGRITY = _ts.IntegrityError if CLOUD_DB else sqlite3.IntegrityError
 
+# إعادة استخدام الاتصالات (keep-alive): الـ driver الأصلي يفتح اتصال HTTPS جديد مع كل
+# جملة SQL (مصافحة TLS كاملة لكل استعلام = بطء شديد). نستبدل طبقة النقل بجلسة
+# requests دائمة تتم فيها إعادة استخدام الاتصال عبر كل الجمل في نفس العملية.
+_HTTP_POOL = None
+if CLOUD_DB:
+    try:
+        import requests as _req_mod
+        from turso_serverless import session as _ts_sess
+
+        _HTTP_POOL = _req_mod.Session()
+        _HTTP_POOL.headers.update({"Connection": "keep-alive"})
+
+        def _pooled_post(self, path, body):
+            url = f"{self._base_url}{path}"
+            data = json.dumps(body, allow_nan=False).encode("utf-8")
+            try:
+                try:
+                    resp = _HTTP_POOL.post(url, data=data, headers=self._headers(), timeout=25)
+                except _req_mod.RequestException as e:
+                    self._reset_stream()
+                    raise _ts_sess.ProtocolError(f"request to {url} failed: {e}") from None
+            except _ts_sess.ProtocolError:
+                raise
+            except Exception as e:
+                self._reset_stream()
+                raise _ts_sess.ProtocolError(f"request to {url} failed: {e!r}") from None
+            if resp.status_code != 200:
+                self._reset_stream()
+                message = None
+                try:
+                    parsed = resp.json()
+                    if isinstance(parsed, dict):
+                        for key in ("error", "message"):
+                            if isinstance(parsed.get(key), str):
+                                message = parsed[key]
+                                break
+                except ValueError:
+                    pass
+                if message is not None:
+                    raise _ts_sess.ProtocolError(f"HTTP status {resp.status_code}: {message}") from None
+                raise _ts_sess.ProtocolError(f"HTTP status {resp.status_code}") from None
+            return resp.content
+
+        _ts_sess.Session._post = _pooled_post
+    except Exception:
+        _HTTP_POOL = None
+
 
 def _raw_conn():
     if CLOUD_DB:
@@ -132,14 +281,28 @@ def get_db():
     return conn
 
 
+_SCHEMA_DONE = False
+
+
 def _ensure_schema(conn, c, log=True):
-    """أضف الأعمدة والجداول الجديدة بأمان (مكتفية ذاتياً؛ تُستدعى عند كل بداية وعند الحاجة)."""
+    """أضف الأعمدة والجداول الجديدة بأمان (تُنفَّذ مرة واحدة لكل عملية خادم فقط).
+
+    كل عبارة SQL عبر HTTP على Turso = رحلة HTTP منفصلة (~20+ رحلة لكل استدعاء)،
+    وتنفيذها لكل طلب مع الاقتراع المتزامن يستنزف حد الاتصالات ويُسبب مهلات 60s.
+    لذلك تُنفَّذ مرة واحدة وتُتخطى بعدها حتى إعادة الإقلاع.
+    """
+    global _SCHEMA_DONE
+    if _SCHEMA_DONE:
+        return
     try:
         ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
         for col, ddl in (
             ("kitchen_status", "ALTER TABLE orders ADD COLUMN kitchen_status TEXT"),
             ("transfer_ref", "ALTER TABLE orders ADD COLUMN transfer_ref TEXT"),
             ("transfer_name", "ALTER TABLE orders ADD COLUMN transfer_name TEXT"),
+            ("credit_name", "ALTER TABLE orders ADD COLUMN credit_name TEXT"),
+            ("table_section", "ALTER TABLE orders ADD COLUMN table_section TEXT"),
+            ("table_id", "ALTER TABLE orders ADD COLUMN table_id INTEGER"),
         ):
             if col not in ocols:
                 c.execute(ddl)
@@ -172,9 +335,141 @@ def _ensure_schema(conn, c, log=True):
             if log:
                 print("ENSURE REFUNDS ERR:", repr(e))
     try:
+        c.execute("SELECT 1 FROM deposit_vouchers LIMIT 1").fetchone()
+    except Exception:
+        try:
+            c.execute('''CREATE TABLE IF NOT EXISTS deposit_vouchers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                receipt_no TEXT UNIQUE,
+                customer_name TEXT,
+                phone TEXT,
+                party_date TEXT,
+                description TEXT,
+                amount REAL DEFAULT 0,
+                method TEXT DEFAULT 'نقدي',
+                transfer_ref TEXT,
+                transfer_name TEXT,
+                employee TEXT,
+                date TEXT DEFAULT (datetime('now','localtime'))
+            )''')
+        except Exception as e:
+            if log:
+                print("ENSURE VOUCHERS ERR:", repr(e))
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS login_attempts (
+            ip TEXT NOT NULL,
+            employee_id INTEGER,
+            target TEXT DEFAULT 'login',
+            attempts INTEGER DEFAULT 0,
+            lock_until REAL DEFAULT 0,
+            PRIMARY KEY (ip, employee_id, target)
+        )''')
+    except Exception as e:
+        if log:
+            print("ENSURE LOGIN_ATTEMPTS ERR:", repr(e))
+    try:
+        rcols = [r[1] for r in c.execute("PRAGMA table_info(reservations)").fetchall()]
+        if "created_by" not in rcols:
+            c.execute("ALTER TABLE reservations ADD COLUMN created_by INTEGER")
+    except Exception as e:
+        if log:
+            print("ENSURE RESERVATIONS ERR:", repr(e))
+    try:
+        ecols = [r[1] for r in c.execute("PRAGMA table_info(employees)").fetchall()]
+        for col, ddl in (
+            ("phone", "ALTER TABLE employees ADD COLUMN phone TEXT DEFAULT ''"),
+            ("salary", "ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0"),
+            ("hire_date", "ALTER TABLE employees ADD COLUMN hire_date TEXT DEFAULT ''"),
+            ("shift", "ALTER TABLE employees ADD COLUMN shift TEXT DEFAULT ''"),
+            ("department", "ALTER TABLE employees ADD COLUMN department TEXT DEFAULT ''"),
+            ("status", "ALTER TABLE employees ADD COLUMN status TEXT DEFAULT 'active'"),
+            ("discount_limit", "ALTER TABLE employees ADD COLUMN discount_limit REAL DEFAULT 20"),
+        ):
+            if col not in ecols:
+                c.execute(ddl)
+    except Exception as e:
+        if log:
+            print("ENSURE EMPLOYEES ERR:", repr(e))
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS discount_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee TEXT,
+            employee_id INTEGER,
+            order_id INTEGER,
+            table_num TEXT,
+            subtotal REAL DEFAULT 0,
+            tax REAL DEFAULT 0,
+            discount REAL DEFAULT 0,
+            limit_pct REAL DEFAULT 0,
+            date TEXT DEFAULT (datetime('now','localtime'))
+        )''')
+    except Exception as e:
+        if log:
+            print("ENSURE DISCOUNT_LOG ERR:", repr(e))
+    try:
+        # تنظيف الدفع الزائد: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)
+        c.execute("UPDATE credit_ledger SET paid=total WHERE paid > total AND total IS NOT NULL AND total >= 0")
+    except Exception as e:
+        if log:
+            print("ENSURE OVERPAID CLEANUP ERR:", repr(e))
+    try:
+        # إزالة سجلات خصم الأوامر المحذوفة (لا تبقى أيتاماً)
+        c.execute("DELETE FROM discount_log WHERE order_id IS NOT NULL AND order_id NOT IN (SELECT id FROM orders)")
+    except Exception as e:
+        if log:
+            print("ENSURE DISCOUNT ORPHAN CLEANUP ERR:", repr(e))
+    try:
+        # أعمدة القسم للجداول المرتبطة بالطاولات (للعرض والتصفية)
+        for tbl, col, ddl in (
+            ("reservations", "table_section", "ALTER TABLE reservations ADD COLUMN table_section TEXT"),
+            ("reservations", "table_id", "ALTER TABLE reservations ADD COLUMN table_id INTEGER"),
+            ("credit_ledger", "table_section", "ALTER TABLE credit_ledger ADD COLUMN table_section TEXT"),
+            ("credit_ledger", "table_id", "ALTER TABLE credit_ledger ADD COLUMN table_id INTEGER"),
+            ("cancellation_requests", "table_section", "ALTER TABLE cancellation_requests ADD COLUMN table_section TEXT"),
+            ("cancellation_requests", "table_id", "ALTER TABLE cancellation_requests ADD COLUMN table_id INTEGER"),
+            ("discount_log", "table_section", "ALTER TABLE discount_log ADD COLUMN table_section TEXT"),
+        ):
+            try:
+                cols = [r[1] for r in c.execute(f"PRAGMA table_info({tbl})").fetchall()]
+                if col not in cols:
+                    c.execute(ddl)
+            except Exception:
+                pass
+    except Exception as e:
+        if log:
+            print("ENSURE TABLE SECTIONS ERR:", repr(e))
+    try:
+        # هجرة الطاولات: ترقيم كل قسم من 1 + قيد UNIQUE(num, section) بدل UNIQUE(num) العام.
+        # النمط القديم: القسم يبدأ ترقيمه من غير 1 (مثلاً vip تبدأ من 9). عند اكتشافه نعيد
+        # البناء في executescript واحد (رحلة HTTP واحدة) ونعيد الترقيم داخل كل قسم.
+        old_min = c.execute("SELECT section, MIN(num) AS mn FROM tables GROUP BY section").fetchall()
+        needs_renumber = any(r["mn"] > 1 for r in old_min)
+        if needs_renumber:
+            tcols = [r[1] for r in c.execute("PRAGMA table_info(tables)").fetchall()]
+            col_map = {"pos_x": "REAL DEFAULT 0", "pos_y": "REAL DEFAULT 0",
+                       "capacity": "INTEGER DEFAULT 4", "shape": "TEXT DEFAULT 'round'"}
+            extra_cols = [x for x in ("pos_x", "pos_y", "capacity", "shape") if x in tcols]
+            extra_def = ", " + ", ".join(f"{x} {col_map[x]}" for x in extra_cols) if extra_cols else ""
+            extra_sel = ", " + ", ".join(extra_cols) if extra_cols else ""
+            script = (
+                "CREATE TABLE tables_new (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "num INTEGER NOT NULL, section TEXT DEFAULT 'hall'"
+                f"{extra_def}, UNIQUE(num, section));"
+                f"INSERT INTO tables_new (id, num, section{extra_sel}) "
+                "SELECT id, ROW_NUMBER() OVER (PARTITION BY section ORDER BY num, id), "
+                f"section{extra_sel} FROM tables ORDER BY section, num, id;"
+                "DROP TABLE tables;"
+                "ALTER TABLE tables_new RENAME TO tables;"
+            )
+            c.executescript(script)
+    except Exception as e:
+        if log:
+            print("ENSURE TABLES RENUMBER ERR:", repr(e))
+    try:
         conn.commit()
     except Exception:
         pass
+    _SCHEMA_DONE = True
 
 
 def init_db():
@@ -199,6 +494,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         table_num INTEGER,
+        table_section TEXT,
         items TEXT,
         subtotal REAL,
         tax REAL,
@@ -213,7 +509,14 @@ def init_db():
         name TEXT NOT NULL,
         pin TEXT NOT NULL,
         role TEXT DEFAULT 'cashier',
-        active INTEGER DEFAULT 1
+        active INTEGER DEFAULT 1,
+        phone TEXT DEFAULT '',
+        salary REAL DEFAULT 0,
+        hire_date TEXT DEFAULT '',
+        shift TEXT DEFAULT '',
+        department TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        discount_limit REAL DEFAULT 20
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS audit_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -282,17 +585,27 @@ def init_db():
         customer_name TEXT,
         phone TEXT,
         table_num INTEGER,
+        table_section TEXT,
+        table_id INTEGER,
         guests INTEGER DEFAULT 1,
         date TEXT,
         time TEXT,
         status TEXT DEFAULT 'confirmed',
         notes TEXT,
+        created_by INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+    try:
+        cols = [r[1] for r in c.execute("PRAGMA table_info(reservations)").fetchall()]
+        if "created_by" not in cols:
+            c.execute("ALTER TABLE reservations ADD COLUMN created_by INTEGER")
+    except Exception:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS tables (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        num INTEGER UNIQUE NOT NULL,
-        section TEXT DEFAULT 'hall'
+        num INTEGER NOT NULL,
+        section TEXT DEFAULT 'hall',
+        UNIQUE(num, section)
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS category_order (
         category TEXT PRIMARY KEY,
@@ -347,9 +660,9 @@ def init_db():
             c.execute("INSERT INTO menu_items (emoji, name, category, price) VALUES (?,?,?,?)",
                       (it["emoji"], it["name"], it["category"], it["price"]))
     if c.execute("SELECT COUNT(*) FROM tables").fetchone()[0] == 0:
-        secs = [("families", 1, 8), ("vip", 9, 12), ("hall", 13, 20), ("takeaway", 21, 24)]
-        for sec, s, e in secs:
-            for n in range(s, e + 1):
+        secs = [("families", 8), ("vip", 4), ("hall", 8), ("takeaway", 4)]
+        for sec, cnt in secs:
+            for n in range(1, cnt + 1):
                 c.execute("INSERT INTO tables (num, section) VALUES (?,?)", (n, sec))
     c.execute('''CREATE TABLE IF NOT EXISTS cancellation_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -367,6 +680,25 @@ def init_db():
         inventory_id INTEGER NOT NULL,
         qty_per INTEGER NOT NULL DEFAULT 1,
         PRIMARY KEY (menu_id, inventory_id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS modifier_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        required INTEGER DEFAULT 0,
+        max_select INTEGER DEFAULT 1,
+        sort_order INTEGER DEFAULT 0
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS modifiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        price_add REAL DEFAULT 0,
+        active INTEGER DEFAULT 1
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS menu_modifiers (
+        menu_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        PRIMARY KEY (menu_id, group_id)
     )''')
     c.execute('''CREATE TABLE IF NOT EXISTS credit_ledger (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -388,6 +720,20 @@ def init_db():
         employee TEXT,
         date TEXT DEFAULT (datetime('now','localtime'))
     )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS deposit_vouchers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        receipt_no TEXT UNIQUE,
+        customer_name TEXT,
+        phone TEXT,
+        party_date TEXT,
+        description TEXT,
+        amount REAL DEFAULT 0,
+        method TEXT DEFAULT 'نقدي',
+        transfer_ref TEXT,
+        transfer_name TEXT,
+        employee TEXT,
+        date TEXT DEFAULT (datetime('now','localtime'))
+    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS expenses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         date TEXT DEFAULT (datetime('now','localtime')),
@@ -395,6 +741,26 @@ def init_db():
         description TEXT DEFAULT '',
         amount REAL DEFAULT 0,
         added_by TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS login_attempts (
+        ip TEXT NOT NULL,
+        employee_id INTEGER,
+        target TEXT DEFAULT 'login',
+        attempts INTEGER DEFAULT 0,
+        lock_until REAL DEFAULT 0,
+        PRIMARY KEY (ip, employee_id, target)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS discount_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee TEXT,
+        employee_id INTEGER,
+        order_id INTEGER,
+        table_num TEXT,
+        subtotal REAL DEFAULT 0,
+        tax REAL DEFAULT 0,
+        discount REAL DEFAULT 0,
+        limit_pct REAL DEFAULT 0,
+        date TEXT DEFAULT (datetime('now','localtime'))
     )''')
     cols_t = [r[1] for r in c.execute("PRAGMA table_info(tables)")]
     if "pos_x" not in cols_t:
@@ -405,6 +771,114 @@ def init_db():
         c.execute("ALTER TABLE tables ADD COLUMN capacity INTEGER DEFAULT 4")
     if "shape" not in cols_t:
         c.execute("ALTER TABLE tables ADD COLUMN shape TEXT DEFAULT 'round'")
+    c.execute('''CREATE TABLE IF NOT EXISTS credit_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        phone TEXT,
+        order_id INTEGER,
+        table_num INTEGER,
+        total REAL DEFAULT 0,
+        paid REAL DEFAULT 0,
+        status TEXT DEFAULT 'open',
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS credit_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ledger_id INTEGER NOT NULL,
+        amount REAL DEFAULT 0,
+        method TEXT DEFAULT 'نقدي',
+        employee TEXT,
+        date TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+    cols_cl = [r[1] for r in c.execute("PRAGMA table_info(credit_ledger)")]
+    if "due_date" not in cols_cl:
+        c.execute("ALTER TABLE credit_ledger ADD COLUMN due_date TEXT")
+    if "table_id" not in cols_cl:
+        c.execute("ALTER TABLE credit_ledger ADD COLUMN table_id INTEGER")
+    if "table_section" not in cols_cl:
+        c.execute("ALTER TABLE credit_ledger ADD COLUMN table_section TEXT")
+    # backfill: سجّل الطلبات الآجلة القديمة المدفوعة/الجزئية في credit_ledger إذا لم تُسجل بعد
+    c.execute("SELECT id, table_num, table_section, total, paid, credit_name, date FROM orders "
+              "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
+    for ro in c.fetchall():
+        cname = (ro["credit_name"] or "").strip() or "عميل آجل"
+        closed_paid = min(ro["paid"] or 0, ro["total"] or 0)  # لا دين سالب أبداً
+        due = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        c.execute("INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  (cname, ro["id"], None, ro["table_num"], ro["table_section"] if "table_section" in ro.keys() else None, ro["total"], closed_paid, "open", ro["date"] or _now_sql(), due))
+        lid = c.lastrowid
+        if closed_paid > 0:
+            c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
+                      "VALUES (?,?,?,?,?)", (lid, closed_paid, "آجل", "مدير", ro["date"] or _now_sql()))
+    # تنظيف الدفع الزائد القديم: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)
+    c.execute("UPDATE credit_ledger SET paid=total WHERE paid > total")
+    c.execute("UPDATE credit_payments SET amount=(SELECT total FROM credit_ledger WHERE credit_ledger.id=credit_payments.ledger_id) "
+              "WHERE ledger_id IN (SELECT id FROM credit_ledger WHERE paid >= total AND amount > (SELECT total FROM credit_ledger WHERE credit_ledger.id=credit_payments.ledger_id))")
+    c.execute('''CREATE TABLE IF NOT EXISTS inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_name TEXT NOT NULL,
+        quantity REAL DEFAULT 0,
+        unit TEXT DEFAULT 'piece',
+        min_stock REAL DEFAULT 0,
+        cost REAL DEFAULT 0
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS menu_inventory (
+        menu_id INTEGER NOT NULL,
+        inventory_id INTEGER NOT NULL,
+        qty_per INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (menu_id, inventory_id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS modifier_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        required INTEGER DEFAULT 0,
+        max_select INTEGER DEFAULT 1,
+        sort_order INTEGER DEFAULT 0
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS modifiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        price_add REAL DEFAULT 0,
+        active INTEGER DEFAULT 1
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS menu_modifiers (
+        menu_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        PRIMARY KEY (menu_id, group_id)
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS supplier_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        supplier_name TEXT NOT NULL,
+        phone TEXT,
+        description TEXT DEFAULT '',
+        total REAL DEFAULT 0,
+        paid REAL DEFAULT 0,
+        status TEXT DEFAULT 'open',
+        due_date TEXT,
+        created_at TEXT DEFAULT (datetime('now','localtime')),
+        updated_at TEXT
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS supplier_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ledger_id INTEGER NOT NULL,
+        amount REAL DEFAULT 0,
+        method TEXT DEFAULT 'نقدي',
+        employee TEXT,
+        date TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS credit_reminders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ledger_id INTEGER NOT NULL,
+        method TEXT DEFAULT 'whatsapp',
+        message TEXT DEFAULT '',
+        sent_by TEXT DEFAULT '',
+        status TEXT DEFAULT 'sent',
+        date TEXT DEFAULT (datetime('now','localtime'))
+    )''')
+    _ensure_schema(conn, c, log=False)
     conn.commit()
     conn.close()
 
@@ -453,9 +927,9 @@ def set_setting(key, value):
 
 def get_tax_rate():
     try:
-        return float(get_setting("tax_rate", "0.15"))
+        return float(get_setting("tax_rate", "0.03"))
     except (TypeError, ValueError):
-        return 0.15
+        return 0.03
 
 
 def require_manager():
@@ -465,6 +939,113 @@ def require_manager():
     if u["role"] != "manager":
         return None, "متاح للمدير فقط", 403
     return u, None, None
+
+
+# ===== قفل محاولات الدخول (rate limit) =====
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCK_MINUTES = 15
+
+
+def _client_ip():
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _login_lock_state(emp_id, target="login"):
+    """راجع حالة القفل: (عدد المحاولات، ثواني البقاء مقفلاً إن وُجد)."""
+    ip = _client_ip()
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        row = c.execute(
+            "SELECT attempts, lock_until FROM login_attempts WHERE ip=? AND employee_id=? AND target=?",
+            (ip, emp_id, target),
+        ).fetchone()
+        conn.close()
+    except Exception:
+        return 0, 0
+    if not row:
+        return 0, 0
+    attempts, lock_until = row[0], row[1]
+    if lock_until and lock_until > time.time():
+        return attempts, int(lock_until - time.time())
+    return attempts, 0
+
+
+def _register_login_fail(emp_id, target="login"):
+    ip = _client_ip()
+    now = time.time()
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        row = c.execute(
+            "SELECT attempts, lock_until FROM login_attempts WHERE ip=? AND employee_id=? AND target=?",
+            (ip, emp_id, target),
+        ).fetchone()
+        if row:
+            attempts = row[0] + 1
+            lock_until = row[1] if (row[1] and row[1] > now) else 0
+            if attempts >= MAX_LOGIN_ATTEMPTS:
+                lock_until = now + LOGIN_LOCK_MINUTES * 60
+                attempts = 0
+            c.execute(
+                "UPDATE login_attempts SET attempts=?, lock_until=? WHERE ip=? AND employee_id=? AND target=?",
+                (attempts, lock_until, ip, emp_id, target),
+            )
+        else:
+            c.execute(
+                "INSERT INTO login_attempts (ip, employee_id, target, attempts, lock_until) VALUES (?,?,?,?,?)",
+                (ip, emp_id, target, 1, 0),
+            )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _reset_login_fail(emp_id, target="login"):
+    ip = _client_ip()
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            "DELETE FROM login_attempts WHERE ip=? AND employee_id=? AND target=?",
+            (ip, emp_id, target),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _employee_exists(emp_id):
+    try:
+        conn = get_db()
+        row = conn.execute("SELECT 1 FROM employees WHERE id=?", (emp_id,)).fetchone()
+        conn.close()
+        return bool(row)
+    except Exception:
+        return False
+
+
+# مقياس بسيط في الذاكرة لمنع الكشط الآلي للقوائم العامة
+_PUBLIC_THROTTLE = {}
+_PUBLIC_THROTTLE_LIMIT = 30
+_PUBLIC_THROTTLE_WINDOW = 60.0
+
+
+def _throttled(key, limit=_PUBLIC_THROTTLE_LIMIT, window=_PUBLIC_THROTTLE_WINDOW):
+    now = time.time()
+    ts_list = _PUBLIC_THROTTLE.get(key, [])
+    ts_list = [t for t in ts_list if now - t < window]
+    if len(ts_list) >= limit:
+        _PUBLIC_THROTTLE[key] = ts_list
+        return True
+    ts_list.append(now)
+    _PUBLIC_THROTTLE[key] = ts_list
+    return False
 
 
 def audit(action, details=""):
@@ -617,6 +1198,27 @@ def api_menu_delete(mid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/menu/reset-default", methods=["POST"])
+def api_menu_reset_default():
+    """استبدال القائمة الحالية بقائمة مؤقتة جاهزة (يمكن تعديلها لاحقاً)."""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    c = conn.cursor()
+    ids = [r["id"] for r in c.execute("SELECT id FROM menu_items").fetchall()]
+    if ids:
+        c.execute("UPDATE menu_items SET active=0 WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+    for it in MENU:
+        c.execute("INSERT INTO menu_items (emoji, name, category, price, active) VALUES (?,?,?,?,1)",
+                  (it["emoji"], it["name"], it["category"], it["price"]))
+    conn.commit()
+    conn.close()
+    _invalidate_boot_cache()
+    audit("menu_reset", f"إعادة ضبط القائمة على الافتراضية ({len(MENU)} صنف)")
+    return jsonify({"ok": True, "count": len(MENU)})
+
+
 # ===== التعديلات (Modifiers) =====
 @app.route("/api/modifiers/<int:menu_id>")
 def api_modifiers(menu_id):
@@ -670,15 +1272,16 @@ def api_order_transfer():
         return jsonify({"error": "الطاولتان مطلوبتان"}), 400
     conn = get_db()
     c = conn.cursor()
-    order = c.execute("SELECT id FROM orders WHERE table_num=? AND status IN ('active','sent','ready')", (from_table,)).fetchone()
+    order = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (from_table,)).fetchone()
     if not order:
         conn.close()
         return jsonify({"error": "لا يوجد طلب نشط في هذه الطاولة"}), 404
-    existing = c.execute("SELECT id FROM orders WHERE table_num=? AND status IN ('active','sent','ready')", (to_table,)).fetchone()
+    existing = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (to_table,)).fetchone()
     if existing:
         conn.close()
         return jsonify({"error": "الطاولة الوجهة مشغولة بالفعل"}), 400
-    c.execute("UPDATE orders SET table_num=? WHERE id=?", (to_table, order['id']))
+    num, section = _table_ref(c, to_table)
+    c.execute("UPDATE orders SET table_id=?, table_num=?, table_section=? WHERE id=?", (to_table, num, section, order['id']))
     conn.commit()
     conn.close()
     audit("order_transfer", f"نقل طلب من طاولة {from_table} إلى {to_table}")
@@ -692,15 +1295,15 @@ def api_cancel_request():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
-    table_num = data.get("table_num")
+    table_id = data.get("table_id")
     order_id = data.get("order_id")
     reason = data.get("reason", "")
-    if not table_num:
+    if not table_id:
         return jsonify({"error": "اختر طاولة"}), 400
     conn = get_db()
     c = conn.cursor()
     if not order_id:
-        row = c.execute("SELECT id FROM orders WHERE table_num=? AND status IN ('active','sent','ready')", (table_num,)).fetchone()
+        row = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (table_id,)).fetchone()
         if row:
             order_id = row["id"]
     if not order_id:
@@ -710,12 +1313,13 @@ def api_cancel_request():
     if existing:
         conn.close()
         return jsonify({"error": "يوجد طلب إلغاء معلق بالفعل"}), 400
-    c.execute("INSERT INTO cancellation_requests (order_id, table_num, requested_by, reason, status) VALUES (?,?,?,?,'pending')",
-              (order_id, table_num, u["name"], reason))
+    num, section = _table_ref(c, table_id)
+    c.execute("INSERT INTO cancellation_requests (order_id, table_id, table_num, table_section, requested_by, reason, status) VALUES (?,?,?,?,?,?,'pending')",
+              (order_id, table_id, num, section, u["name"], reason))
     conn.commit()
     req_id = c.lastrowid
     conn.close()
-    audit("cancel_request", f"طلب إلغاء طلب #{order_id} (طاولة {table_num}) من {u['name']}")
+    audit("cancel_request", f"طلب إلغاء طلب #{order_id} (طاولة {num}) من {u['name']}")
     return jsonify({"ok": True, "request_id": req_id})
 
 
@@ -782,7 +1386,7 @@ def api_cancel_approve():
                   (row["order_id"], order["items"], order["subtotal"] or 0, order["tax"] or 0, order["discount"] or 0,
                    order["total"] or 0, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))
         rid = c.lastrowid
-        receipt_no = "SR-%d-%05d" % (datetime.now().year, rid)
+        receipt_no = "SR-%d-%05d" % (_now().year, rid)
         c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))
         refund_receipt = {
             "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],
@@ -791,7 +1395,7 @@ def api_cancel_approve():
             "discount": order["discount"] or 0, "total": order["total"] or 0,
             "refund_method": refund_method, "refund_ref": refund_ref,
             "reason": row["reason"] or "", "requested_by": row["requested_by"],
-            "approved_by": u["name"], "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "approved_by": u["name"], "date": _now_sql(),
             "payment_method": order["payment_method"] or "",
         }
     # إلغاء فاتورة آجل: أغلق رصيد الدفتر المرتبط بها
@@ -872,6 +1476,11 @@ def api_admin_delete_order(oid):
         c.execute("DELETE FROM credit_ledger WHERE order_id=?", (oid,))
     except Exception:
         pass
+    # احذف سجلات الخصم المرتبطة
+    try:
+        c.execute("DELETE FROM discount_log WHERE order_id=?", (oid,))
+    except Exception:
+        pass
     c.execute("DELETE FROM orders WHERE id=?", (oid,))
     conn.commit()
     audit("admin_delete_order", f"حذف نهائي لطلب #{oid} (طاولة {row['table_num']}) من {u['name']} - صيانة")
@@ -895,9 +1504,11 @@ def api_cancel_count():
 # ===== تسجيل الدخول =====
 @app.route("/api/employees")
 def api_employees():
+    if _throttled("employees:" + _client_ip()):
+        return jsonify({"error": "محاولات كثيرة، حاول لاحقاً"}), 429
     conn = get_db()
     c = conn.cursor()
-    rows = c.execute("SELECT id, name, role FROM employees WHERE active=1 ORDER BY id").fetchall()
+    rows = c.execute("SELECT id, name, role, phone, salary, hire_date, shift, department, status, discount_limit FROM employees WHERE active=1 ORDER BY id").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -917,9 +1528,24 @@ def api_employees_add():
         role = "cashier"
     if len(pin) < 4 or not pin.isdigit():
         return jsonify({"error": "PIN يجب أن يكون 4 أرقام على الأقل"}), 400
+    phone = str(data.get("phone", "")).strip()
+    try:
+        salary = float(data.get("salary") or 0)
+    except (TypeError, ValueError):
+        salary = 0
+    hire_date = str(data.get("hire_date", "")).strip()
+    shift = str(data.get("shift", "")).strip()
+    department = str(data.get("department", "")).strip()
+    try:
+        discount_limit = float(data.get("discount_limit", 20) or 20)
+    except (TypeError, ValueError):
+        discount_limit = 20
+    if discount_limit < 0:
+        discount_limit = 0
     conn = get_db()
     c = conn.cursor()
-    c.execute("INSERT INTO employees (name, pin, role) VALUES (?,?,?)", (name, hash_pin(pin), role))
+    c.execute("INSERT INTO employees (name, pin, role, phone, salary, hire_date, shift, department, discount_limit) VALUES (?,?,?,?,?,?,?,?,?)",
+              (name, hash_pin(pin), role, phone, salary, hire_date, shift, department, discount_limit))
     eid = c.lastrowid
     conn.commit()
     conn.close()
@@ -945,6 +1571,13 @@ def api_employees_update(eid):
     if role not in ("cashier", "manager"):
         role = row["role"]
     active = data.get("active", row["active"])
+    status = str(data.get("status", row["status"] or "active"))
+    if status not in ("active", "on_leave", "suspended"):
+        status = "active"
+    if status == "suspended":
+        active = 0
+    elif status == "active":
+        active = 1
     if active == 0 and int(row["id"]) == int(u["id"]):
         conn.close()
         return jsonify({"error": "لا يمكنك تعطيل حسابك الخاص"}), 400
@@ -954,15 +1587,29 @@ def api_employees_update(eid):
             conn.close()
             return jsonify({"error": "يجب بقاء مدير واحد نشط على الأقل"}), 400
     pin = str(data.get("pin", "")).strip()
+    phone = str(data.get("phone", row["phone"] or "")).strip()
+    try:
+        salary = float(data.get("salary", row["salary"] or 0))
+    except (TypeError, ValueError):
+        salary = row["salary"] or 0
+    hire_date = str(data.get("hire_date", row["hire_date"] or "")).strip()
+    shift = str(data.get("shift", row["shift"] or "")).strip()
+    department = str(data.get("department", row["department"] or "")).strip()
+    try:
+        discount_limit = float(data.get("discount_limit", row["discount_limit"] if "discount_limit" in row.keys() else 20) or 0)
+    except (TypeError, ValueError):
+        discount_limit = float(row["discount_limit"] if "discount_limit" in row.keys() else 20)
+    if discount_limit < 0:
+        discount_limit = 0
     if pin:
         if len(pin) < 4 or not pin.isdigit():
             conn.close()
             return jsonify({"error": "PIN يجب أن يكون 4 أرقام على الأقل"}), 400
-        c.execute("UPDATE employees SET name=?, role=?, active=?, pin=? WHERE id=?",
-                  (name, role, int(active), hash_pin(pin), eid))
+        c.execute("UPDATE employees SET name=?, role=?, active=?, status=?, phone=?, salary=?, hire_date=?, shift=?, department=?, discount_limit=?, pin=? WHERE id=?",
+                  (name, role, int(active), status, phone, salary, hire_date, shift, department, discount_limit, hash_pin(pin), eid))
     else:
-        c.execute("UPDATE employees SET name=?, role=?, active=? WHERE id=?",
-                  (name, role, int(active), eid))
+        c.execute("UPDATE employees SET name=?, role=?, active=?, status=?, phone=?, salary=?, hire_date=?, shift=?, department=?, discount_limit=? WHERE id=?",
+                  (name, role, int(active), status, phone, salary, hire_date, shift, department, discount_limit, eid))
     conn.commit()
     conn.close()
     _invalidate_boot_cache()
@@ -989,7 +1636,7 @@ def api_employees_delete(eid):
         if cnt == 0:
             conn.close()
             return jsonify({"error": "يجب بقاء مدير واحد نشط على الأقل"}), 400
-    c.execute("UPDATE employees SET active=0 WHERE id=?", (eid,))
+    c.execute("UPDATE employees SET active=0, status='suspended' WHERE id=?", (eid,))
     conn.commit()
     conn.close()
     _invalidate_boot_cache()
@@ -1008,6 +1655,7 @@ def api_settings():
         "currency": get_setting("currency", "ر.س"),
         "auto_backup": get_setting("auto_backup", "1") == "1",
         "backup_freq": get_setting("backup_freq", "daily"),
+        "day_close_remind_hour": int(get_setting("day_close_remind_hour", "21")),
     })
 
 
@@ -1035,13 +1683,21 @@ def api_settings_save():
         freq = str(data["backup_freq"])
         if freq in ("daily", "weekly"):
             set_setting("backup_freq", freq)
+    if "day_close_remind_hour" in data:
+        try:
+            hr = int(data["day_close_remind_hour"])
+            if 0 <= hr <= 23:
+                set_setting("day_close_remind_hour", str(hr))
+        except (TypeError, ValueError):
+            pass
     _invalidate_boot_cache()
     audit("settings", "تحديث الإعدادات")
     return jsonify({"ok": True, "tax_rate": get_tax_rate(),
                     "restaurant_name": get_setting("restaurant_name"),
                     "currency": get_setting("currency"),
                     "auto_backup": get_setting("auto_backup", "1") == "1",
-                    "backup_freq": get_setting("backup_freq", "daily")})
+                    "backup_freq": get_setting("backup_freq", "daily"),
+                    "day_close_remind_hour": int(get_setting("day_close_remind_hour", "21"))})
 
 
 _BOOT_TTL = 8
@@ -1088,15 +1744,16 @@ def _bootstrap_static(conn):
         elif kind == "cancelcount":
             cancel_count = int(v1)
     try:
-        tax_rate = float(raw_settings.get("tax_rate", 0.15))
+        tax_rate = float(raw_settings.get("tax_rate", 0.03))
     except (TypeError, ValueError):
-        tax_rate = 0.15
+        tax_rate = 0.03
     settings = {
         "restaurant_name": raw_settings.get("restaurant_name", "مطعم الذوق الرفيع"),
         "tax_rate": tax_rate,
         "currency": raw_settings.get("currency", "ر.س"),
         "auto_backup": raw_settings.get("auto_backup", "1") == "1",
         "backup_freq": raw_settings.get("backup_freq", "daily"),
+        "day_close_remind_hour": int(raw_settings.get("day_close_remind_hour", "21")),
     }
     return (settings, menu, catorder, employees, low_stock, cancel_count)
 
@@ -1117,8 +1774,8 @@ def api_bootstrap():
 
         tabs = c.execute(
             "SELECT t.id, t.num, t.section, t.pos_x, t.pos_y, t.capacity, t.shape, "
-            "(SELECT COUNT(*) FROM orders o WHERE o.table_num = t.num AND o.status IN ('active','sent','ready')) AS active_cnt "
-            "FROM tables t ORDER BY t.num").fetchall()
+            "(SELECT COUNT(*) FROM orders o WHERE o.table_id = t.id AND o.status IN ('active','sent','ready')) AS active_cnt "
+            "FROM tables t ORDER BY t.section, t.num").fetchall()
         tables = [{"id": t["id"], "num": t["num"], "section": t["section"],
                    "pos_x": t["pos_x"], "pos_y": t["pos_y"],
                    "capacity": t["capacity"], "shape": t["shape"],
@@ -1239,7 +1896,7 @@ def api_promo_verify():
     if row["max_uses"] > 0 and row["used_count"] >= row["max_uses"]:
         conn.close()
         return jsonify({"error": "تم استخدام هذا الكود بالفعل"}), 400
-    if row["expires_at"] and row["expires_at"] < datetime.now().strftime("%Y-%m-%d"):
+    if row["expires_at"] and row["expires_at"] < _now().strftime("%Y-%m-%d"):
         conn.close()
         return jsonify({"error": "انتهت صلاحية الكود"}), 400
     if order_total < row["min_order"]:
@@ -1405,7 +2062,7 @@ def api_credit_list():
     status = request.args.get("status") or ""
     conn = get_db()
     rows = []
-    sql = "SELECT id, customer_name, order_id, table_num, total, paid, status, created_at FROM credit_ledger WHERE 1=1"
+    sql = "SELECT id, customer_name, order_id, table_num, table_section, total, paid, status, created_at FROM credit_ledger WHERE 1=1"
     params = []
     if status in ("open", "settled"):
         sql += " AND status=?"
@@ -1420,7 +2077,7 @@ def api_credit_list():
         rows.append(d)
     # فواتير الآجل المسدّدة بالكامل غير المقيّدة في الدفتر: تُعرض أيضاً مع اسم الدائن
     if status != "open":
-        osql = ("SELECT id, credit_name, table_num, total, paid, date FROM orders "
+        osql = ("SELECT id, credit_name, table_num, table_section, total, paid, date FROM orders "
                 "WHERE payment_method='آجل' AND id NOT IN "
                 "(SELECT DISTINCT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
         oparams = []
@@ -1432,6 +2089,7 @@ def api_credit_list():
             rows.append({
                 "id": r["id"], "customer_name": r["credit_name"] or "",
                 "order_id": r["id"], "table_num": r["table_num"],
+                "table_section": r["table_section"] if "table_section" in r.keys() else None,
                 "total": r["total"] or 0, "paid": r["paid"] or 0,
                 "status": "settled", "created_at": r["date"], "src": "order",
             })
@@ -1464,7 +2122,7 @@ def api_credit_summary():
         settled += conn.execute(
             "SELECT COUNT(*) FROM orders WHERE payment_method='آجل' AND id NOT IN "
             "(SELECT DISTINCT order_id FROM credit_ledger WHERE order_id IS NOT NULL)").fetchone()[0]
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = _now().strftime("%Y-%m-%d")
         today_collected = conn.execute(
             "SELECT COALESCE(SUM(amount),0) FROM credit_payments WHERE date(date) = ?", (today,)).fetchone()[0]
         today_opened = conn.execute(
@@ -1514,6 +2172,121 @@ def api_credit_settle():
     return jsonify({"ok": True, "remaining": remaining, "status": status})
 
 
+# ===== ذمم المدينة (المورّدين) =====
+@app.route("/api/supplier/list")
+def api_supplier_list():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    q = (request.args.get("q") or "").strip()
+    status = request.args.get("status") or ""
+    conn = get_db()
+    sql = "SELECT * FROM supplier_ledger WHERE 1=1"
+    params = []
+    if status in ("open", "settled"):
+        sql += " AND status=?"
+        params.append(status)
+    if q:
+        sql += " AND supplier_name LIKE ?"
+        params.append(f"%{q}%")
+    sql += " ORDER BY id DESC"
+    rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    conn.close()
+    return jsonify(rows)
+
+
+@app.route("/api/supplier/summary")
+def api_supplier_summary():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    total_due = conn.execute("SELECT COALESCE(SUM(total),0) FROM supplier_ledger WHERE status='open'").fetchone()[0]
+    total_paid = conn.execute("SELECT COALESCE(SUM(paid),0) FROM supplier_ledger WHERE status='open'").fetchone()[0]
+    open_count = conn.execute("SELECT COUNT(*) FROM supplier_ledger WHERE status='open'").fetchone()[0]
+    settled_count = conn.execute("SELECT COUNT(*) FROM supplier_ledger WHERE status='settled'").fetchone()[0]
+    today = _now().strftime("%Y-%m-%d")
+    today_paid = conn.execute("SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE date(date)=?", (today,)).fetchone()[0]
+    conn.close()
+    return jsonify({"total_due": round(total_due,2), "total_paid": round(total_paid,2),
+                    "remaining": round(total_due - total_paid,2), "open_count": open_count,
+                    "settled_count": settled_count, "today_paid": round(today_paid,2)})
+
+
+@app.route("/api/supplier/add", methods=["POST"])
+def api_supplier_add():
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    data = request.json or {}
+    name = (data.get("supplier_name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم المورد مطلوب"}), 400
+    total = _amount(data, "total", 0)
+    paid = _amount(data, "paid", 0)
+    phone = (data.get("phone") or "").strip()
+    description = (data.get("description") or "").strip()
+    due_date = (data.get("due_date") or "").strip() or None
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("INSERT INTO supplier_ledger (supplier_name, phone, description, total, paid, status, due_date, created_at) "
+              "VALUES (?,?,?,?,?,?,?,?, datetime('now','localtime'))",
+              (name, phone, description, total, paid, "open" if total > paid else "settled", due_date))
+    lid = c.lastrowid
+    if paid > 0:
+        c.execute("INSERT INTO supplier_payments (ledger_id, amount, method, employee, date) "
+                  "VALUES (?,?,?,?, datetime('now','localtime'))",
+                  (lid, paid, data.get("method") or "نقدي", u["name"]))
+    conn.commit()
+    conn.close()
+    audit("supplier_open", f"فتح رصيد مورد {name} - {total:.2f}")
+    return jsonify({"ok": True, "id": lid})
+
+
+@app.route("/api/supplier/<int:lid>/pay", methods=["POST"])
+def api_supplier_pay(lid):
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    data = request.json or {}
+    amount = _amount(data, "amount", 0)
+    method = str(data.get("method") or "نقدي")
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM supplier_ledger WHERE id=? AND status='open'", (lid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "الرصيد غير موجود أو مقفل"}), 404
+    if amount <= 0:
+        conn.close()
+        return jsonify({"error": "مبلغ غير صالح"}), 400
+    new_paid = round(row["paid"] + amount, 2)
+    if new_paid > row["total"]:
+        new_paid = row["total"]
+    remaining = round(row["total"] - new_paid, 2)
+    status = "settled" if remaining <= 0 else "open"
+    c.execute("UPDATE supplier_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
+              (new_paid, status, lid))
+    c.execute("INSERT INTO supplier_payments (ledger_id, amount, method, employee, date) "
+              "VALUES (?,?,?,?, datetime('now','localtime'))",
+              (lid, amount, method, u["name"]))
+    conn.commit()
+    conn.close()
+    audit("supplier_pay", f"دفع لمورد #{lid} بمبلغ {amount:.2f}")
+    return jsonify({"ok": True, "remaining": remaining, "status": status})
+
+
+@app.route("/api/supplier/<int:lid>/payments")
+def api_supplier_payments(lid):
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM supplier_payments WHERE ledger_id=? ORDER BY id ASC", (lid,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 # ===== المصروفات =====
 @app.route("/api/expenses")
 def api_expenses():
@@ -1554,7 +2327,7 @@ def api_expenses_add():
         return jsonify({"error": "وصف المصروف مطلوب"}), 400
     if amount <= 0:
         return jsonify({"error": "مبلغ غير صالح"}), 400
-    exp_date = str(data.get("date") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    exp_date = str(data.get("date") or "").strip() or _now_sql()
     conn = get_db()
     c = conn.cursor()
     c.execute("INSERT INTO expenses (date, category, description, amount, added_by) VALUES (?,?,?,?,?)",
@@ -1681,23 +2454,24 @@ def api_reservation_create():
     data = request.json or {}
     customer_name = str(data.get("customer_name", "")).strip()
     phone = str(data.get("phone", "")).strip()
-    table_num = int(data.get("table_num", 0))
+    table_id = data.get("table_id")
     date = str(data.get("date", "")).strip()
     time = str(data.get("time", "")).strip()
     guests = int(data.get("guests", 1))
     notes = str(data.get("notes", "")).strip()
-    if not customer_name or not date or not time or not table_num:
+    if not customer_name or not date or not time or not table_id:
         return jsonify({"error": "البيانات ناقصة"}), 400
     conn = get_db()
-    conflict = conn.execute("SELECT id FROM reservations WHERE table_num=? AND date=? AND time=? AND status != 'cancelled'", (table_num, date, time)).fetchone()
+    conflict = conn.execute("SELECT id FROM reservations WHERE table_id=? AND date=? AND time=? AND status != 'cancelled'", (table_id, date, time)).fetchone()
     if conflict:
         conn.close()
         return jsonify({"error": "الطاولة محجوزة في هذا الوقت"}), 400
-    conn.execute("INSERT INTO reservations (customer_name, phone, table_num, date, time, guests, notes, created_by) VALUES (?,?,?,?,?,?,?,?)",
-                 (customer_name, phone, table_num, date, time, guests, notes, u["id"]))
+    num, section = _table_ref(conn.cursor(), table_id)
+    conn.execute("INSERT INTO reservations (customer_name, phone, table_id, table_num, table_section, date, time, guests, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                 (customer_name, phone, table_id, num, section, date, time, guests, notes, u["id"]))
     conn.commit()
     conn.close()
-    audit("reservation_create", f"حجز طاولة {table_num}: {customer_name}")
+    audit("reservation_create", f"حجز طاولة {num} ({section}): {customer_name}")
     return jsonify({"ok": True})
 
 
@@ -1723,14 +2497,28 @@ def api_login():
     data = request.json or {}
     emp_id = data.get("employee_id")
     pin = data.get("pin", "")
+    try:
+        emp_id_int = int(emp_id)
+    except (TypeError, ValueError):
+        emp_id_int = 0
+    attempts, lock_left = _login_lock_state(emp_id_int)
+    if lock_left > 0:
+        return jsonify({"error": f"تم قفل الدخول مؤقتاً، حاول بعد {lock_left} ثانية"}), 429
     conn = get_db()
     c = conn.cursor()
-    row = c.execute("SELECT id, name, role, pin FROM employees WHERE id=? AND active=1", (emp_id,)).fetchone()
+    row = c.execute("SELECT id, name, role, pin, discount_limit FROM employees WHERE id=? AND active=1 AND status='active'", (emp_id,)).fetchone()
     conn.close()
+    if not row and _employee_exists(emp_id):
+        _register_login_fail(emp_id_int)
+        return jsonify({"error": "الحساب غير نشط حالياً"}), 403
     if row and verify_pin(pin, row["pin"]):
-        session["user"] = {"id": row["id"], "name": row["name"], "role": row["role"]}
+        _reset_login_fail(emp_id_int)
+        session.permanent = True
+        session["user"] = {"id": row["id"], "name": row["name"], "role": row["role"],
+                           "discount_limit": float(row["discount_limit"] or 20)}
         audit("login", f"تسجيل دخول: {row['name']}")
         return jsonify({"ok": True, "user": session["user"]})
+    _register_login_fail(emp_id_int)
     return jsonify({"error": "PIN غير صحيح"}), 401
 
 
@@ -1752,13 +2540,18 @@ def api_me():
 @app.route("/api/manager/verify", methods=["POST"])
 def api_manager_verify():
     pin = (request.json or {}).get("pin", "")
+    attempts, lock_left = _login_lock_state(0, target="manager")
+    if lock_left > 0:
+        return jsonify({"error": f"تم قفل التحقق مؤقتاً، حاول بعد {lock_left} ثانية"}), 429
     conn = get_db()
     c = conn.cursor()
     managers = c.execute("SELECT pin FROM employees WHERE active=1 AND role='manager'").fetchall()
     conn.close()
     for m in managers:
         if verify_pin(pin, m["pin"]):
+            _reset_login_fail(0, target="manager")
             return jsonify({"ok": True})
+    _register_login_fail(0, target="manager")
     return jsonify({"error": "PIN المدير غير صحيح"}), 403
 
 
@@ -1789,7 +2582,7 @@ def api_audit():
 
 # ===== النسخ الاحتياطي =====
 def _stamp():
-    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    return _now().strftime("%Y-%m-%d_%H-%M-%S")
 
 
 def _dump_remote_to_file(dst_path):
@@ -1837,6 +2630,129 @@ def make_backup(prefix="backup"):
     return dest
 
 
+# ===== النسخ الاحتياطي إلى Vercel Blob (للإنتاج على السحابة) =====
+_BLOB_BASE = "https://blob.vercel-storage.com"
+
+
+def _blob_token():
+    return (os.environ.get("BLOB_READ_WRITE_TOKEN", "").strip() or "").strip('"')
+
+
+def _blob_headers(extra=None):
+    h = {
+        "authorization": f"Bearer {_blob_token()}",
+        "x-api-version": "10",
+    }
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _blob_make_backup(prefix="backup"):
+    if not _blob_token():
+        return None
+    tmp = os.path.join(tempfile.gettempdir(), f"{prefix}_{_stamp()}.db")
+    if CLOUD_DB:
+        _dump_remote_to_file(tmp)
+    else:
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+    try:
+        with open(tmp, "rb") as f:
+            data = f.read()
+        try:
+            import requests
+            pathname = f"backups/{os.path.basename(tmp)}"
+            r = requests.put(
+                f"{_BLOB_BASE}/?pathname={pathname}",
+                data=data,
+                headers=_blob_headers({
+                    "x-content-type": "application/octet-stream",
+                    "x-vercel-blob-access": "private",
+                    "x-cache-control-max-age": "0",
+                    "x-add-random-suffix": "0",
+                }),
+                timeout=30,
+            )
+            if r.status_code != 200:
+                return None
+            return os.path.basename(tmp)
+        except Exception:
+            return None
+    finally:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+
+
+def _blob_list():
+    if not _blob_token():
+        return []
+    try:
+        import requests
+        r = requests.get(f"{_BLOB_BASE}/", headers=_blob_headers(), params={"limit": "1000"}, timeout=20)
+        if r.status_code != 200:
+            return []
+        blobs = r.json().get("blobs", [])
+    except Exception:
+        return []
+    items = []
+    for b in blobs:
+        pathname = b.get("pathname", "") or ""
+        name = os.path.basename(pathname)
+        if pathname.startswith("backups/") and name.endswith(".db"):
+            items.append({
+                "name": name,
+                "size": b.get("size", 0),
+                "date": b.get("uploadedAt", ""),
+                "url": b.get("url", ""),
+            })
+    items.sort(key=lambda x: x["name"], reverse=True)
+    return items
+
+
+def _blob_download(name, dst):
+    if not _blob_token():
+        return False
+    for b in _blob_list():
+        if b["name"] == name:
+            try:
+                import requests
+                r = requests.get(b["url"], headers=_blob_headers(), timeout=30)
+                if r.status_code != 200:
+                    return False
+                with open(dst, "wb") as f:
+                    f.write(r.content)
+                return True
+            except Exception:
+                return False
+    return False
+
+
+def _blob_cleanup(keep=40):
+    if not _blob_token():
+        return
+    old = _blob_list()[keep:]
+    if not old:
+        return
+    try:
+        import requests
+        r = requests.post(
+            f"{_BLOB_BASE}/delete",
+            headers=_blob_headers({"content-type": "application/json"}),
+            json={"urls": [b["url"] for b in old]},
+            timeout=30,
+        )
+    except Exception:
+        pass
+
+
 def _cleanup_old_backups(keep=40):
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -1870,8 +2786,8 @@ def backup_scheduler():
             freq = get_setting("backup_freq", "daily")
             schedule_key = "scheduled_daily" if freq == "daily" else "scheduled_weekly"
             last = get_setting(schedule_key, "")
-            today = datetime.now().strftime("%Y-%m-%d")
-            week = datetime.now().strftime("%G-W%V")
+            today = _now().strftime("%Y-%m-%d")
+            week = _now().strftime("%G-W%V")
             cut = today if freq == "daily" else (week if freq == "weekly" else today)
             if last == cut:
                 continue
@@ -1941,16 +2857,25 @@ def api_backup_list():
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
+    if _blob_token():
+        return jsonify({"backups": _blob_list()})
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
     except Exception:
         pass
     items = []
-    for fn in sorted(os.listdir(BACKUP_DIR), reverse=True):
+    try:
+        names = sorted(os.listdir(BACKUP_DIR), reverse=True)
+    except Exception:
+        names = []
+    for fn in names:
         if fn.endswith(".db"):
             p = os.path.join(BACKUP_DIR, fn)
-            st = os.stat(p)
-            items.append({"name": fn, "size": st.st_size, "date": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")})
+            try:
+                st = os.stat(p)
+                items.append({"name": fn, "size": st.st_size, "date": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")})
+            except Exception:
+                pass
     return jsonify({"backups": items})
 
 
@@ -1962,6 +2887,17 @@ def api_backup_download_one(name):
     safe = _safe_backup_name(name)
     if not safe:
         return jsonify({"error": "اسم ملف غير صالح"}), 400
+    if _blob_token():
+        tmp = os.path.join(tempfile.gettempdir(), f"dl_{safe}")
+        if not _blob_download(safe, tmp):
+            return jsonify({"error": "النسخة غير موجودة"}), 404
+        try:
+            return send_file(tmp, as_attachment=True, download_name=safe, mimetype="application/octet-stream")
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
     p = os.path.join(BACKUP_DIR, safe)
     if not os.path.exists(p):
         return jsonify({"error": "النسخة غير موجودة"}), 404
@@ -1976,6 +2912,27 @@ def api_backup_restore_one(name):
     safe = _safe_backup_name(name)
     if not safe:
         return jsonify({"error": "اسم ملف غير صالح"}), 400
+    if _blob_token():
+        p = os.path.join(tempfile.gettempdir(), f"restore_{safe}")
+        if not _blob_download(safe, p):
+            return jsonify({"error": "النسخة غير موجودة"}), 404
+        try:
+            con = sqlite3.connect(p)
+            ok = con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            con.close()
+            if not ok:
+                return jsonify({"error": "النسخة تالفة"}), 400
+            make_backup("auto_before_restore")
+            _restore_from_file(p)
+            audit("restore_backup", f"استعادة نسخة: {safe}")
+            return jsonify({"ok": True, "message": "تمت الاستعادة بنجاح"})
+        except Exception:
+            return jsonify({"error": "تعذر فتح النسخة"}), 400
+        finally:
+            try:
+                os.remove(p)
+            except Exception:
+                pass
     p = os.path.join(BACKUP_DIR, safe)
     if not os.path.exists(p):
         return jsonify({"error": "النسخة غير موجودة"}), 404
@@ -1993,6 +2950,36 @@ def api_backup_restore_one(name):
     return jsonify({"ok": True, "message": "تمت الاستعادة بنجاح"})
 
 
+@app.route("/api/backup/cron", methods=["POST"])
+def api_backup_cron():
+    """يستدعيها Vercel Cron: ينشئ نسخة مجدولة على Blob (يومي/أسبوعي حسب الإعدادات)."""
+    if request.headers.get("x-vercel-cron") is None and not require_user():
+        return jsonify({"error": "غير مصرح"}), 403
+    try:
+        if get_setting("auto_backup", "1") != "1":
+            return jsonify({"ok": True, "skipped": "auto_backup off"})
+        freq = get_setting("backup_freq", "daily")
+        schedule_key = "scheduled_daily" if freq == "daily" else "scheduled_weekly"
+        last = get_setting(schedule_key, "")
+        now = _now()
+        today = now.strftime("%Y-%m-%d")
+        week = now.strftime("%G-W%V")
+        cut = today if freq == "daily" else (week if freq == "weekly" else today)
+        if last == cut:
+            return jsonify({"ok": True, "skipped": "already done"})
+        if _blob_token():
+            name = _blob_make_backup("sched" if freq == "daily" else "weekly")
+            _blob_cleanup()
+        else:
+            name = make_backup("sched" if freq == "daily" else "weekly")
+            _cleanup_old_backups()
+        set_setting(schedule_key, cut)
+        audit("scheduled_backup", f"نسخة مجدولة: {name}")
+        return jsonify({"ok": True, "backup": name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ===== إغلاق اليوم =====
 def _day_summary(c, day):
     rows = c.execute("SELECT * FROM orders WHERE status='completed' AND date(date)=?", (day,)).fetchall()
@@ -2001,7 +2988,7 @@ def _day_summary(c, day):
     by_method = {}
     opened = None
     for r in rows:
-        m = r["payment_method"] or "نقدي"
+        m = _canon_method(r["payment_method"] or "نقدي")
         bm = by_method.setdefault(m, {"total": 0.0, "count": 0})
         bm["total"] = round(bm["total"] + (r["total"] or 0), 2)
         bm["count"] += 1
@@ -2017,14 +3004,18 @@ def _day_summary(c, day):
 
 @app.route("/api/day/status")
 def api_day_status():
-    u, err, code = require_manager()
-    if err:
-        return jsonify({"error": err}), code
-    today = datetime.now().strftime("%Y-%m-%d")
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
     s = _day_summary(c, today)
     cl = c.execute("SELECT * FROM day_closures WHERE date=?", (today,)).fetchone()
+    try:
+        last_cl = c.execute("SELECT COALESCE(MAX(date), '') FROM day_closures").fetchone()[0]
+    except Exception:
+        last_cl = ""
     conn.close()
     closure = None
     if cl:
@@ -2036,21 +3027,21 @@ def api_day_status():
                    "order_count": cl["order_count"], "tax_total": cl["tax_total"], "by_method": by_method,
                    "expected_cash": cl["expected_cash"], "counted_cash": cl["counted_cash"],
                    "difference": cl["difference"], "closed_by": cl["closed_by"]}
-    return jsonify({"date": today, "closed": cl is not None, "closure": closure, **s})
+    return jsonify({"date": today, "closed": cl is not None, "closure": closure, "last_closed": last_cl, **s})
 
 
 @app.route("/api/day/close", methods=["POST"])
 def api_day_close():
-    u, err, code = require_manager()
-    if err:
-        return jsonify({"error": err}), code
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
     try:
         counted = round(float(data.get("counted_cash", 0)), 2)
     except (TypeError, ValueError):
         counted = 0
-    today = datetime.now().strftime("%Y-%m-%d")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    today = _now().strftime("%Y-%m-%d")
+    now = _now_sql()
     conn = get_db()
     c = conn.cursor()
     if c.execute("SELECT id FROM day_closures WHERE date=?", (today,)).fetchone():
@@ -2074,11 +3065,11 @@ def api_day_reopen():
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
-    c.execute("DELETE FROM day_closures WHERE date=?", (today,))
-    conn.commit()
+    s = _day_summary(c, today)
+    cl = c.execute("SELECT * FROM day_closures WHERE date=?", (today,)).fetchone()
     conn.close()
     audit("day_reopen", f"إعادة فتح اليوم {today}")
     return jsonify({"ok": True})
@@ -2140,27 +3131,52 @@ def api_backup_import():
     os.remove(tmp)
     audit("restore_backup", "استعادة نسخة احتياطية")
     return jsonify({"ok": True, "message": "تمت الاستعادة بنجاح"})
+def _sql_lit(v):
+    """تحويل قيمة Python إلى SQL literal مهرّب (للاستخدام داخل executescript)."""
+    if v is None:
+        return "NULL"
+    if isinstance(v, bool):
+        return "1" if v else "0"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    s = str(v).replace("'", "''")
+    return f"'{s}'"
+
+
 def _serialize_items(items):
     try:
         return json.dumps([{"name": str(i["name"]), "qty": int(i["qty"]),
                             "price": float(i["price"]), "emoji": str(i.get("emoji", "")),
-                            "menu_id": int(i.get("menu_id") or 0)} for i in items],
+                            "menu_id": int(i.get("menu_id") or 0),
+                            "open": bool(i.get("open", False)),
+                            "note": str(i.get("note", "") or "")} for i in items],
                           ensure_ascii=False)
     except Exception:
         return json.dumps([])
 
 
-def _open_order_id(c, table_num, order_id=None, new_order=False):
+def _open_order_id(c, table_id, order_id=None, new_order=False):
     if new_order:
         return None
     if order_id:
-        row = c.execute("SELECT id FROM orders WHERE id=? AND table_num=? AND status IN ('active','sent','ready')",
-                        (order_id, table_num)).fetchone()
+        row = c.execute("SELECT id FROM orders WHERE id=? AND table_id=? AND status IN ('active','sent','ready')",
+                        (order_id, table_id)).fetchone()
         if row:
             return row["id"]
-    row = c.execute("SELECT id FROM orders WHERE table_num=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
-                    (table_num,)).fetchone()
+    row = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
+                    (table_id,)).fetchone()
     return row["id"] if row else None
+
+
+def _table_ref(c, table_id):
+    """يُرجع (num, section) للطاولة عبر id، أو (None, None) إذا لم توجد."""
+    try:
+        row = c.execute("SELECT num, section FROM tables WHERE id=?", (int(table_id),)).fetchone()
+        if row:
+            return row["num"], row["section"]
+    except Exception:
+        pass
+    return None, None
 
 
 def _parse_items(raw):
@@ -2179,20 +3195,32 @@ def _amount(data, key, default=0):
 
 def _order_payload(c, oid):
     row = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if row is None:
+        # انقطاع اتصال مؤقت على Turso ("stream not found"): أعد الاستعلام باتصال جديد
+        try:
+            n = get_db()
+            row = n.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+            n.close()
+        except Exception:
+            row = None
+    if row is None:
+        return None
     items = _parse_items(row["items"])
     return {
         "ok": True, "order_id": oid, "total": row["total"], "subtotal": row["subtotal"],
         "tax": row["tax"], "discount": row["discount"] or 0, "paid": row["paid"] or 0,
         "change": round((row["paid"] or 0) - row["total"], 2),
         "payment_method": row["payment_method"], "table_num": row["table_num"],
+        "table_section": row["table_section"] if "table_section" in row.keys() else None,
         "guests": row["guests"] or 1, "employee": row["employee"],
         "credit_name": row["credit_name"] if "credit_name" in row.keys() else None,
         "transfer_ref": row["transfer_ref"] if "transfer_ref" in row.keys() else None,
         "transfer_name": row["transfer_name"] if "transfer_name" in row.keys() else None,
         "items": [{"name": i["name"], "qty": i["qty"], "price": float(i["price"]),
-                   "subtotal": round(float(i["price"]) * int(i["qty"]), 2), "emoji": i.get("emoji", "")}
+                   "subtotal": round(float(i["price"]) * int(i["qty"]), 2), "emoji": i.get("emoji", ""),
+                   "open": bool(i.get("open", False))}
                   for i in items],
-        "date": row["date"] or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "date": row["date"] or _now_sql(),
     }
 
 
@@ -2203,14 +3231,14 @@ def api_tables():
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
-    rows = c.execute("SELECT table_num, COUNT(*) AS cnt FROM orders WHERE status IN ('active','sent','ready') GROUP BY table_num").fetchall()
-    active = {r["table_num"]: r["cnt"] for r in rows}
-    tabs = c.execute("SELECT * FROM tables ORDER BY num").fetchall()
+    rows = c.execute("SELECT table_id, COUNT(*) AS cnt FROM orders WHERE table_id IS NOT NULL AND status IN ('active','sent','ready') GROUP BY table_id").fetchall()
+    active = {r["table_id"]: r["cnt"] for r in rows}
+    tabs = c.execute("SELECT * FROM tables ORDER BY section, num").fetchall()
     conn.close()
     return jsonify([{"id": t["id"], "num": t["num"], "section": t["section"],
                      "pos_x": t["pos_x"], "pos_y": t["pos_y"],
                      "capacity": t["capacity"], "shape": t["shape"],
-                     "active": t["num"] in active, "orders": active.get(t["num"], 0)} for t in tabs])
+                     "active": t["id"] in active, "orders": active.get(t["id"], 0)} for t in tabs])
 
 
 @app.route("/api/tables", methods=["POST"])
@@ -2283,6 +3311,22 @@ def api_tables_edit(tid):
         capacity = int(data["capacity"])
     if "shape" in data and data["shape"] in ("round", "square", "rectangle"):
         shape = data["shape"]
+    if num != row["num"]:
+        other = conn.execute("SELECT id FROM tables WHERE num=? AND id!=?", (num, tid)).fetchone()
+        if other:
+            tmp = -abs(tid) - 1000
+            conn.execute("UPDATE tables SET num=? WHERE id=?", (tmp, other["id"]))
+            conn.execute("UPDATE tables SET num=?, section=?, pos_x=?, pos_y=?, capacity=?, shape=? WHERE id=?",
+                         (num, section, pos_x, pos_y, capacity, shape, tid))
+            conn.commit()
+            try:
+                conn.execute("UPDATE tables SET num=? WHERE id=?", (row["num"], other["id"]))
+                conn.commit()
+            except DB_INTEGRITY:
+                pass
+            conn.close()
+            audit("tables", "تعديل طاولة رقم " + str(num))
+            return jsonify({"ok": True})
     try:
         conn.execute("UPDATE tables SET num=?, section=?, pos_x=?, pos_y=?, capacity=?, shape=? WHERE id=?",
                      (num, section, pos_x, pos_y, capacity, shape, tid))
@@ -2333,14 +3377,14 @@ def api_tables_positions():
     return jsonify({"ok": True})
 
 
-@app.route("/api/table_order/<int:tn>")
-def api_table_order(tn):
+@app.route("/api/table_order/<int:tid>")
+def api_table_order(tid):
     u = require_user()
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
-    oid = _open_order_id(c, tn)
+    oid = _open_order_id(c, tid)
     if not oid:
         conn.close()
         return jsonify({"order": None})
@@ -2357,30 +3401,31 @@ def api_order_save():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
-    table_num = data.get("table_num")
+    table_id = data.get("table_id")
     items = data.get("items", [])
     order_id = data.get("order_id")
-    if not table_num or not items:
+    if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     discount = _amount(data, "discount")
     guests = int(data.get("guests", 1) or 1)
     items_str = _serialize_items(items)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = _now_sql()
     conn = get_db()
     c = conn.cursor()
-    oid = _open_order_id(c, table_num, order_id, bool(data.get("new_order")))
+    num, section = _table_ref(c, table_id)
+    oid = _open_order_id(c, table_id, order_id, bool(data.get("new_order")))
     if oid:
-        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, employee=?, date=?, kitchen_status='sent' WHERE id=?",
-                  (items_str, discount, guests, now, u["name"], now, oid))
+        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, employee=?, date=?, kitchen_status='sent', table_num=?, table_section=? WHERE id=?",
+                  (items_str, discount, guests, now, u["name"], now, oid, num, section))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, sent_at, date, kitchen_status) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (table_num, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now,
+        c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, payment_method, employee, status, guests, sent_at, date, kitchen_status) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (num, section, table_id, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now,
                    now, "sent"))
         oid = c.lastrowid
     conn.commit()
     conn.close()
-    audit("save_order", f"حفظ طلب #{oid} - طاولة {table_num} - أصناف {len(items)}")
+    audit("save_order", f"حفظ طلب #{oid} - طاولة {num} - أصناف {len(items)}")
     return jsonify({"ok": True, "order_id": oid})
 
 
@@ -2390,29 +3435,30 @@ def api_order_send():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
-    table_num = data.get("table_num")
+    table_id = data.get("table_id")
     items = data.get("items", [])
     order_id = data.get("order_id")
-    if not table_num or not items:
+    if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     discount = _amount(data, "discount")
     guests = int(data.get("guests", 1) or 1)
     items_str = _serialize_items(items)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = _now_sql()
     conn = get_db()
     c = conn.cursor()
-    oid = _open_order_id(c, table_num, order_id, bool(data.get("new_order")))
+    num, section = _table_ref(c, table_id)
+    oid = _open_order_id(c, table_id, order_id, bool(data.get("new_order")))
     if oid:
-        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, date=?, employee=?, kitchen_status='sent' WHERE id=?",
-                  (items_str, discount, guests, now, now, u["name"], oid))
+        c.execute("UPDATE orders SET items=?, discount=?, guests=?, status='sent', sent_at=?, date=?, employee=?, kitchen_status='sent', table_num=?, table_section=? WHERE id=?",
+                  (items_str, discount, guests, now, now, u["name"], oid, num, section))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, payment_method, employee, status, guests, date, sent_at, kitchen_status) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (table_num, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now, now, "sent"))
+        c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, payment_method, employee, status, guests, date, sent_at, kitchen_status) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (num, section, table_id, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now, now, "sent"))
         oid = c.lastrowid
     conn.commit()
     conn.close()
-    audit("send_to_kitchen", f"إرسال طلب #{oid} للمطبخ - طاولة {table_num} - أصناف {len(items)}")
+    audit("send_to_kitchen", f"إرسال طلب #{oid} للمطبخ - طاولة {num} - أصناف {len(items)}")
     return jsonify({"ok": True, "order_id": oid})
 
 
@@ -2430,7 +3476,7 @@ def api_kitchen_orders():
     conn = get_db()
     c = conn.cursor()
     rows = c.execute(
-        "SELECT id, table_num, items, status, guests, employee, sent_at, date, paid, payment_method, kitchen_status "
+        "SELECT id, table_num, table_section, items, status, guests, employee, sent_at, date, paid, payment_method, kitchen_status "
         "FROM orders WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status IN ('sent','ready')) "
         "ORDER BY COALESCE(sent_at, date) ASC, id ASC").fetchall()
     conn.close()
@@ -2443,7 +3489,9 @@ def api_kitchen_orders():
         except Exception:
             pass
         orders.append({
-            "id": r["id"], "table_num": r["table_num"], "status": r["status"],
+            "id": r["id"], "table_num": r["table_num"],
+            "table_section": r["table_section"] if "table_section" in r.keys() else None,
+            "status": r["status"],
             "kitchen_status": r["kitchen_status"] if "kitchen_status" in r.keys() else "sent",
             "guests": r["guests"] or 1, "employee": r["employee"],
             "sent_at": sent, "sent_ts": sent_ts, "items": _parse_items(r["items"]),
@@ -2468,30 +3516,59 @@ def api_kitchen_ready(oid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/kitchen/clear", methods=["POST"])
+def api_kitchen_clear():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("UPDATE orders SET kitchen_status='ready' "
+              "WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status IN ('sent','ready'))")
+    cleared = c.rowcount
+    conn.commit()
+    conn.close()
+    audit("kitchen_clear", f"تنظيف شاشة المطبخ - {cleared} طلب")
+    return jsonify({"ok": True, "cleared": cleared})
+
+
 def _deduct_inventory(c, items):
     """خصم كميات المخزون تلقائياً عند بيع أصناف مرتبطة بمخزون."""
-    for it in items:
-        mid = int(it.get("menu_id") or 0)
-        qty_sold = int(it.get("qty") or 0)
-        if not mid or qty_sold <= 0:
-            continue
-        links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
-        for link in links:
-            consume = link["qty_per"] * qty_sold
-            c.execute("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id=?", (consume, link["inventory_id"]))
+    try:
+        for it in items:
+            mid = int(it.get("menu_id") or 0)
+            qty_sold = int(it.get("qty") or 0)
+            if not mid or qty_sold <= 0:
+                continue
+            links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
+            for link in links:
+                consume = link["qty_per"] * qty_sold
+                c.execute("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id=?", (consume, link["inventory_id"]))
+    except Exception as e:
+        print("DEDUCT INVENTORY ERR:", repr(e))
 
 
 def _restore_inventory(c, items):
     """إرجاع المخزون المُخصوم عند إلغاء طلب مدفوع."""
-    for it in items:
-        mid = int(it.get("menu_id") or 0)
-        qty_sold = int(it.get("qty") or 0)
-        if not mid or qty_sold <= 0:
-            continue
-        links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
-        for link in links:
-            restore = link["qty_per"] * qty_sold
-            c.execute("UPDATE inventory SET quantity = quantity + ? WHERE id=?", (restore, link["inventory_id"]))
+    try:
+        for it in items:
+            mid = int(it.get("menu_id") or 0)
+            qty_sold = int(it.get("qty") or 0)
+            if not mid or qty_sold <= 0:
+                continue
+            links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
+            for link in links:
+                restore = link["qty_per"] * qty_sold
+                c.execute("UPDATE inventory SET quantity = quantity + ? WHERE id=?", (restore, link["inventory_id"]))
+    except Exception as e:
+        print("RESTORE INVENTORY ERR:", repr(e))
+
+
+def _is_stream_error(e):
+    """خطأ اتصال عابر من Turso يستحق إعادة محاولة على اتصال جديد."""
+    msg = str(e)
+    return "stream not found" in msg or "connections limit" in msg or "limit exceeded" in msg \
+        or "1008" in msg or "try to reduce concurrency" in msg
 
 
 @app.route("/api/order/pay", methods=["POST"])
@@ -2500,10 +3577,22 @@ def api_order_pay():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
-    table_num = data.get("table_num")
+    for _attempt in range(3):
+        try:
+            return _do_pay(u, data)
+        except Exception as e:
+            if _is_stream_error(e) and _attempt < 2:
+                import time as _t
+                _t.sleep(0.8 * (_attempt + 1))
+                continue
+            return jsonify({"error": f"خطأ في حفظ الطلب: {e}"}), 500
+
+
+def _do_pay(u, data):
+    table_id = data.get("table_id")
     items = data.get("items", [])
     order_id = data.get("order_id")
-    if not table_num or not items:
+    if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     paid = _amount(data, "paid")
     discount = _amount(data, "discount")
@@ -2512,7 +3601,6 @@ def api_order_pay():
     credit_name = str(data.get("credit_name") or "").strip() or None
     transfer_ref = str(data.get("transfer_ref") or "").strip() or None
     transfer_name = str(data.get("transfer_name") or "").strip() or None
-    # التحويل البنكي يتطلب مرجعاً لتسوية كشف البنك
     if payment_method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
         return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
     subtotal = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
@@ -2520,53 +3608,141 @@ def api_order_pay():
     max_discount = round(subtotal + tax, 2)
     if discount > max_discount:
         discount = max_discount
+    emp_limit_pct = 100.0
+    manual_discount = discount
+    try:
+        manual_discount = round(float(data.get("manual_discount") or 0), 2)
+    except (TypeError, ValueError):
+        pass
+    if u.get("role") != "manager" and manual_discount > 0:
+        emp_limit_pct = float(u.get("discount_limit") or 20)
+        if "discount_limit" not in u:
+            try:
+                tmp = get_db()
+                rmax = tmp.execute("SELECT discount_limit FROM employees WHERE id=? AND active=1", (u["id"],)).fetchone()
+                tmp.close()
+                if rmax and rmax["discount_limit"] is not None:
+                    emp_limit_pct = float(rmax["discount_limit"] or 20)
+            except Exception:
+                pass
+        emp_limit_amt = round(max_discount * emp_limit_pct / 100.0, 2)
+        if manual_discount > emp_limit_amt:
+            return jsonify({"error": f"تجاوزت حد الخصم المسموح لك ({emp_limit_pct:.0f}% = {emp_limit_amt:.2f}). المدير فقط يمكنه خصم أكثر"}), 400
     total = round(subtotal + tax - discount, 2)
     if total < 0:
         total = 0
     if paid < total and payment_method != "آجل":
         return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
     items_str = _serialize_items(items)
+    now_str = _now_sql()
+    due_str = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    emp_name = _sql_lit(u["name"])
+    emp_id = _sql_lit(u["id"])
+
+    # ── Batch save: كل الكتابات في executescript واحد (رحلة HTTP واحدة) ──
+    # الخطوات: pre-query → INSERT/UPDATE orders → executescript لكل الباقي → payload
+    # المجموع: ~4-5 رحلات بدلاً من ~15
     conn = get_db()
     c = conn.cursor()
     _ensure_schema(conn, c)
     is_new = bool(data.get("new_order"))
-    oid = _open_order_id(c, table_num, order_id, is_new)
-    # الآجل الجزئي: سجّل الرصيد المتأخر في credit_ledger
-    credit_name = (credit_name or "").strip() or None
+    num, section = _table_ref(c, table_id)
+    oid = _open_order_id(c, table_id, order_id, is_new)
+
+    # 1) INSERT/UPDATE orders → oid
     if oid:
         c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
-                  "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=? WHERE id=?",
+                  "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=?, table_num=?, table_section=? WHERE id=?",
                   (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
-                   datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name, transfer_ref, transfer_name, oid))
+                   now_str, credit_name, transfer_ref, transfer_name, num, section, oid))
     else:
-        c.execute("INSERT INTO orders (table_num, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (table_num, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
-                   "completed", guests, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), credit_name, transfer_ref, transfer_name))
+        c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
+                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
+                   "completed", guests, now_str, credit_name, transfer_ref, transfer_name))
         oid = c.lastrowid
+
+    # 2) قراءة روابط المخزون مرة واحدة (رحلة HTTP واحدة بدلاً من loops)
+    menu_ids = []
+    for it in items:
+        mid = int(it.get("menu_id") or 0)
+        if mid and mid not in menu_ids:
+            menu_ids.append(mid)
+    inv_links = []
+    if menu_ids:
+        placeholders = ",".join("?" * len(menu_ids))
+        try:
+            inv_links = c.execute(
+                f"SELECT menu_id, inventory_id, qty_per FROM menu_inventory WHERE menu_id IN ({placeholders})",
+                menu_ids
+            ).fetchall()
+        except Exception:
+            inv_links = []
+
+    # 3) بناء السكربت المجمّع (كل الكتابات المتبقية في رحلة HTTP واحدة)
+    S = []
+    # 3a) إغلاق طلبات قديمة في نفس الطاولة (وضع التقسيم)
     if is_new:
-        # في وضع التقسيم يُنشأ طلب جديد لكل فاتورة؛ أغلق أي طلب مفتوح قديم
-        # على نفس الطاولة (قبل التقسيم) حتى لا يعود للأصناف عند إعادة اختيارها
-        c.execute("UPDATE orders SET status='closed', kitchen_status='ready' WHERE table_num=? AND status IN ('active','sent','ready') AND id != ?",
-                  (table_num, oid))
-    # نظام الآجل: إذا المدفوع أقل من الإجمالي (والطريقة آجل) سجّل رصيداً مفتوحاً
-    if payment_method == "آجل" and total > paid:
-        cname = (credit_name or "").strip() or "عميل آجل"
-        c.execute("INSERT INTO credit_ledger (customer_name, order_id, table_num, total, paid, status, created_at) "
-                  "VALUES (?,?,?,?,?, 'open', ?)",
-                  (cname, oid, table_num, total, paid, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        lid = c.lastrowid
-        if paid > 0:
-            c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-                      "VALUES (?,?,?,?, datetime('now','localtime'))",
-                      (lid, paid, "آجل", u["name"]))
-        audit("credit_open", f"فتح رصيد آجل {lid} للعميل {cname} - متبقي {round(total - paid, 2):.2f}")
-    # خصم المخزون تلقائياً عند البيع
-    _deduct_inventory(c, items)
-    conn.commit()
+        S.append(f"UPDATE orders SET status='closed', kitchen_status='ready' WHERE table_id={_sql_lit(int(table_id))} AND status IN ('active','sent','ready') AND id != {oid};")
+    # 3b) سجل الخصومات
+    if discount > 0:
+        S.append(
+            f"INSERT INTO discount_log (employee, employee_id, order_id, table_num, table_section, subtotal, tax, discount, limit_pct, date) "
+            f"VALUES ({emp_name},{emp_id},{oid},{_sql_lit(num)},{_sql_lit(section)},{subtotal},{tax},{discount},{emp_limit_pct},{_sql_lit(now_str)});"
+        )
+    # 3c) نظام الآجل: credit_ledger + credit_payments
+    if payment_method == "آجل":
+        cname = _sql_lit((credit_name or "").strip() or "عميل آجل")
+        ledger_paid = min(paid, total)
+        overpaid = paid > total
+        S.append(
+            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date) "
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)});"
+        )
+        if ledger_paid > 0:
+            S.append(
+                f"INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
+                f"VALUES (last_insert_rowid(),{ledger_paid},'آجل',{emp_name},{_sql_lit(now_str)});"
+            )
+        credit_cname = (credit_name or "").strip() or "عميل آجل"
+        audit_details = f"فتح رصيد آجل للعميل {credit_cname} - متبقي {round(total - ledger_paid, 2):.2f}"
+        S.append(
+            f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_open',{_sql_lit(audit_details)});"
+        )
+        if overpaid:
+            overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
+            S.append(
+                f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
+            )
+    # 3d) خصم المخزون تلقائياً عند البيع
+    for it in items:
+        mid = int(it.get("menu_id") or 0)
+        qty_sold = int(it.get("qty") or 0)
+        if not mid or qty_sold <= 0:
+            continue
+        for link in inv_links:
+            if link["menu_id"] == mid:
+                consume = link["qty_per"] * qty_sold
+                S.append(
+                    f"UPDATE inventory SET quantity = MAX(0, quantity - {_sql_lit(consume)}) WHERE id={_sql_lit(link['inventory_id'])};"
+                )
+    # 3e) سجل العملية في audit_log
+    place_details = f"دفع طلب #{oid} - طاولة {num} - {payment_method} - إجمالي {total:.2f}"
+    S.append(
+        f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
+    )
+
+    # تنفيذ السكربت المجمّع (رحلة HTTP واحدة عبر pipeline)
+    if S:
+        script = "\n".join(S)
+        c.executescript(script)
+
+    # 4) جلب بيانات الفاتورة النهائية (رحلة واحدة)
     payload = _order_payload(c, oid)
     conn.close()
-    audit("place_order", f"دفع طلب #{oid} - طاولة {table_num} - {payment_method} - إجمالي {total:.2f}")
+    if not payload:
+        print(f"ORDER SAVE LOST: oid={oid} table={num}")
+        raise RuntimeError("connection lost during save: stream not found")
     return jsonify(payload)
 
 
@@ -2593,14 +3769,14 @@ def api_reports_cashier_daily():
     u = require_user()
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
     my = c.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS tot FROM orders WHERE status='completed' AND employee=? AND date(date)=?",
                    (u["name"], today)).fetchone()
     all_today = c.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total), 0) AS tot FROM orders WHERE status='completed' AND date(date)=?",
                           (today,)).fetchone()
-    my_orders = c.execute("SELECT id, table_num, total, payment_method, date FROM orders WHERE status='completed' AND employee=? AND date(date)=? ORDER BY date",
+    my_orders = c.execute("SELECT id, table_num, table_section, total, payment_method, date FROM orders WHERE status='completed' AND employee=? AND date(date)=? ORDER BY date",
                           (u["name"], today)).fetchall()
     conn.close()
     return jsonify({
@@ -2608,6 +3784,37 @@ def api_reports_cashier_daily():
         "all_count": all_today["cnt"], "all_total": all_today["tot"],
         "my_orders": [dict(o) for o in my_orders],
     })
+
+
+@app.route("/api/reports/discounts")
+def api_reports_discounts():
+    """سجل الخصومات: كل خصم مع الموظف الذي أضافه (للمدير)"""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    from_d = (request.args.get("from") or "").strip()
+    to_d = (request.args.get("to") or "").strip()
+    employee = (request.args.get("employee") or "").strip()
+    conn = get_db()
+    c = conn.cursor()
+    _ensure_schema(conn, c)
+    where = "1=1"
+    params = []
+    if from_d:
+        where += " AND date(d.date) >= ?"
+        params.append(from_d)
+    if to_d:
+        where += " AND date(d.date) <= ?"
+        params.append(to_d)
+    if employee:
+        where += " AND d.employee = ?"
+        params.append(employee)
+    rows = conn.execute(
+        f"SELECT d.* FROM discount_log d WHERE {where} ORDER BY d.id DESC LIMIT 500", params).fetchall()
+    conn.close()
+    total = round(sum((r["discount"] or 0) for r in rows), 2)
+    count = len(rows)
+    return jsonify({"discounts": [dict(r) for r in rows], "total": total, "count": count})
 
 
 def _report_filtered(c, from_d, to_d, args):
@@ -2657,9 +3864,14 @@ def _report_filtered(c, from_d, to_d, args):
 
     section = (args.get("section") or "").strip()
     if section:
-        nums = [str(x[0]) for x in c.execute("SELECT num FROM tables WHERE section=?", (section,))]
-        if nums:
-            filtered = [r for r in filtered if str(r["table_num"] or "") in nums]
+        nums_all = set(str(x[0]) for x in c.execute("SELECT num FROM tables WHERE section=?", (section,)))
+        # الأوامر الجديدة تخزن القسم مباشرة؛ القديمة نطابقها عبر أرقام طاولات القسم
+        def _in_section(r):
+            s = r["table_section"] if "table_section" in r.keys() else None
+            if s:
+                return s == section
+            return str(r["table_num"] or "") in nums_all
+        filtered = [r for r in filtered if _in_section(r)]
     return filtered
 
 
@@ -2680,6 +3892,7 @@ def api_reports_orders():
             "id": r["id"],
             "date": r["date"] or "",
             "table_num": r["table_num"],
+            "table_section": r["table_section"] if "table_section" in r.keys() else None,
             "employee": r["employee"] or "",
             "payment_method": r["payment_method"] or "",
             "credit_name": r["credit_name"] if "credit_name" in r.keys() else None,
@@ -2693,6 +3906,21 @@ def api_reports_orders():
         })
     conn.close()
     return jsonify({"count": len(orders), "orders": orders})
+
+
+@app.route("/api/orders/<int:oid>")
+def api_order_get(oid):
+    """بيانات فاتورة واحدة كاملة (لإعادة الطباعة)."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    c = conn.cursor()
+    payload = _order_payload(c, oid)
+    conn.close()
+    if not payload:
+        return jsonify({"error": "الفاتورة غير موجودة"}), 404
+    return jsonify(payload)
 
 
 @app.route("/api/reports/advanced")
@@ -2725,7 +3953,7 @@ def api_reports_advanced():
         cost_map[mid] = existing + float(qp or 0) * float(inv.cost or 0)
     cogs = 0.0
     for r in rows:
-        method = r["payment_method"] or "نقدي"
+        method = _canon_method(r["payment_method"] or "نقدي")
         m = by_method.setdefault(method, {"total": 0.0, "count": 0})
         m["total"] = round(m["total"] + (r["total"] or 0), 2)
         m["count"] += 1
@@ -2825,7 +4053,32 @@ def api_reports_ar():
     to_d = (request.args.get("to") or "").strip()
     conn = get_db()
     c = conn.cursor()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = _now().strftime("%Y-%m-%d")
+
+    # backfill فوري: أي طلب آجل لم يُسجل بعد في credit_ledger يُضاف الآن (كله رصيد مفتوح)
+    try:
+        c.execute("UPDATE credit_ledger SET status='open' WHERE order_id IN (SELECT id FROM orders WHERE payment_method='آجل')")
+        c.execute("SELECT id, table_num, total, paid, credit_name, date FROM orders "
+                  "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
+        _backfilled = 0
+        for ro in c.fetchall():
+            cname = (ro["credit_name"] or "").strip() or "عميل آجل"
+            closed_paid = min(ro["paid"] or 0, ro["total"] or 0)  # لا دين سالب أبداً
+            due = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
+            c.execute("INSERT INTO credit_ledger (customer_name, order_id, table_num, total, paid, status, created_at, due_date) "
+                      "VALUES (?,?,?,?,?,?,?,?)",
+                      (cname, ro["id"], ro["table_num"], ro["total"], closed_paid, "open",
+                       ro["date"] or _now_sql(), due))
+            lid = c.lastrowid
+            if closed_paid > 0:
+                c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
+                          "VALUES (?,?,?,?,?)", (lid, closed_paid, "آجل", "مدير",
+                                                 ro["date"] or _now_sql()))
+            _backfilled += 1
+        if _backfilled:
+            conn.commit()
+    except Exception as e:
+        print("AR BACKFILL ERR:", repr(e))
 
     rows = c.execute("SELECT * FROM credit_ledger ORDER BY id DESC").fetchall()
     paymap = {}
@@ -2853,7 +4106,8 @@ def api_reports_ar():
         rec = dict(r)
         total = rec["total"] or 0
         paid = rec["paid"] or 0
-        due = round(total - paid, 2)
+        raw_due = round(total - paid, 2)
+        due = round(max(raw_due, 0), 2)  # لا يُظهر ديناً سالباً أبداً (حماية الدفع الزائد)
         is_open = rec["status"] == "open"
         summary["total_invoiced"] += total
         summary["total_paid"] += paid
@@ -2883,6 +4137,14 @@ def api_reports_ar():
                 aging["90_plus"][0] += 1; aging["90_plus"][1] += due
         rec["due"] = due
         rec["days_open"] = max(days, 0)
+        rec["due_date"] = rec.get("due_date") or ""
+        overdue_days = 0
+        if rec.get("due_date") and is_open:
+            try:
+                overdue_days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(rec["due_date"], "%Y-%m-%d")).days
+            except Exception:
+                overdue_days = 0
+        rec["overdue_days"] = max(overdue_days, 0)
         rec["payments"] = paymap.get(rec["id"], [])
         customers.append(rec)
 
@@ -2914,6 +4176,129 @@ def api_reports_ar():
         "period_collected": period_collected,
         "period_new": period_new,
     })
+
+
+# ===== إدارة المتاخرات =====
+@app.route("/api/credit/overdue")
+def api_credit_overdue():
+    """قائمة الحسابات المتأخرة (due_date pasado و status='open')"""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    today = _now().strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT *, (total - paid) as due FROM credit_ledger "
+        "WHERE status='open' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? "
+        "ORDER BY due_date ASC", (today,)).fetchall()
+    result = []
+    for r in rows:
+        rec = dict(r)
+        rec["due"] = round(max(rec.get("due") or 0, 0), 2)  # لا دين سالب أبداً
+        try:
+            rec["overdue_days"] = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(rec["due_date"], "%Y-%m-%d")).days
+        except Exception:
+            rec["overdue_days"] = 0
+        last_reminder = conn.execute(
+            "SELECT date FROM credit_reminders WHERE ledger_id=? ORDER BY id DESC LIMIT 1",
+            (rec["id"],)).fetchone()
+        rec["last_reminder"] = dict(last_reminder)["date"] if last_reminder else ""
+        result.append(rec)
+    conn.close()
+    return jsonify({"overdue": result, "count": len(result),
+                    "total_overdue": round(sum(r["due"] for r in result), 2)})
+
+
+@app.route("/api/credit/overdue/auto-update", methods=["POST"])
+def api_credit_auto_update_overdue():
+    """ تحديث تلقائي: تغيير حالة الحسابات التي تجاوزت due_date إلى 'overdue' """
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    c = conn.cursor()
+    today = _now().strftime("%Y-%m-%d")
+    rows = c.execute(
+        "SELECT id, due_date FROM credit_ledger "
+        "WHERE status='open' AND due_date IS NOT NULL AND due_date != '' AND due_date < ?",
+        (today,)).fetchall()
+    updated = []
+    for r in rows:
+        c.execute("UPDATE credit_ledger SET updated_at=datetime('now','localtime') WHERE id=?", (r["id"],))
+        updated.append(r["id"])
+    conn.commit()
+    conn.close()
+    audit("credit_auto_update", f"تم تحديث {len(updated)} حساب متأخر تلقائياً")
+    return jsonify({"ok": True, "updated": len(updated), "ids": updated})
+
+
+@app.route("/api/credit/overdue/export")
+def api_credit_overdue_export():
+    """تصدير قائمة المتأخرين كـ CSV"""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    today = _now().strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT *, (total - paid) as due FROM credit_ledger "
+        "WHERE status='open' AND due_date IS NOT NULL AND due_date != '' AND due_date < ? "
+        "ORDER BY due_date ASC", (today,)).fetchall()
+    lines = ["العميل,رقم الفاتورة,الطاولة,الإجمالي,المدفوع,المتبقي,تاريخ الاستحقاق,أيام التأخر"]
+    for r in rows:
+        try:
+            odays = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(r["due_date"], "%Y-%m-%d")).days
+        except Exception:
+            odays = 0
+        due = round(max(float(r["total"] or 0) - float(r["paid"] or 0), 0), 2)
+        lines.append(f"{r['customer_name']},{r['order_id'] or ''},{r['table_num'] or ''},{r['total']},{r['paid']},{due},{r['due_date']},{odays}")
+    conn.close()
+    from io import BytesIO
+    buf = BytesIO(("\ufeff" + "\n".join(lines)).encode("utf-8-sig"))
+    from flask import send_file
+    return send_file(buf, mimetype="text/csv; charset=utf-8",
+                     as_attachment=True, download_name=f"overdue_{today}.csv")
+
+
+@app.route("/api/credit/reminder", methods=["POST"])
+def api_credit_reminder():
+    """إرسال تذكير لعميل متأخر + تسجيل في credit_reminders"""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    data = request.json or {}
+    lid = data.get("ledger_id")
+    method = data.get("method", "whatsapp")
+    message = data.get("message", "")
+    if not lid:
+        return jsonify({"error": "معرف الرصيد مطلوب"}), 400
+    conn = get_db()
+    c = conn.cursor()
+    row = c.execute("SELECT * FROM credit_ledger WHERE id=?", (lid,)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({"error": "الرصيد غير موجود"}), 404
+    due = round((row["total"] or 0) - (row["paid"] or 0), 2)
+    auto_msg = message or f"مرحباً {row['customer_name']}، تذكير: متبقي آجل {due:.2f} ريال (استحقاق: {row['due_date'] or '-'}) — مطعم {get_setting('restaurant_name', 'مطعم الذوق الرفيع')}"
+    c.execute("INSERT INTO credit_reminders (ledger_id, method, message, sent_by, status) VALUES (?,?,?,?,?)",
+              (lid, method, auto_msg, u["name"], "sent"))
+    conn.commit()
+    conn.close()
+    audit("credit_reminder", f"أُرسل تذكير {method} للعميل {row['customer_name']} #{lid}")
+    return jsonify({"ok": True, "message": auto_msg})
+
+
+@app.route("/api/credit/reminders/<int:lid>")
+def api_credit_reminders_list(lid):
+    """سجل تذكيرات عميل معين"""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM credit_reminders WHERE ledger_id=? ORDER BY id DESC", (lid,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 
 @app.route("/api/reports/cancelled")
@@ -2970,6 +4355,76 @@ def api_refunds():
     return jsonify({"items": items_out, "count": len(items_out), "total": refunded_total})
 
 
+@app.route("/api/deposit-voucher", methods=["POST"])
+def api_deposit_voucher_create():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    data = request.json or {}
+    customer_name = str(data.get("customer_name") or "").strip()
+    phone = str(data.get("phone") or "").strip()
+    party_date = str(data.get("party_date") or "").strip()
+    description = str(data.get("description") or "").strip()
+    amount = _amount(data, "amount", 0)
+    method = str(data.get("method") or "نقدي")
+    transfer_ref = str(data.get("transfer_ref") or "").strip() or None
+    transfer_name = str(data.get("transfer_name") or "").strip() or None
+    if amount <= 0:
+        return jsonify({"error": "أدخل مبلغاً صحيحاً"}), 400
+    conn = get_db()
+    c = conn.cursor()
+    _ensure_schema(conn, c)
+    try:
+        c.execute("INSERT INTO deposit_vouchers (customer_name, phone, party_date, description, amount, method, transfer_ref, transfer_name, employee, date) "
+                  "VALUES (?,?,?,?,?,?,?,?,?, datetime('now','localtime'))",
+                  (customer_name or None, phone or None, party_date or None, description or None,
+                   amount, method, transfer_ref, transfer_name, u["name"]))
+        vid = c.lastrowid
+        receipt_no = "QC-%d-%05d" % (_now().year, vid)
+        c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, vid))
+    except Exception as e:
+        conn.close()
+        if CLOUD_DB:
+            print("DEPOSIT VOUCHER ERR:", repr(e))
+        return jsonify({"error": "تعذّر إنشاء السند"}), 500
+    conn.commit()
+    conn.close()
+    voucher = {
+        "id": vid, "receipt_no": receipt_no,
+        "customer_name": customer_name or "", "phone": phone or "",
+        "party_date": party_date or "", "description": description or "",
+        "amount": amount, "method": method,
+        "transfer_ref": transfer_ref, "transfer_name": transfer_name,
+        "employee": u["name"], "date": _now_sql(),
+    }
+    audit("deposit_voucher", f"سند قبض {receipt_no} بمبلغ {amount:.2f} ({method}) من {u['name']}")
+    return jsonify({"ok": True, "voucher": voucher})
+
+
+@app.route("/api/deposit-vouchers")
+def api_deposit_vouchers_list():
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    from_d = (request.args.get("from") or "").strip()
+    to_d = (request.args.get("to") or "").strip()
+    conn = get_db()
+    c = conn.cursor()
+    _ensure_schema(conn, c)
+    where = "1=1"
+    params = []
+    if from_d:
+        where += " AND date(date) >= ?"
+        params.append(from_d)
+    if to_d:
+        where += " AND date(date) <= ?"
+        params.append(to_d)
+    rows = c.execute(f"SELECT * FROM deposit_vouchers WHERE {where} ORDER BY id DESC", params).fetchall()
+    total = round(sum(r["amount"] or 0 for r in rows), 2)
+    conn.close()
+    return jsonify({"items": [dict(r) for r in rows], "count": len(rows), "total": total})
+
+
 @app.route("/api/reports/income")
 def api_reports_income():
     u, err, code = require_manager()
@@ -2997,7 +4452,7 @@ def api_reports_income():
     # تحليل حسب طريقة الدفع (مبالغ مقبوضة فعلاً)
     by_method = {}
     for r in rows:
-        m = (r["payment_method"] or "نقدي")
+        m = _canon_method(r["payment_method"] or "نقدي")
         b = by_method.setdefault(m, {"count": 0, "paid": 0.0, "total": 0.0})
         b["count"] += 1
         b["paid"] = round(b["paid"] + (r["paid"] or 0), 2)

@@ -1,16 +1,16 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="id" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>POS</title>
-<link rel="stylesheet" href="/style2.css?v=15">
+          <link rel="stylesheet" href="/style2.css?v={{ asset_ver('style2.css') }}">
 </head>
 <body>
 
 <div class="topbar">
   <div class="logo">
-    <span class="logo-emoji">🍽️</span>
+    <img src="/logo.png" class="logo-emoji logo-img" alt="logo">
     <div>
       <div class="title" id="app-title">{{ restaurant_name }}</div>
       <div class="subtitle" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
@@ -36,7 +36,10 @@
       </div>
     </div>
     <button class="btn btn-info" onclick="showReports()" data-i18n="reports">📊 التقارير</button>
+    <button class="btn btn-success" onclick="openDepositModal()" data-i18n="depositVoucher">🧾 سند قبض</button>
     <button class="btn btn-info" onclick="window.open('/kitchen', '_blank')" data-i18n="kitchen">🧑‍🍳 المطبخ</button>
+    <button class="btn btn-warning" onclick="showReservationManager()" data-i18n="reservationTitle">📅 الحجوزات</button>
+    <button class="btn btn-warning" id="btn-day-close" style="display:none" onclick="showDayClose()" data-i18n="dayClose">📆 إغلاق اليوم</button>
     <button class="btn btn-success" id="btn-menu-mgr" style="display:none" onclick="showMenuManager()" data-i18n="menuManage">🍽️ إدارة القائمة</button>
     <div class="lang-dropdown" id="manager-dropdown" style="display:none">
       <button class="btn btn-secondary" onclick="toggleManagerDropdown()" id="btn-manager">🛠️ <span data-i18n="managerTools">أدوات المدير</span></button>
@@ -44,7 +47,6 @@
         <button class="lang-option" onclick="showPromoManager(); closeManagerDropdown();" data-i18n="promoTitle">🏷️ أكواد الخصم</button>
         <button class="lang-option" onclick="showInventoryManager(); closeManagerDropdown();" data-i18n="inventoryTitle">📦 إدارة المخزون</button>
         <button class="lang-option" onclick="showLoyaltyManager(); closeManagerDropdown();" data-i18n="loyaltyTitle">⭐ نقاط الولاء</button>
-        <button class="lang-option" onclick="showReservationManager(); closeManagerDropdown();" data-i18n="reservationTitle">📅 الحجوزات</button>
         <button class="lang-option" onclick="showBackup(); closeManagerDropdown();" data-i18n="backup">💾 نسخ احتياطي</button>
         <button class="lang-option" onclick="showDayClose(); closeManagerDropdown();" data-i18n="dayClose">📆 إغلاق اليوم</button>
         <button class="lang-option" onclick="showAudit(); closeManagerDropdown();" data-i18n="audit">🛡️ السجل</button>
@@ -58,10 +60,16 @@
   </div>
 </div>
 
+<!-- تنبيه إغلاق اليوم -->
+<div id="day-reminder" class="day-reminder" style="display:none" onclick="showDayClose()">
+  <span id="day-reminder-msg" data-i18n="dayReminder">⏰ لم يُغلق حساب اليوم بعد — يرجى إغلاق اليوم وطباعة التقرير اليومي</span>
+  <button class="btn btn-warning btn-sm" data-i18n="dayClose">📆 إغلاق اليوم</button>
+</div>
+
 <!-- شاشة تسجيل الدخول -->
 <div id="login-overlay" class="login-overlay">
   <div class="login-card">
-    <div class="login-emoji">🍽️</div>
+    <img src="/logo.png" class="login-emoji login-img" alt="logo">
     <div class="login-title" id="login-title">{{ restaurant_name }}</div>
     <div class="login-sub" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
     <select id="login-employee" class="login-select"></select>
@@ -119,6 +127,11 @@
     </div>
 
     <div class="actions">
+      <div class="open-add-row">
+        <input id="open-item-name" class="open-name-input" data-i18n="openNamePh" placeholder="اسم الصنف المفتوح..." maxlength="40">
+        <button class="btn btn-sm open-item-btn" onclick="addOpenItem('food')">🍽️ <span data-i18n="openFood">أطعمة مفتوحة</span></button>
+        <button class="btn btn-sm open-item-btn" onclick="addOpenItem('other')">📦 <span data-i18n="openOther">أخرى مفتوحة</span></button>
+      </div>
       <div class="actions-row">
         <button class="btn btn-success btn-lg" onclick="showPayment()" data-i18n="pay">💳 دفع</button>
         <div class="lang-dropdown" id="discount-dropdown">
@@ -142,7 +155,7 @@
       <div class="actions-row" style="margin-top:8px">
         <button class="btn btn-md" onclick="showTransferModal()" data-i18n="transferBtn">🔄 نقل الطلب</button>
         <button class="btn btn-md" onclick="showSplitModal()" data-i18n="splitBtn">👥 تقسيم</button>
-        <button class="btn btn-danger btn-md" onclick="showCancelOrderModal()" id="btn-cancel-order">❌ إلغاء الطلب</button>
+        <button class="btn btn-danger btn-md" onclick="showCancelOrderModal()" id="btn-cancel-order" data-i18n="cancelOrder">❌ إلغاء الطلب</button>
       </div>
     </div>
   </div>
@@ -217,9 +230,7 @@
     <div class="modal-body">
       <!-- تبويبات التقارير -->
       <div class="report-tabs" id="report-tabs">
-        <button class="report-tab active" data-i18n="tabOverview" onclick="switchReportTab('overview')">📊 نظرة عامة</button>
-        <button class="report-tab" data-i18n="tabDaily" onclick="switchReportTab('daily')">📅 يومي</button>
-        <button class="report-tab" data-i18n="tabMonthly" onclick="switchReportTab('monthly')">📆 شهري</button>
+        <button class="report-tab active" data-i18n="tabOverview" onclick="switchReportTab('overview')">📊 نظرة عامة شاملة</button>
         <button class="report-tab" data-i18n="tabProfitLoss" onclick="switchReportTab('profitloss')">💰 أرباح وخسائر</button>
         <button class="report-tab" data-i18n="tabTax" onclick="switchReportTab('tax')">🏛️ الضرائب</button>
         <button class="report-tab" data-i18n="tabEmployees" onclick="switchReportTab('employees')">👥 الموظفين</button>
@@ -231,15 +242,18 @@
         <button class="report-tab" data-i18n="tabIncome" onclick="switchReportTab('income')">💼 الدخل الشامل</button>
         <button class="report-tab" data-i18n="tabCashflow" onclick="switchReportTab('cashflow')">💵 التدفقات النقدية</button>
         <button class="report-tab" data-i18n="tabAR" onclick="switchReportTab('ar')">📒 الذمم المدينة</button>
+        <button class="report-tab" data-i18n="tabAP" onclick="switchReportTab('ap')">📒 ذمم المورّدين</button>
         <button class="report-tab" data-i18n="tabCancelled" onclick="switchReportTab('cancelled')">🔄 الإلغاءات</button>
+        <button class="report-tab" data-i18n="tabDeposits" onclick="switchReportTab('deposits')">🎉 سندات القبض</button>
+        <button class="report-tab" data-i18n="tabDiscounts" onclick="switchReportTab('discounts')">🏷️ الخصومات</button>
       </div>
 
       <!-- فلتر التاريخ والتفاصيل -->
       <div class="report-filter" id="report-filter">
         <label data-i18n="rptFrom">من:</label>
-        <input type="date" id="report-from" class="login-input" style="width:auto;padding:5px 8px;font-size:12px">
+        <input type="date" id="report-from" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="loadReportData()">
         <label data-i18n="rptTo">إلى:</label>
-        <input type="date" id="report-to" class="login-input" style="width:auto;padding:5px 8px;font-size:12px">
+        <input type="date" id="report-to" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="loadReportData()">
         <label data-i18n="rptMethod">الطريقة:</label>
         <select id="filter-method" class="login-input" style="width:auto;padding:5px 8px;font-size:12px" onchange="setReportFilter('method', this.value)"></select>
         <label data-i18n="rptEmployee">الموظف:</label>
@@ -261,20 +275,20 @@
 
       <!-- الرسوم البيانية -->
       <div id="report-charts" style="display:none">
-        <div class="settings-section">📈 المبيعات اليومية</div>
+        <div class="settings-section" data-i18n="rptDailySales">📈 المبيعات اليومية</div>
         <canvas id="chart-daily" style="width:100%;height:180px"></canvas>
-        <div class="settings-section">🏆 أكثر الأصناف مبيعاً</div>
+        <div class="settings-section" data-i18n="rptTopItems">🏆 أكثر الأصناف مبيعاً</div>
         <canvas id="chart-top-items" style="width:100%;height:180px"></canvas>
-        <div class="settings-section">💰 حسب طريقة الدفع</div>
+        <div class="settings-section" data-i18n="rptSalesByMethod">💰 حسب طريقة الدفع</div>
         <canvas id="chart-method" style="width:100%;height:180px"></canvas>
-        <div class="settings-section">🕐 حسب الساعة</div>
+        <div class="settings-section" data-i18n="advByHour">🕐 حسب الساعة</div>
         <canvas id="chart-hour" style="width:100%;height:180px"></canvas>
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-info" onclick="printReports()">🖨️ طباعة</button>
-      <button class="btn btn-success" onclick="exportCSV()">📥 تصدير CSV</button>
-      <button class="btn" onclick="closeModal('reports-modal')">✕ إغلاق</button>
+      <button class="btn btn-info" onclick="printReports()" data-i18n="rptPrintBtn">🖨️ طباعة</button>
+      <button class="btn btn-success" onclick="exportCSV()" data-i18n="rptExportBtn">📥 تصدير CSV</button>
+      <button class="btn" onclick="closeModal('reports-modal')" data-i18n="rptClose">✕ إغلاق</button>
     </div>
   </div>
 </div>
@@ -417,8 +431,8 @@
             <input id="set-name" class="login-input" data-i18n="restaurantName" placeholder="اسم المطعم">
           </div>
           <div>
-            <label class="settings-label" data-i18n="taxRateLabel">نسبة الضريبة (0.15 = 15%)</label>
-            <input id="set-tax" class="login-input" type="number" step="0.01" min="0" max="1" placeholder="0.15">
+            <label class="settings-label" data-i18n="taxRateLabel">نسبة الضريبة (0.03 = 3%)</label>
+            <input id="set-tax" class="login-input" type="number" step="0.01" min="0" max="1" placeholder="0.03">
           </div>
           <div>
             <label class="settings-label" data-i18n="currencyLabel">العملة</label>
@@ -439,24 +453,63 @@
               <option value="weekly">الأسبوعي</option>
             </select>
           </div>
+          <div>
+            <label class="settings-label" data-i18n="dayCloseRemindHour">ساعة تنبيه إغلاق اليوم (24)</label>
+            <input id="set-day-close-hour" class="login-input" type="number" min="0" max="23" step="1" placeholder="21">
+          </div>
         </div>
         <button class="btn btn-success" onclick="saveSettings()" data-i18n="saveSettings">💾 حفظ الإعدادات</button>
         <div class="settings-section" style="margin-top:18px" data-i18n="employeesManage">👥 إدارة الموظفين</div>
         <div class="settings-grid">
           <div>
+            <label class="settings-label" data-i18n="employeeNameLabel">الاسم</label>
             <input id="emp-name" class="login-input" data-i18n="employeeNamePh" placeholder="اسم الموظف">
           </div>
           <div>
+            <label class="settings-label" data-i18n="employeeRoleLabel">الدور</label>
             <select id="emp-role" class="login-input">
               <option value="cashier" data-i18n="cashierRole">كاشير</option>
               <option value="manager" data-i18n="managerRole">مدير</option>
             </select>
           </div>
           <div>
+            <label class="settings-label" data-i18n="employeePinLabel">رمز PIN</label>
             <input id="emp-pin" class="login-input" type="password" inputmode="numeric" maxlength="6" placeholder="PIN (4)">
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeePhoneLabel">رقم الهاتف</label>
+            <input id="emp-phone" class="login-input" type="tel" inputmode="tel" placeholder="07xx">
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeeSalaryLabel">الراتب الشهري</label>
+            <input id="emp-salary" class="login-input" type="number" inputmode="decimal" min="0" placeholder="0">
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeeHireLabel">تاريخ التعيين</label>
+            <input id="emp-hire" class="login-input" type="date">
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeeShiftLabel">الوردية</label>
+            <select id="emp-shift" class="login-input">
+              <option value="">—</option>
+              <option value="morning" data-i18n="shiftMorning">صباحية</option>
+              <option value="evening" data-i18n="shiftEvening">مسائية</option>
+              <option value="night" data-i18n="shiftNight">ليلية</option>
+              <option value="full" data-i18n="shiftFull">كاملة</option>
+            </select>
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeeDeptLabel">القسم</label>
+            <input id="emp-dept" class="login-input" placeholder="قسم">
+          </div>
+          <div>
+            <label class="settings-label" data-i18n="employeeDiscLimit">حد الخصم للكاشير (%)</label>
+            <input id="emp-disc-limit" class="login-input" type="number" inputmode="decimal" min="0" max="100" value="20" placeholder="20">
+            <div style="font-size:11px;color:var(--muted)" data-i18n="employeeDiscLimitHint">النسبة القصوى من الفاتورة التي يمكن للكاشير خصمها دون موافقة المدير</div>
           </div>
         </div>
         <button class="btn btn-success" onclick="addEmployee()" data-i18n="addEmployee">➕ إضافة موظف</button>
+        <div id="employees-list" class="menu-manage-list" style="margin-top:12px"></div>
         <div class="settings-section" style="margin-top:18px" data-i18n="tablesManage">🪑 إدارة الطاولات</div>
         <div class="settings-grid">
           <div>
@@ -482,7 +535,6 @@
         <div class="settings-section" style="margin-top:18px" data-i18n="menuManage">🍽️ إدارة القائمة</div>
         <button class="btn btn-info" onclick="showMenuManager()" data-i18n="openMenuManager">🍽️ فتح إدارة القائمة</button>
       </div>
-      <div id="employees-list" class="menu-manage-list"></div>
     </div>
   </div>
 </div>
@@ -656,6 +708,76 @@
   </div>
 </div>
 
+<!-- Employee Modal -->
+<div id="modal-employee" class="modal">
+  <div class="modal-content" style="width:560px;max-width:94vw">
+    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span id="emp-modal-title" data-i18n="employeeEditTitle">✏️ تعديل موظف</span>
+      <span class="modal-x" onclick="closeModal('modal-employee')">✕</span>
+    </div>
+    <div class="modal-body">
+      <input id="emp-edit-id" type="hidden">
+      <div class="settings-grid">
+        <div>
+          <label class="settings-label" data-i18n="employeeNameLabel">الاسم</label>
+          <input id="emp-edit-name" class="login-input">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeRoleLabel">الدور</label>
+          <select id="emp-edit-role" class="login-input">
+            <option value="cashier" data-i18n="cashierRole">كاشير</option>
+            <option value="manager" data-i18n="managerRole">مدير</option>
+          </select>
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeePhoneLabel">رقم الهاتف</label>
+          <input id="emp-edit-phone" class="login-input" type="tel" inputmode="tel">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeSalaryLabel">الراتب الشهري</label>
+          <input id="emp-edit-salary" class="login-input" type="number" inputmode="decimal" min="0">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeHireLabel">تاريخ التعيين</label>
+          <input id="emp-edit-hire" class="login-input" type="date">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeShiftLabel">الوردية</label>
+          <select id="emp-edit-shift" class="login-input">
+            <option value="">—</option>
+            <option value="morning" data-i18n="shiftMorning">صباحية</option>
+            <option value="evening" data-i18n="shiftEvening">مسائية</option>
+            <option value="night" data-i18n="shiftNight">ليلية</option>
+            <option value="full" data-i18n="shiftFull">كاملة</option>
+          </select>
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeDeptLabel">القسم</label>
+          <input id="emp-edit-dept" class="login-input">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeDiscLimit">حد الخصم للكاشير (%)</label>
+          <input id="emp-edit-disc-limit" class="login-input" type="number" inputmode="decimal" min="0" max="100" value="20">
+        </div>
+        <div>
+          <label class="settings-label" data-i18n="employeeStatusLabel">الحالة</label>
+          <select id="emp-edit-status" class="login-input">
+            <option value="active" data-i18n="statusActive">نشط</option>
+            <option value="on_leave" data-i18n="statusLeave">إجازة</option>
+            <option value="suspended" data-i18n="statusSuspended">موقوف</option>
+          </select>
+        </div>
+      </div>
+      <div class="settings-section" style="margin-top:16px" data-i18n="employeeResetPin">🔑 تغيير رقم PIN</div>
+      <input id="emp-edit-pin" class="login-input" type="password" inputmode="numeric" maxlength="6" placeholder="PIN جديد (اتركه فارغاً للإبقاء)">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="saveEmployeeEdit()" data-i18n="saveSettings">💾 حفظ</button>
+      <button class="btn" onclick="closeModal('modal-employee')" data-i18n="close">✕ إغلاق</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modifier Modal -->
 <div id="modifier-modal" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
@@ -704,25 +826,25 @@
 <div id="cancel-order-modal" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>❌ طلب إلغاء الطلب</span>
+      <span data-i18n="cancelRequest">❌ طلب إلغاء الطلب</span>
       <span class="modal-x" onclick="closeModal('cancel-order-modal')">✕</span>
     </div>
     <div class="modal-body">
-      <p style="margin:0 0 12px;color:var(--muted)">سيتم إرسال طلب للمدير للموافقة على الإلغاء</p>
+      <p style="margin:0 0 12px;color:var(--muted)" data-i18n="cancelDesc">سيتم إرسال طلب للمدير للموافقة على الإلغاء</p>
       <div style="margin-bottom:12px">
-        <label style="font-weight:600;display:block;margin-bottom:4px">سبب الإلغاء</label>
+        <label style="font-weight:600;display:block;margin-bottom:4px" data-i18n="cancelReason">سبب الإلغاء</label>
         <select id="cancel-reason" class="input" style="width:100%;margin-bottom:8px">
-          <option value="خطأ في الطلب">خطأ في الطلب</option>
-          <option value="العميل طلب الإلغاء">العميل طلب الإلغاء</option>
-          <option value="المكونات غير متوفرة">المكونات غير متوفرة</option>
-          <option value="أخرى">أخرى</option>
+          <option value="خطأ في الطلب" data-i18n="cancelReaWrong">خطأ في الطلب</option>
+          <option value="العميل طلب الإلغاء" data-i18n="cancelReaClient">العميل طلب الإلغاء</option>
+          <option value="المكونات غير متوفرة" data-i18n="cancelReaMissing">المكونات غير متوفرة</option>
+          <option value="أخرى" data-i18n="cancelReaOther">أخرى</option>
         </select>
-        <input type="text" id="cancel-reason-custom" class="input" placeholder="سبب آخر..." style="display:none;width:100%">
+        <input type="text" id="cancel-reason-custom" class="input" placeholder="سبب آخر..." style="display:none;width:100%" data-i18n="cancelReasonCustomPh">
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeModal('cancel-order-modal')">✕ إلغاء</button>
-      <button class="btn btn-danger" onclick="submitCancelRequest()">📩 إرسال الطلب للمدير</button>
+      <button class="btn" onclick="closeModal('cancel-order-modal')" data-i18n="cancel">✕ إلغاء</button>
+      <button class="btn btn-danger" onclick="submitCancelRequest()" data-i18n="cancelSendManager">📩 إرسال الطلب للمدير</button>
     </div>
   </div>
 </div>
@@ -775,6 +897,43 @@
   </div>
 </div>
 
+<!-- سند قبض: دفعة مقدمة للحفلات الخاصة -->
+<div id="modal-sandqabd" class="modal">
+  <div class="modal-content" style="width:430px;max-width:94vw">
+    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span data-i18n="dvTitle">🧾 سند قبض — دفعة مقدمة (حفلات خاصة)</span>
+      <span class="modal-x" onclick="closeModal('modal-sandqabd')">✕</span>
+    </div>
+    <div class="modal-body">
+      <div class="pay-label"><span data-i18n="dvCustomer">اسم العميل:</span></div>
+      <input id="dv-customer" type="text" class="pay-input" data-i18n="dvCustomerPh" placeholder="مثال: أحمد محمد" maxlength="50" style="text-transform:none;margin-bottom:10px">
+      <div class="pay-label"><span data-i18n="dvPhone">رقم الهاتف:</span></div>
+      <input id="dv-phone" type="text" class="pay-input" data-i18n="dvPhonePh" placeholder="اختياري" maxlength="20" style="text-transform:none;margin-bottom:10px">
+      <div class="pay-label"><span data-i18n="dvPartyDate">تاريخ الحفلة/المناسبة:</span></div>
+      <input id="dv-party-date" type="date" class="pay-input" style="margin-bottom:10px">
+      <div class="pay-label"><span data-i18n="dvDesc">بيان المناسبة (نوع الحفل):</span></div>
+      <input id="dv-desc" type="text" class="pay-input" data-i18n="dvDescPh" placeholder="مثال: حفل زفاف — قاعة كبيرة" maxlength="120" style="text-transform:none;margin-bottom:10px">
+      <div class="pay-label"><span data-i18n="dvAmount">المبلغ المقدم</span> <span style="color:var(--danger)">*</span>:</div>
+      <input id="dv-amount" type="number" class="pay-input" min="0" placeholder="0" style="margin-bottom:10px">
+      <div class="pay-label"><span data-i18n="dvMethod">طريقة الدفع:</span></div>
+      <select id="dv-method" class="pay-input" onchange="toggleDepositRef()" style="margin-bottom:10px">
+        <option value="نقدي" data-i18n="dvMethodCash">💵 نقدي</option>
+        <option value="BCA" data-i18n="dvMethodBCA">🏦 تحويل BCA</option>
+        <option value="مانديري" data-i18n="dvMethodMandiri">💳 تحويل مانديري</option>
+        <option value="كيروس" data-i18n="dvMethodQris">🧾 كيروس</option>
+      </select>
+      <div id="dv-ref-row" style="display:none;margin-bottom:10px">
+        <div class="pay-label"><span data-i18n="dvRef">رقم مرجع التحويل</span> <span style="color:var(--danger)">*</span>:</div>
+        <input id="dv-ref" type="text" class="pay-input" data-i18n="dvRefPh" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modal-sandqabd')" data-i18n="cancel">✕ إلغاء</button>
+      <button class="btn btn-success" onclick="confirmDepositVoucher()" data-i18n="dvCreate">🧾 إنشاء سند قبض</button>
+    </div>
+  </div>
+</div>
+
 <!-- شريط اختصارات لوحة المفاتيح -->
 <div class="shortcut-bar" id="shortcut-bar" style="display:none">
   <span class="shortcut-key">F1</span><span class="shortcut-label">التقارير</span>
@@ -798,6 +957,7 @@
   <button class="mobile-nav-btn" onclick="showPayment()">💳<span data-i18n="pay">دفع</span></button>
   <button class="mobile-nav-btn" onclick="saveOrder()">💾<span data-i18n="save">حفظ</span></button>
   <button class="mobile-nav-btn" onclick="sendToKitchen()">🍳<span data-i18n="sendKitchen">مطبخ</span></button>
+  <button class="mobile-nav-btn" onclick="showReservationManager()">📅<span data-i18n="reservationTitle">الحجوزات</span></button>
   <button class="mobile-nav-btn" id="mobile-mgr-btn" style="display:none" onclick="showMobileMgrMenu()">🛠️<span>المدير</span></button>
 </div>
 
@@ -816,7 +976,7 @@
   </div>
 </div>
 
-<script src="/lang.js?v=77"></script>
-  <script src="/app.js?v=77"></script>
+        <script src="/lang.js?v={{ asset_ver('lang.js') }}"></script>
+  <script src="/app.js?v={{ asset_ver('app.js') }}"></script>
 </body>
 </html>

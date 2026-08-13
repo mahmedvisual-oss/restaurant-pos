@@ -19,6 +19,8 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #111418; color: 
 .k-stats { display: flex; gap: 14px; font-size: 14px; }
 .k-stat { padding: 6px 12px; background: #22282f; border-radius: 8px; }
 .k-stat b { color: #f59e0b; }
+.k-clear-btn { background: #ef4444; color: #fff; border: none; border-radius: 6px; padding: 4px 12px; font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; }
+.k-clear-btn:hover { background: #dc2626; }
 #k-conn { color: #34d399; }
 #k-conn.offline { color: #f87171; }
 

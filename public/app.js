@@ -58,7 +58,9 @@ function toggleLangDropdown() {
 }
 
 function closeLangDropdown() {
-  document.getElementById("lang-menu").classList.remove("show");
+  const menu = document.getElementById("lang-menu");
+  if (!menu.classList.contains("show")) return;
+  menu.classList.remove("show");
   applyLang();
   updateLangBtn();
   renderTables();
@@ -150,11 +152,20 @@ const METHOD_NAMES = {
   "كيروس": { ar: "كيروس", en: "Kiros", id: "Kiros" },
 };
 
+const METHOD_SYNONYMS = {
+  "نقداً": "نقدي",
+  "تحويل BCA": "BCA",
+  "تحويل مانديري": "مانديري",
+  "Transfer BCA": "BCA",
+  "Transfer Mandiri": "مانديري",
+};
+
 const TRANSFER_METHODS = new Set(["BCA", "مانديري", "كيروس"]);
 
 function methodName(m) {
   if (!m) return "—";
-  const e = METHOD_NAMES[m];
+  const key = METHOD_SYNONYMS[m] || m;
+  const e = METHOD_NAMES[key];
   if (!e) return m;
   return e[currentLang] || e.ar || m;
 }
@@ -171,7 +182,7 @@ function openModal(id) { document.getElementById(id).classList.add("show"); }
 function closeModal(id) { document.getElementById(id).classList.remove("show"); }
 
 async function api(url, opts) {
-  const r = await fetch(url, opts);
+  const r = await fetch(url, { credentials: 'same-origin', ...opts });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(terr(d.error || t("err.generic")));
   return d;
@@ -249,9 +260,38 @@ async function doLogin() {
     document.getElementById("login-pin").value = "";
     document.getElementById("login-overlay").style.display = "none";
     updateUserBar();
-    loadTables();
-    loadSettings();
-    checkCancelRequests();
+    startDayReminderPolling();
+    const b = window.__boot;
+    if (b && b.tables) {
+      tableData = {};
+      for (const t of b.tables) tableData[t.id] = t;
+      renderTables();
+      updateStats();
+    } else {
+      loadTables();
+    }
+    if (b && b.settings) {
+      const s = b.settings;
+      CURRENCY = s.currency;
+      TAX_RATE = s.tax_rate;
+      RESTAURANT_NAME = s.restaurant_name;
+      const set1 = document.getElementById("set-name");
+      if (set1) set1.value = s.restaurant_name;
+      const set2 = document.getElementById("set-tax");
+      if (set2) set2.value = s.tax_rate;
+      const set3 = document.getElementById("set-currency");
+      if (set3) set3.value = s.currency;
+      const set4 = document.getElementById("set-autobackup");
+      if (set4) set4.checked = !!s.auto_backup;
+      const set5 = document.getElementById("set-backup-freq");
+      if (set5) set5.value = s.backup_freq || "daily";
+      updateAutoBackupLabel();
+      applySettings();
+    } else {
+      loadSettings();
+    }
+    if (b) { checkCancelRequests(b.cancel_count); }
+    else { checkCancelRequests(); }
     toast(t("toast.welcome") + " " + user.name + " 👋");
   } catch (e) {
     document.getElementById("login-error").textContent = e.message;
@@ -261,6 +301,9 @@ async function doLogin() {
 async function doLogout() {
   try { await api("/api/logout"); } catch (e) {}
   user = null;
+  if (_dayRemindTimer) { clearInterval(_dayRemindTimer); _dayRemindTimer = null; }
+  const rem = document.getElementById("day-reminder");
+  if (rem) rem.style.display = "none";
   document.getElementById("login-overlay").style.display = "flex";
   loadEmployees();
   updateUserBar();
@@ -280,6 +323,8 @@ function updateUserBar() {
     document.getElementById("user-label").textContent = "👤 " + user.name + (user.role === "manager" ? " (" + t("managerRole") + ")" : "");
     const isMgr = user.role === "manager";
     mgrDropdown.style.display = isMgr ? "" : "none";
+    const btnDayClose = document.getElementById("btn-day-close");
+    if (btnDayClose) btnDayClose.style.display = "";
     if (btnMenuMgr) btnMenuMgr.style.display = isMgr ? "" : "none";
     if (shortcutBar) shortcutBar.style.display = smallScreen ? "none" : "flex";
     if (mobileNav) mobileNav.style.display = smallScreen ? "flex" : "none";
@@ -332,12 +377,22 @@ async function _loadMenuEditor() {
 function _renderCatTabs() {
   const bar = document.getElementById("cat-tabs-bar");
   const total = _menuItemsCache.length;
-  let html = `<button class="btn btn-sm ${_menuCatFilter==='all'?'btn-success':''}" onclick="_setMenuCatFilter('all')">${t("all")} (${total})</button>`;
+  let html = `<button class="btn btn-sm" onclick="resetMenuToDefault()" title="استبدال القائمة بقائمة مؤقتة جاهزة">♻️ قائمة مؤقتة</button>`;
+  html += `<button class="btn btn-sm ${_menuCatFilter==='all'?'btn-success':''}" onclick="_setMenuCatFilter('all')">${t("all")} (${total})</button>`;
   _menuCatsCache.forEach(c => {
     const cnt = _menuItemsCache.filter(it => it.category === c).length;
     html += `<button class="btn btn-sm ${_menuCatFilter===c?'btn-success':''}" onclick="_setMenuCatFilter('${c.replace(/'/g,"\\'")}')">${c} (${cnt})</button>`;
   });
   bar.innerHTML = html;
+}
+
+async function resetMenuToDefault() {
+  if (!confirm("سيتم تعطيل الأصناف الحالية وإضافة قائمة مؤقتة جاهزة (20 صنف). هل تريد المتابعة؟")) return;
+  try {
+    const r = await api("/api/menu/reset-default", { method: "POST", body: "{}" });
+    toast(`✅ تم تفعيل القائمة المؤقتة (${r.count} صنف)`);
+    await _loadMenuEditor();
+  } catch (e) { toast("❌ " + e.message); }
 }
 
 function _setMenuCatFilter(cat) {
@@ -714,9 +769,50 @@ function addToCart(name, emoji, price, menuId) {
       return;
     }
   }
-  cart.push({ name, emoji, price, qty: 1, subtotal: price, modifiers: [], menu_id: menuId || null });
+  cart.push({ name, emoji, price, qty: 1, subtotal: price, modifiers: [], menu_id: menuId || null, note: "" });
   if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
   renderCart();
+}
+
+function addOpenItem(type) {
+  if (!user) return;
+  if (!selectedTable) { toast("⚠️ " + t("toast.noTableSelected")); return; }
+  const nameInput = document.getElementById("open-item-name");
+  const typed = nameInput ? nameInput.value.trim() : "";
+  const defName = type === "food" ? t("openFood") : t("openOther");
+  const name = typed || defName;
+  const emoji = type === "food" ? "🍽️" : "📦";
+  for (const item of cart) {
+    if (item.open && item.name === name) {
+      item.qty++;
+      item.subtotal = item.qty * item.price;
+      if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
+      renderCart();
+      return;
+    }
+  }
+  cart.push({ name, emoji, price: 0, qty: 1, subtotal: 0, modifiers: [], menu_id: null, open: true, note: "" });
+  if (nameInput) nameInput.value = "";
+  if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
+  renderCart();
+}
+
+function setOpenItemPrice(idx, val) {
+  const it = cart[idx];
+  if (!it || !it.open) return;
+  it.price = Math.max(0, parseFloat(val) || 0);
+  it.subtotal = it.qty * it.price;
+  const amt = document.getElementById("cart-amount-" + idx);
+  if (amt) amt.textContent = fmtCur(it.subtotal);
+  if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
+  updateSummary();
+}
+
+function setOpenItemName(idx, val) {
+  const it = cart[idx];
+  if (!it || !it.open) return;
+  it.name = val.trim() || it.name;
+  if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
 }
 
 function showModifierModal(name, emoji, price, menuId) {
@@ -778,7 +874,7 @@ function confirmModifiers() {
       return;
     }
   }
-  cart.push({ name, emoji, price: unitPrice, qty: 1, subtotal: unitPrice, modifiers: mods });
+  cart.push({ name, emoji, price: unitPrice, qty: 1, subtotal: unitPrice, modifiers: mods, note: "" });
   renderCart();
 }
 
@@ -801,6 +897,17 @@ function changeQty(idx, delta) {
   else { cart[idx].subtotal = cart[idx].qty * cart[idx].price; }
   if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
   renderCart();
+}
+
+function setItemNote(idx) {
+  const it = cart[idx];
+  if (!it) return;
+  const note = prompt(t("itemNotePrompt") + "\n" + it.name, it.note || "");
+  if (note !== null) {
+    it.note = note.trim();
+    if (splitInvoices) splitInvoices[splitCurrent].items = cart.slice();
+    renderCart();
+  }
 }
 
 function renderCart() {
@@ -827,18 +934,26 @@ function renderCart() {
       const mods = (it.modifiers && it.modifiers.length) 
         ? `<div class="cart-mods">${it.modifiers.map(m => `<span class="cart-mod-tag">${escapeHtml(m.name)}${m.price > 0 ? " +" + fmtCur(m.price) : ""}</span>`).join("")}</div>` 
         : "";
+      const priceCtrl = it.open
+        ? `<span class="unit">${t("openPriceLabel")} <input type="number" class="open-price-input" min="0" step="500" value="${it.price}" oninput="setOpenItemPrice(${i}, this.value)"></span>`
+        : `<span class="unit">${fmtCur(it.price)} × ${it.qty}</span>`;
+      const nameCtrl = it.open
+        ? `<span class="name"><span class="cart-item-num">${itemNum}</span> ${escapeHtml(it.emoji)} <input type="text" class="open-name-edit" value="${escapeHtml(it.name)}" oninput="setOpenItemName(${i}, this.value)" onfocus="this.select()" title="${t("openNameEdit")}"></span>`
+        : `<span class="name"><span class="cart-item-num">${itemNum}</span> ${escapeHtml(it.emoji)} ${escapeHtml(it.name)}</span>`;
       cont.innerHTML += `<div class="cart-item">
         <div class="top">
-          <span class="name"><span class="cart-item-num">${itemNum}</span> ${escapeHtml(it.emoji)} ${escapeHtml(it.name)}</span>
-          <span class="amount">${fmtCur(it.subtotal)}</span>
+          ${nameCtrl}
+          <span class="amount" id="cart-amount-${i}">${fmtCur(it.subtotal)}</span>
         </div>
         ${mods}
+        ${it.note ? `<div class="cart-item-note">📝 ${escapeHtml(it.note)}</div>` : ""}
         <div class="bottom">
+          <button class="qty-btn" onclick="setItemNote(${i})" title="${t("itemNote")}">📝</button>
           <button class="qty-btn qty-del" onclick="removeItem(${i})">🗑️</button>
           <button class="qty-btn qty-dec" onclick="changeQty(${i}, -1)">−</button>
           <span class="qty-num">${it.qty}</span>
           <button class="qty-btn qty-add" onclick="changeQty(${i}, 1)">+</button>
-          <span class="unit">${fmtCur(it.price)} × ${it.qty}</span>
+          ${priceCtrl}
         </div>
       </div>`;
     }
@@ -879,7 +994,7 @@ async function loadTables() {
   try {
     tableData = {};
     const arr = await api("/api/tables");
-    for (const t of arr) tableData[t.num] = t;
+    for (const t of arr) tableData[t.id] = t;
   } catch (e) { /* لا يهم */ }
   renderTables();
   updateStats();
@@ -900,14 +1015,14 @@ function renderTables() {
       <div class="table-grid">`;
     for (const tb of list) {
       const i = tb.num;
-      const sel = selectedTable === i;
+      const sel = selectedTable === tb.id;
       const cls = sel ? "selected" : (tb.active ? "occupied" : "available");
       const status = sel ? t("selected") : (tb.active ? t("occupied") : t("available"));
       const dot = sel ? "✓" : (tb.active ? "✕" : "●");
       const capacity = tb.capacity || 4;
       const orderInfo = tb.active && tb.order_total ? `<span class="table-order-total">${fmtCur(tb.order_total)}</span>` : "";
       const timeInfo = tb.active && tb.started_at ? `<span class="table-time">${getElapsedTime(tb.started_at)}</span>` : "";
-      block += `<button class="table-btn ${cls}" onclick="selectTable(${i})" title="طاولة ${i} - ${capacity} أشخاص">
+      block += `<button class="table-btn ${cls}" onclick="selectTable(${tb.id})" title="طاولة ${i} - ${capacity} أشخاص">
         <span class="table-num">${i}</span>
         <span class="table-capacity">👥 ${capacity}</span>
         <span class="table-status"><span class="status-dot">${dot}</span>${status}</span>
@@ -987,10 +1102,10 @@ function renderFloorPlan() {
 
   /* ── ترتيب الطاولات بالأرقام داخل كل قسم ── */
   const sections = {};
-  for (const [num, tb] of Object.entries(tableData)) {
+  for (const [tid, tb] of Object.entries(tableData)) {
     const sec = tb.section || "hall";
     if (!sections[sec]) sections[sec] = [];
-    sections[sec].push({ num: parseInt(num), ...tb });
+    sections[sec].push({ id: parseInt(tid), ...tb });
   }
   for (const sec in sections) {
     sections[sec].sort((a, b) => a.num - b.num);
@@ -1019,7 +1134,7 @@ function renderFloorPlan() {
     const z = zoneLayout[sec] || zoneLayout.hall;
     list.forEach((tb, idx) => {
       const n = tb.num;
-      const sel = selectedTable === n;
+      const sel = selectedTable === tb.id;
       const cls = sel ? "selected" : (tb.active ? "occupied" : "available");
       let w, h;
       if (tb.shape === "rectangle") { w = 90; h = 55; }
@@ -1034,9 +1149,9 @@ function renderFloorPlan() {
       fp.innerHTML += `<div class="floor-table ${cls} ${tb.shape || 'round'}" 
         style="width:${w}px;height:${h}px;left:${px}px;top:${py}px" 
         data-num="${n}" data-id="${tb.id}"
-        onclick="selectTable(${n})"
-        onmousedown="startDrag(event, ${n})"
-        ontouchstart="startDrag(event, ${n})">
+        onclick="selectTable(${tb.id})"
+        onmousedown="startDrag(event, ${tb.id})"
+        ontouchstart="startDrag(event, ${tb.id})">
         <span class="ft-num">${n}</span>
         <span class="ft-cap">👥 ${tb.capacity || 4}</span>
         ${orderInfo}
@@ -1049,10 +1164,10 @@ function renderFloorPlan() {
 
 function autoLayoutFloor() {
   const sections = {};
-  for (const [num, tb] of Object.entries(tableData)) {
+  for (const [tid, tb] of Object.entries(tableData)) {
     const sec = tb.section || "hall";
     if (!sections[sec]) sections[sec] = [];
-    sections[sec].push({ id: tb.id, num: parseInt(num) });
+    sections[sec].push({ id: tb.id, num: tb.num });
   }
   const zoneLayout = {
     families: { cols: 4, gapX: 85, gapY: 95, startX: 30, startY: 80 },
@@ -1174,30 +1289,31 @@ async function deleteFloorTable(id) {
   } catch (e) { toast(e.message); }
 }
 
-async function selectTable(n) {
+async function selectTable(id) {
   if (!user) return;
-  if (selectedTable === n && tableData[n] && tableData[n].active) return;
-  selectedTable = n;
-  const tb = tableData[n];
+  if (selectedTable === id && tableData[id] && tableData[id].active) return;
+  selectedTable = id;
+  const tb = tableData[id];
   const capacity = tb ? tb.capacity || 4 : 4;
-  document.getElementById("table-badge").innerHTML = `🪑 ${t("table")} ${n} <span style="font-size:10px;color:#e0e7ff">👥 ${capacity}</span>`;
-  await loadTableOrder(n);
+  document.getElementById("table-badge").innerHTML = `🪑 ${t("table")} ${tb.num} <span style="font-size:10px;color:#e0e7ff">👥 ${capacity}</span>`;
+  await loadTableOrder(id);
   renderTables();
   if (window.innerWidth <= 768) { switchPanel("cart"); }
 }
 
-async function loadTableOrder(n) {
+async function loadTableOrder(id) {
   try {
-    const d = await api("/api/table_order/" + n);
+    const d = await api("/api/table_order/" + id);
     if (d.order) {
       existingOrderId = d.order.id;
       cart = d.order.items.map(i => ({
         name: i.name, emoji: i.emoji || "", price: i.price, qty: i.qty,
-        subtotal: Math.round(i.price * i.qty * 100) / 100
+        subtotal: Math.round(i.price * i.qty * 100) / 100,
+        open: !!(i.open), note: i.note || "", modifiers: i.modifiers || [], menu_id: i.menu_id || null
       }));
       discount = d.order.discount || 0;
       document.getElementById("guests").value = d.order.guests || 1;
-      toast("📂 " + t("toast.loadedSaved") + " " + n + ")");
+      toast("📂 " + t("toast.loadedSaved") + " " + (tableData[id] ? tableData[id].num : id) + ")");
     } else {
       existingOrderId = null;
       cart = [];
@@ -1224,13 +1340,15 @@ function updateStats() {
 // ===== نقل الطلب =====
 function showTransferModal() {
   if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
-  let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${selectedTable}</b> إلى:</div>`;
-  for (const [num, tb] of Object.entries(tableData)) {
-    if (parseInt(num) === selectedTable) continue;
+  const cur = tableData[selectedTable];
+  const curLabel = cur ? cur.num : selectedTable;
+  let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${curLabel}</b> إلى:</div>`;
+  for (const [tid, tb] of Object.entries(tableData)) {
+    if (parseInt(tid) === selectedTable) continue;
     const status = tb.active ? "🔴" : "🟢";
     const disabled = tb.active ? "disabled" : "";
-    html += `<button class="transfer-table-btn" onclick="transferOrder(${num})" ${disabled}>
-      <span>طاولة ${num}</span><span style="font-size:11px">${status}</span>
+    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>
+      <span>طاولة ${tb.num}</span><span style="font-size:11px">${status}</span>
     </button>`;
   }
   document.getElementById("transfer-body").innerHTML = html;
@@ -1241,7 +1359,8 @@ async function transferOrder(toTable) {
   try {
     const res = await api("/api/order/transfer", { method: "POST", body: JSON.stringify({ from_table: selectedTable, to_table: toTable }) });
     if (res.ok) {
-      toast("✅ تم النقل إلى الطاولة " + toTable);
+      const lb = tableData[toTable] ? tableData[toTable].num : toTable;
+      toast("✅ تم النقل إلى الطاولة " + lb);
       closeModal("transfer-modal");
       await selectTable(toTable);
     } else {
@@ -1456,11 +1575,11 @@ async function saveOrder() {
     const res = await api("/api/order/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_num: selectedTable, items: cart, discount, guests, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, discount, guests, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     existingOrderId = res.order_id;
     if (splitInvoices) { splitInvoices[splitCurrent].existingOrderId = res.order_id; renderInvoiceTabs(); }
-    toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + selectedTable + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
+    toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
     loadTables();
   } catch (e) { toast(e.message); }
 }
@@ -1476,7 +1595,7 @@ function showPayment() {
   document.getElementById("pay-sub").textContent = fmtCur(sub);
   document.getElementById("pay-tax").textContent = fmtCur(tax);
   document.getElementById("pay-total").textContent = fmtCur(total > 0 ? total : 0);
-  document.getElementById("pay-table").textContent = "🪑 " + t("table") + " " + selectedTable;
+  document.getElementById("pay-table").textContent = "🪑 " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable);
   document.getElementById("paid").value = Math.round(total > 0 ? total : 0);
   const dr = document.getElementById("pay-discount-row");
   if (discount > 0 || promoDiscount > 0) {
@@ -1502,6 +1621,21 @@ function setPayMethod(el) {
   if (creditRow) creditRow.style.display = payMethod === "آجل" ? "" : "none";
   const transferRow = document.getElementById("transfer-row");
   if (transferRow) transferRow.style.display = TRANSFER_METHODS.has(payMethod) ? "" : "none";
+  if (payMethod === "آجل") {
+    const paidEl = document.getElementById("paid");
+    if (paidEl) {
+      const sub = cart.reduce((s, i) => s + i.subtotal, 0);
+      const total = sub + sub * TAX_RATE - discount - promoDiscount;
+      const cur = Math.round(parseFloat(paidEl.value) || 0);
+      // الآجل يُسجَّل كاملاً على العميل: لا نقد الآن افتراضياً (يُعدَّل يدوياً لدفعة أولى)
+      if (total > 0 && cur === Math.round(total) && document.activeElement !== paidEl) {
+        paidEl.value = "0";
+      }
+    }
+    const changeEl = document.getElementById("change");
+    if (changeEl) changeEl.style.color = "#f59e0b";
+  }
+  calcChange();
 }
 
 function toggleRefundRef() {
@@ -1517,8 +1651,16 @@ function calcChange() {
   const change = paid - total;
   const el = document.getElementById("change");
   if (change >= 0) {
-    el.textContent = t("remaining") + ": " + fmtCur(change);
-    el.style.color = "#10b981";
+    if (payMethod === "آجل" && change > 0) {
+      el.textContent = "⚠️ دفع زائد: يُسجَّل آجل بقيمة الإجمالي فقط (" + fmtCur(total) + ") والفرق " + fmtCur(change) + " يُردّ للعميل";
+      el.style.color = "#ef4444";
+    } else {
+      el.textContent = t("remaining") + ": " + fmtCur(change);
+      el.style.color = "#10b981";
+    }
+  } else if (payMethod === "آجل") {
+    el.textContent = "📝 آجل: يُدفع الآن " + fmtCur(paid) + " والمتبقي " + fmtCur(Math.abs(change)) + " على العميل";
+    el.style.color = "#f59e0b";
   } else {
     el.textContent = t("shortfall") + ": " + fmtCur(Math.abs(change));
     el.style.color = "#ef4444";
@@ -1547,7 +1689,7 @@ async function confirmPayment() {
     const res = await api("/api/order/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_num: selectedTable, items: cart, paid, discount: discount + promoDiscount, payment_method: payMethod, guests, credit_name: creditName, transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     closeModal("pay-modal");
     toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
@@ -1609,7 +1751,7 @@ function printReceipt(o) {
     const mods = (i.modifiers && i.modifiers.length) 
       ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>` 
       : "";
-    return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
+    return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
   }).join("");
   const w = window.open("", "_blank", "width=320,height=600");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
@@ -1624,14 +1766,14 @@ function printReceipt(o) {
     .barcode{margin-top:10px;font-family:monospace;font-size:10px;letter-spacing:2px}
     .summary-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:8px;margin:6px 0}
   </style></head><body>
-    <div class="logo">🍽️</div>
+    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
     <h3>${name}</h3>
     <div class="muted">${t("appSubtitle")}</div>
     <div class="dash"></div>
     <table>
       <tr><td class="right">${t("orderLabel")} #${o.order_id}</td><td class="left">${o.date}</td></tr>
-      <tr><td class="right">${t("table")}: ${o.table_num}</td><td class="left">${t("cashier")}: ${o.employee}</td></tr>
-      <tr><td class="right">${t("guestsLabel")} ${o.guests || 1}</td><td class="left">${t("paymentMethod")} ${o.payment_method}</td></tr>
+      <tr><td class="right">${t("table")}: ${o.table_num}${o.table_section && o.table_section !== "hall" ? " (" + t(o.table_section) + ")" : ""}</td><td class="left">${t("cashier")}: ${o.employee}</td></tr>
+      <tr><td class="right">${t("guestsLabel")} ${o.guests || 1}</td><td class="left">${t("paymentMethod")} ${methodName(o.payment_method)}</td></tr>
       ${o.credit_name ? `<tr><td class="right" style="color:#d97706;font-weight:bold">📝 صاحب الآجل</td><td class="left" style="font-weight:bold">${o.credit_name}</td></tr>` : ""}
       ${o.transfer_ref ? `<tr><td class="right" style="color:#2563eb;font-weight:bold">🏦 مرجع التحويل</td><td class="left" style="font-weight:bold">${escapeHtml(o.transfer_ref)}${o.transfer_name ? " (" + escapeHtml(o.transfer_name) + ")" : ""}</td></tr>` : ""}
     </table>
@@ -1659,6 +1801,13 @@ function printReceipt(o) {
   w.close();
 }
 
+async function reprintInvoice(oid) {
+  try {
+    const o = await api("/api/orders/" + oid);
+    printReceipt(o);
+  } catch (e) { toast(e.message); }
+}
+
 // ===== سند مردودات (استرداد) =====
 function printRefundReceipt(r) {
   const name = RESTAURANT_NAME;
@@ -1684,7 +1833,7 @@ function printRefundReceipt(r) {
     .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
     .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
   </style></head><body>
-    <div class="logo">🍽️</div>
+    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
     <h3>${name}</h3>
     <div class="muted">${t("appSubtitle")}</div>
     <div class="badge">🧾 سند مردودات (استرداد)</div>
@@ -1728,6 +1877,66 @@ function printRefundReceipt(r) {
   w.print();
   w.close();
 }
+
+// ===== سند قبض (دفعة مقدمة للحفلات الخاصة) =====
+function printDepositVoucher(r) {
+  const name = RESTAURANT_NAME;
+  const dir = document.documentElement.dir;
+  const w = window.open("", "_blank", "width=340,height=650");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  const methodN = METHOD_NAMES[r.method] ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar) : (r.method || "نقدي");
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("depositVoucher")} ${r.receipt_no}</title><style>
+    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
+    h3{margin:4px 0}.muted{font-size:11px;color:#555}
+    .dash{border-top:1px dashed #000;margin:6px 0}
+    table{width:100%;border-collapse:collapse}td{padding:3px 0}
+    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
+    .logo{font-size:24px;margin:4px 0}
+    .badge{background:#059669;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
+    .summary-box{background:#f0fdf4;border:1px solid #86efac;border-radius:4px;padding:8px;margin:6px 0}
+    .amount-big{font-size:20px;font-weight:bold;color:#059669}
+    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
+    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
+  </style></head><body>
+    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
+    <h3>${name}</h3>
+    <div class="muted">${t("appSubtitle")}</div>
+    <div class="badge">🧾 ${t("depositVoucher")}</div>
+    <div class="muted">${t("dvReceiptNo")}: <b>${r.receipt_no}</b></div>
+    <div class="dash"></div>
+    <table>
+      <tr><td class="right">${t("dvPCustomer")}</td><td class="left">${escapeHtml(r.customer_name || "—")}</td></tr>
+      ${r.phone ? `<tr><td class="right">${t("dvPPhone")}</td><td class="left">${escapeHtml(r.phone)}</td></tr>` : ""}
+      ${r.party_date ? `<tr><td class="right">${t("dvPPartyDate")}</td><td class="left">${escapeHtml(r.party_date)}</td></tr>` : ""}
+      ${r.description ? `<tr><td class="right">${t("dvPOccasion")}</td><td class="left">${escapeHtml(r.description)}</td></tr>` : ""}
+      <tr><td class="right">${t("dvPDate")}</td><td class="left">${r.date}</td></tr>
+      <tr><td class="right">${t("dvPCashier")}</td><td class="left">${escapeHtml(r.employee || "")}</td></tr>
+    </table>
+    <div class="dash"></div>
+    <div class="summary-box">
+      <table>
+        <tr><td class="right">${t("paidAmount")}</td><td class="left amount-big">${fmtCur(r.amount)}</td></tr>
+        <tr><td class="right">${t("dvPMethod")}</td><td class="left">${methodN}</td></tr>
+      </table>
+    </div>
+    ${r.transfer_ref ? `<table>
+      <tr><td class="right" style="color:#2563eb;font-weight:bold">${t("dvPTransferRef")}</td><td class="left" style="font-weight:bold">${escapeHtml(r.transfer_ref)}${r.transfer_name ? " (" + escapeHtml(r.transfer_name) + ")" : ""}</td></tr>
+    </table>` : ""}
+    <div class="dash"></div>
+    <div class="sig">
+      <div>${t("dvPSignReceiver")}<div class="line">${t("dvPSignCustomer")}</div></div>
+      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
+      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
+    </div>
+    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
+    <div class="muted">${new Date().toLocaleString()}</div>
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
+
 function toggleDiscountDropdown() {
   document.getElementById("discount-menu").classList.toggle("show");
 }
@@ -1745,7 +1954,13 @@ function applyDiscount(pct) {
     renderCart();
     logAudit("discount", `${pct > 0 ? "تطبيق خصم " + pct + "%" : "إلغاء الخصم"} (= ${fmtCur(discount)})`);
   };
-  requireManager(`🏷️ <b>${pct > 0 ? t("applyDiscount") + " " + pct + "%" : t("cancelDiscount")}</b><br><span style="font-size:13px;color:var(--text)">${t("discountAmount")} ${fmtCur(pct > 0 ? sub * pct / 100 : discount)}</span>`, doIt);
+  const myLimit = user && user.role !== "manager" ? (parseFloat(user.discount_limit) || 0) : 100;
+  if (user && user.role === "manager") { doIt(); return; }
+  if (pct > 0 && pct <= myLimit) { doIt(); return; }
+  const overMsg = pct > myLimit
+    ? `<br><span style="font-size:12px;color:var(--warn)">⚠️ الخصم ${pct}% يتجاوز حدك (${myLimit}%) — يتطلب موافقة المدير</span>`
+    : "";
+  requireManager(`🏷️ <b>${pct > 0 ? t("applyDiscount") + " " + pct + "%" : t("cancelDiscount")}</b><br><span style="font-size:13px;color:var(--text)">${t("discountAmount")} ${fmtCur(pct > 0 ? sub * pct / 100 : discount)}</span>${overMsg}`, doIt);
 }
 
 // ===== أكواد الخصم =====
@@ -1917,7 +2132,7 @@ async function loadInventoryList() {
       const lowStock = i.min_stock > 0 && i.quantity <= i.min_stock;
       return `<div class="emp-row" style="display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${lowStock ? "var(--danger)" : "var(--border)"}">
         <div>
-          <b>${esc(i.item_name)}</b>
+          <b>${escapeHtml(i.item_name)}</b>
           <div style="font-size:12px;color:var(--text)">
             <span data-i18n="quantity">الكمية</span>: ${i.quantity} <span data-i18n="unit_${i.unit}">${i.unit}</span>
             ${i.min_stock > 0 ? ` | <span data-i18n="minStock">الحد الأدنى</span>: ${i.min_stock}` : ""}
@@ -2035,7 +2250,7 @@ async function loadCustomerList() {
     if (!items.length) { el.innerHTML = `<div class="empty-state">${t("empty")}</div>`; return; }
     el.innerHTML = items.map(c => `<div class="emp-row" style="display:flex;justify-content:space-between;align-items:center">
       <div>
-        <b>${esc(c.name)}</b>
+          <b>${escapeHtml(c.name)}</b>
         ${c.phone ? `<div style="font-size:12px;color:var(--text)">${c.phone}</div>` : ""}
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
@@ -2051,10 +2266,11 @@ async function showReservationManager() {
   openModal("modal-reservation");
   const sel = document.getElementById("res-new-table");
   sel.innerHTML = "";
-  for (const n of Object.values(tableData).map(t => t.num).sort((a, b) => a - b)) {
+  const list = Object.values(tableData).sort((a, b) => a.section === b.section ? a.num - b.num : (a.section || "").localeCompare(b.section || ""));
+  for (const tb of list) {
     const opt = document.createElement("option");
-    opt.value = n;
-    opt.textContent = t("table") + " " + n;
+    opt.value = tb.id;
+    opt.textContent = t("table") + " " + tb.num + (tb.section && tb.section !== "hall" ? " (" + t(tb.section) + ")" : "");
     sel.appendChild(opt);
   }
   document.getElementById("res-new-date").value = new Date().toISOString().slice(0, 10);
@@ -2068,16 +2284,16 @@ async function loadReservationList() {
     if (!items.length) { el.innerHTML = `<div class="empty-state">${t("empty")}</div>`; return; }
     el.innerHTML = items.map(r => `<div class="emp-row" style="display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${r.status === "confirmed" ? "var(--success)" : r.status === "cancelled" ? "var(--danger)" : "var(--warning)"}">
       <div>
-        <b>${esc(r.customer_name)}</b>
+        <b>${escapeHtml(r.customer_name)}</b>
         <div style="font-size:12px;color:var(--text)">
-          <span data-i18n="table">${t("table")}</span> ${r.table_num} | ${r.date} ${r.time} | ${r.guests} <span data-i18n="guests">${t("guests")}</span>
+          <span data-i18n="table">${t("table")}</span> ${r.table_num}${r.table_section && r.table_section !== "hall" ? " (" + t(r.table_section) + ")" : ""} | ${r.date} ${r.time} | ${r.guests} <span data-i18n="guests">${t("guests")}</span>
           ${r.phone ? ` | ${r.phone}` : ""}
-          ${r.notes ? `<br><i>${esc(r.notes)}</i>` : ""}
+          ${r.notes ? `<br><i>${escapeHtml(r.notes)}</i>` : ""}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         ${r.status === "pending" ? `<button class="btn btn-success" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'confirmed')" data-i18n="confirm">✓</button>` : ""}
-        ${r.status !== "cancelled" ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'cancelled')" data-i18n="cancel">✕</button>` : ""}
+        ${r.status !== "cancelled" ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'cancelled')">✕</button>` : ""}
       </div>
     </div>`).join("");
   } catch (e) { toast(e.message); }
@@ -2087,17 +2303,17 @@ async function createReservation() {
   if (!user) return;
   const customer_name = document.getElementById("res-new-name").value.trim();
   const phone = document.getElementById("res-new-phone").value.trim();
-  const table_num = parseInt(document.getElementById("res-new-table").value);
+  const table_id = parseInt(document.getElementById("res-new-table").value);
   const date = document.getElementById("res-new-date").value;
   const time = document.getElementById("res-new-time").value;
   const guests = parseInt(document.getElementById("res-new-guests").value) || 1;
   const notes = document.getElementById("res-new-notes").value.trim();
-  if (!customer_name || !date || !time) { toast("⚠️ " + t("reservationMissing")); return; }
+  if (!customer_name || !date || !time || !table_id) { toast("⚠️ " + t("reservationMissing")); return; }
   try {
     await api("/api/reservation", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ customer_name, phone, table_num, date, time, guests, notes })
+      body: JSON.stringify({ customer_name, phone, table_id, date, time, guests, notes })
     });
     document.getElementById("res-new-name").value = "";
     document.getElementById("res-new-phone").value = "";
@@ -2213,11 +2429,11 @@ async function sendToKitchen() {
     const res = await api("/api/order/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_num: selectedTable, items: cart, discount, guests })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, discount, guests })
     });
-    toast("🍳 " + t("toast.sentKitchen") + " #" + res.order_id + " " + t("toast.toKitchen") + " " + selectedTable);
+    toast("🍳 " + t("toast.sentKitchen") + " #" + res.order_id + " " + t("toast.toKitchen") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable));
     loadTables();
-    if (w) printKitchenTicket(w, res.order_id, selectedTable, guests);
+    if (w) printKitchenTicket(w, res.order_id, tableData[selectedTable] ? tableData[selectedTable].num : selectedTable, guests);
     if (window.innerWidth <= 768) { switchPanel("tables"); }
   } catch (e) {
     if (w) w.close();
@@ -2228,7 +2444,7 @@ async function sendToKitchen() {
 function printKitchenTicket(w, oid, table, guests) {
   const rows = cart.map(i =>
     `<tr>
-      <td style="text-align:right;font-size:19px;padding:4px 0">${i.emoji || ""} ${i.name}</td>
+      <td style="text-align:right;font-size:19px;padding:4px 0">${i.emoji || ""} ${i.name}${i.note ? `<br><span style="font-size:14px;color:#666">📝 ${escapeHtml(i.note)}</span>` : ""}</td>
       <td style="text-align:center;font-weight:bold;font-size:22px">x${i.qty}</td>
     </tr>`).join("");
   const now = new Date().toLocaleString(currentLang);
@@ -2240,6 +2456,7 @@ function printKitchenTicket(w, oid, table, guests) {
     .big{font-size:30px;font-weight:bold}
     table{width:100%;border-collapse:collapse}td{padding:2px 0}
   </style></head><body>
+    <img src="/logo.png" alt="logo" style="width:26px;height:26px;margin:2px 0">
     <h2>🧑‍🍳 ${t("kitchenOrder")}</h2>
     <div class="muted">${RESTAURANT_NAME}</div>
     <div class="dash"></div>
@@ -2269,7 +2486,7 @@ async function showReports() {
     document.getElementById("report-tabs").style.display = "";
     document.getElementById("report-filter").style.display = "";
     openModal("reports-modal");
-    await loadReportData();
+    await Promise.all([loadReportData(), seedFilterOptions()]);
   } else {
     document.getElementById("report-tabs").style.display = "none";
     document.getElementById("report-filter").style.display = "none";
@@ -2279,34 +2496,45 @@ async function showReports() {
 }
 
 async function loadCashierReport() {
+  const c = document.getElementById("report-content");
   try {
     const d = await api("/api/reports/cashier-daily");
-    const c = document.getElementById("report-content");
     c.innerHTML = `
       <div class="report-section">
         <div class="report-section-title">${t("rptCashierDailyTitle", { name: user.name })}</div>
         <div class="report-kpi">
-          <div class="report-kpi-item"><div class="report-kpi-value">${d.my_count}</div><div class="report-kpi-label">${t("rptMyOrdersToday")}</div></div>
-          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.my_total)}</div><div class="report-kpi-label">${t("rptMySalesTotal")}</div></div>
-          <div class="report-kpi-item"><div class="report-kpi-value">${d.all_count}</div><div class="report-kpi-label">${t("rptBranchOrdersTotal")}</div></div>
-          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.all_total)}</div><div class="report-kpi-label">${t("rptBranchSalesTotal")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${d.my_count ?? 0}</div><div class="report-kpi-label">${t("rptMyOrdersToday")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.my_total ?? 0)}</div><div class="report-kpi-label">${t("rptMySalesTotal")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${d.all_count ?? 0}</div><div class="report-kpi-label">${t("rptBranchOrdersTotal")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.all_total ?? 0)}</div><div class="report-kpi-label">${t("rptBranchSalesTotal")}</div></div>
         </div>
       </div>
       <div class="report-section">
         <div class="report-section-title">${t("rptMyTodayOrders")}</div>
         <table class="report-table">
           <tr><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th></tr>
-          ${(d.my_orders || []).map(o => `<tr><td>${o.date?.split(" ")[1] || o.date}</td><td>${o.table_num}</td><td>${fmtCur(o.total)}</td><td>${methodName(o.payment_method)}</td></tr>`).join("")}
+          ${(d.my_orders || []).map(o => `<tr><td>${o.date?.split(" ")[1] || o.date}</td><td>${o.table_num}${o.table_section && o.table_section !== "hall" ? " (" + t(o.table_section) + ")" : ""}</td><td>${fmtCur(o.total)}</td><td>${methodName(o.payment_method)}</td></tr>`).join("")}
           ${d.my_orders && d.my_orders.length === 0 ? '<tr><td colspan="4" style="text-align:center;color:var(--muted)">' + t("rptNoOrdersToday") + '</td></tr>' : ""}
         </table>
+      </div>
+
+      <div class="report-section" id="ar-overdue-section">
+        <div class="report-section-title">${t("rptOverdueList")}
+          <button class="btn btn-sm btn-success" style="margin-right:8px" onclick="loadOverdueList()">${t("rptOverdueList")}</button>
+          <button class="btn btn-sm btn-warning" style="margin-right:8px" onclick="autoUpdateOverdue()">${t("rptAutoUpdate")}</button>
+          <button class="btn btn-sm btn-info" onclick="exportOverdueCSV()">${t("rptExportCSV")}</button>
+        </div>
+        <div id="overdue-list-body" style="font-size:12px;color:var(--muted)">${t("rptLoading")}</div>
       </div>`;
-  } catch (e) { toast(e.message); }
+  } catch (e) { c.innerHTML = `<div style="padding:16px;text-align:center;color:var(--danger)">${e.message}</div>`; }
 }
 
 let currentReportTab = "overview";
 let reportData = {};
 let reportOrders = [];
 let reportFilters = { method: "", employee: "", item: "", table: "", day: "", month: "", hour: "", section: "" };
+let filterOptionsCache = { method: [], employee: [], item: [], table: [] };
+let filterOptionsSeeded = false;
 let creditFilterStatus = "open";
 let creditSearchVal = "";
 
@@ -2360,18 +2588,45 @@ function clearReportFilters() {
 function fillSelect(id, values, selected) {
   const el = document.getElementById(id);
   if (!el) return;
+  const label = v => id === "filter-method" ? methodName(v) : v;
   el.innerHTML = `<option value="">${t("rptAll")}</option>` + values.map(v =>
-    `<option value="${escq(v)}" ${String(v) === String(selected) ? "selected" : ""}>${escapeHtml(v)}</option>`
+    `<option value="${escq(v)}" ${String(v) === String(selected) ? "selected" : ""}>${escapeHtml(label(v))}</option>`
   ).join("");
+}
+
+function mergeFilterOptions(a, b) {
+  const out = a.slice();
+  for (const v of b) if (out.indexOf(v) < 0) out.push(v);
+  return out;
+}
+
+async function seedFilterOptions() {
+  if (filterOptionsSeeded) return;
+  filterOptionsSeeded = true;
+  try {
+    const d = await api("/api/reports/advanced");
+    const cache = filterOptionsCache;
+    cache.method = mergeFilterOptions(cache.method, (d.by_method || []).map(m => m.method));
+    cache.employee = mergeFilterOptions(cache.employee, (d.by_employee || []).map(e => e.employee));
+    cache.item = mergeFilterOptions(cache.item, (d.top_items || []).map(i => i.name));
+    cache.table = mergeFilterOptions(cache.table, Object.values(tableData).map(t => String(t.num)));
+    cache.table.sort((a, b) => Number(a) - Number(b));
+    populateReportFilters();
+  } catch (e) {}
 }
 
 function populateReportFilters() {
   const d = reportData;
-  fillSelect("filter-method", (d.by_method || []).map(m => m.method), reportFilters.method);
-  fillSelect("filter-employee", (d.by_employee || []).map(e => e.employee), reportFilters.employee);
-  fillSelect("filter-item", (d.top_items || []).map(i => i.name), reportFilters.item);
-  const nums = [...new Set(Object.values(tableData).map(t => String(t.num)))].sort((a, b) => Number(a) - Number(b));
-  fillSelect("filter-table", nums, reportFilters.table);
+  const cache = filterOptionsCache;
+  cache.method = mergeFilterOptions(cache.method, (d.by_method || []).map(m => m.method));
+  cache.employee = mergeFilterOptions(cache.employee, (d.by_employee || []).map(e => e.employee));
+  cache.item = mergeFilterOptions(cache.item, (d.top_items || []).map(i => i.name));
+  cache.table = mergeFilterOptions(cache.table, Object.values(tableData).map(t => String(t.num)));
+  cache.table.sort((a, b) => Number(a) - Number(b));
+  fillSelect("filter-method", cache.method, reportFilters.method);
+  fillSelect("filter-employee", cache.employee, reportFilters.employee);
+  fillSelect("filter-item", cache.item, reportFilters.item);
+  fillSelect("filter-table", cache.table, reportFilters.table);
   const hint = document.getElementById("report-drill-hint");
   if (hint) hint.style.display = "";
 }
@@ -2406,16 +2661,17 @@ function renderReportDetail() {
       <div class="report-section-title">${t("rptDetailsTitle")} (${orders.length})</div>
       ${label ? `<div class="report-filter-badge">🔎 ${label} <button class="btn btn-sm" onclick="clearReportFilters()">${t("rptClearFilters")}</button></div>` : ""}
       <table class="report-table">
-        <tr><th>#</th><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptMethod")}</th><th>${t("rptItems")}</th><th>${t("rptTotal")}</th></tr>
+        <tr><th>#</th><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptMethod")}</th><th>${t("rptItems")}</th><th>${t("rptTotal")}</th><th></th></tr>
         ${shown.length ? shown.map(o => `
           <tr class="report-order-row" onclick="toggleReportOrderDetail(${o.id})" title="${t("rptDrillHint")}">
-            <td>#${o.id}</td><td>${o.date}</td><td>${o.table_num || "-"}</td>
+            <td>#${o.id}</td><td>${o.date}</td><td>${o.table_num || "-"}${o.table_section && o.table_section !== "hall" ? ` <span style="color:#6b7280;font-size:11px">(${t(o.table_section)})</span>` : ""}</td>
             <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}${o.credit_name ? ` <span style="color:#d97706">· ${escapeHtml(o.credit_name)}</span>` : ""}</td>
             <td>${(o.items || []).map(i => `${i.qty || 1}× ${escapeHtml(i.name)}`).join(", ")}</td>
             <td>${fmtCur(o.total)}</td>
+            <td><button class="btn btn-sm" onclick="event.stopPropagation();reprintInvoice(${o.id})" title="${t("rptReprint")}">🖨️ ${t("rptReprint")}</button></td>
           </tr>
           <tr id="order-detail-${o.id}" class="report-order-detail" style="display:none">
-            <td colspan="7">
+            <td colspan="8">
               <table class="report-table report-table-sub">
                 <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptPrice")}</th><th>${t("rptAmount")}</th></tr>
                 ${(o.items || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td>${i.qty || 1}</td><td>${fmtCur(i.price)}</td><td>${fmtCur(i.subtotal != null ? i.subtotal : (i.price * (i.qty || 1)))}</td></tr>`).join("")}
@@ -2424,7 +2680,7 @@ function renderReportDetail() {
                 <tr class="total-row"><td colspan="3">${t("rptTotal")}</td><td>${fmtCur(o.total)}</td></tr>
               </table>
             </td>
-          </tr>`).join("") : `<tr><td colspan="7" style="text-align:center;color:var(--muted)">${t("rptNoOrdersMatch")}</td></tr>`}
+          </tr>`).join("") : `<tr><td colspan="8" style="text-align:center;color:var(--muted)">${t("rptNoOrdersMatch")}</td></tr>`}
       </table>
       ${orders.length > max ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${t("rptShowingFirst", { n: max, total: orders.length })}</div>` : ""}
     </div>`;
@@ -2446,11 +2702,11 @@ function renderReportTab() {
   const c = document.getElementById("report-content");
   const charts = document.getElementById("report-charts");
   charts.style.display = "none";
+  // دمج التبويبات القديمة في نظرة عامة شاملة
+  const tab = (currentReportTab === "daily" || currentReportTab === "monthly") ? "overview" : currentReportTab;
 
-  switch (currentReportTab) {
+  switch (tab) {
     case "overview": renderOverview(c); charts.style.display = ""; break;
-    case "daily": renderDaily(c); break;
-    case "monthly": renderMonthly(c); break;
     case "profitloss": renderProfitLoss(c); break;
     case "tax": renderTax(c); break;
     case "employees": renderEmployees(c); break;
@@ -2462,12 +2718,114 @@ function renderReportTab() {
     case "income": renderIncome(c); break;
     case "cashflow": renderCashFlow(c); break;
     case "ar": renderAR(c); break;
+    case "ap": renderAP(c); break;
     case "cancelled": renderCancelled(c); break;
+    case "deposits": renderDeposits(c); break;
+    case "discounts": renderDiscounts(c); break;
   }
+}
+
+function renderDeposits(c) {
+  c.innerHTML = `<div class="report-section">
+    <div class="report-section-title">🎉 ${t("rptDepositVouchers")}</div>
+    <p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
+  loadDepositVouchers();
+}
+
+function renderDiscounts(c) {
+  const from = document.getElementById("report-from").value;
+  const to = document.getElementById("report-to").value;
+  c.innerHTML = `<div class="report-section">
+    <div class="report-section-title">🏷️ ${t("rptDiscounts")}</div>
+    <p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
+  loadDiscountsLog(from, to);
+}
+
+async function loadDiscountsLog(from, to) {
+  const el = document.getElementById("report-content");
+  try {
+    const q = new URLSearchParams();
+    if (from) q.set("from", from);
+    if (to) q.set("to", to);
+    const res = await api("/api/reports/discounts" + (q.toString() ? "?" + q.toString() : ""));
+    const rows = res.discounts || [];
+    el.innerHTML = `<div class="report-section">
+      <div class="report-section-title">🏷️ ${t("rptDiscounts")}</div>
+      <div class="rpt-summary-grid">
+        <div class="rpt-summary-card"><div class="rpt-summary-num">${fmtCur(res.total)}</div><div class="rpt-summary-label">${t("rptTotalDiscounts")}</div></div>
+        <div class="rpt-summary-card"><div class="rpt-summary-num">${res.count}</div><div class="rpt-summary-label">${t("rptDiscountCount")}</div></div>
+      </div>
+      <table class="rpt-table">
+        <thead><tr><th>${t("rptDate")}</th><th>${t("rptEmployee")}</th><th>${t("rptOrder")}</th><th>${t("rptTable")}</th><th>${t("rptSubtotal")}</th><th>${t("rptDiscount")}</th><th>${t("rptLimit")}</th></tr></thead>
+        <tbody>${rows.length ? rows.map(r => `
+          <tr>
+            <td>${r.date}</td>
+            <td>${escapeHtml(r.employee || "")}</td>
+            <td>#${r.order_id || ""}</td>
+            <td>${r.table_num || ""}${r.table_section && r.table_section !== "hall" ? ` <span style="color:#6b7280;font-size:11px">(${t(r.table_section)})</span>` : ""}</td>
+            <td>${fmtCur(r.subtotal)}</td>
+            <td style="color:#ef4444;font-weight:bold">-${fmtCur(r.discount)}</td>
+            <td>${r.limit_pct != null ? r.limit_pct + "%" : "—"}</td>
+          </tr>`).join("") : `<tr><td colspan="7" style="text-align:center;color:var(--muted)">${t("noRecords")}</td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
+  } catch (e) { el.innerHTML = `<p style="color:var(--danger)">${e.message}</p>`; }
+}
+
+async function loadDepositVouchers() {
+  const el = document.getElementById("report-content");
+  try {
+    const from = document.getElementById("report-from").value;
+    const to = document.getElementById("report-to").value;
+    const d = await api("/api/deposit-vouchers?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to));
+    el.innerHTML = `
+      <div class="report-section">
+        <div class="report-section-title">🎉 ${t("rptDepositVouchers")}</div>
+        <div class="report-kpi">
+          <div class="report-kpi-item"><div class="report-kpi-value">${d.count}</div><div class="report-kpi-label">${t("rptOrderCount")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(d.total)}</div><div class="report-kpi-label">${t("rptTotalDeposits")}</div></div>
+        </div>
+        <table class="report-table">
+          <tr><th>${t("dvReceiptNo")}</th><th>${t("rptDate")}</th><th>${t("rptCustomer")}</th><th>${t("rptParty")}</th><th>${t("rptPartyDate")}</th><th>${t("rptMethod")}</th><th>${t("dvRefShort")}</th><th>${t("rptAmount")}</th><th></th></tr>
+          ${d.items.length ? d.items.map(v => `<tr>
+            <td><b>${v.receipt_no}</b></td><td>${v.date}</td>
+            <td>${escapeHtml(v.customer_name||"") || "—"}</td>
+            <td>${escapeHtml(v.description||"") || "—"}</td>
+            <td>${escapeHtml(v.party_date||"") || "—"}</td>
+            <td>${methodName(v.method)}</td>
+            <td>${escapeHtml(v.transfer_ref||"") || "—"}</td>
+            <td style="color:var(--success)">${fmtCur(v.amount)}</td>
+            <td><button class="btn btn-sm" onclick="printDepositVoucher(${JSON.stringify(v).replace(/"/g, "&quot;")})">🖨️ ${t("dvPrintBtn")}</button></td>
+          </tr>`).join("") : `<tr><td colspan="9" style="text-align:center;color:var(--muted)">${t("rptNoDeposits")}</td></tr>`}
+          <tr class="total-row"><td colspan="7">${t("rptTotal")}</td><td style="color:var(--success)">${fmtCur(d.total)}</td><td></td></tr>
+        </table>
+      </div>`;
+  } catch (e) { el.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
 }
 
 function renderOverview(c) {
   const d = reportData;
+  const today = new Date().toISOString().slice(0, 10);
+  const thisMonth = today.slice(0, 7);
+
+  // حساب بيانات اليوم والشهر من البيانات اليومية
+  let todayOrders = 0, todaySales = 0, monthOrders = 0, monthSales = 0;
+  (d.daily || []).forEach(day => {
+    if (day.date === today) { todayOrders = day.count; todaySales = day.total; }
+    if (day.date && day.date.slice(0, 7) === thisMonth) { monthOrders += day.count; monthSales += day.total; }
+  });
+
+  // تجميع شهري من البيانات اليومية
+  const monthly = {};
+  (d.daily || []).forEach(day => {
+    const m = day.date.slice(0, 7);
+    if (!monthly[m]) monthly[m] = { total: 0, count: 0 };
+    monthly[m].total += day.total;
+    monthly[m].count += day.count;
+  });
+  const months = Object.entries(monthly).sort((a, b) => b[0].localeCompare(a[0]));
+
   c.innerHTML = `
     <div class="report-kpi">
       <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.total_sales)}</div><div class="report-kpi-label">${t("rptTotalSales")}</div></div>
@@ -2475,6 +2833,43 @@ function renderOverview(c) {
       <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.avg_order)}</div><div class="report-kpi-label">${t("rptAvgOrder")}</div></div>
       <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.total_tax)}</div><div class="report-kpi-label">${t("rptTotalTax")}</div></div>
     </div>
+
+    <div class="report-section">
+      <div class="report-section-title">📋 ملخص سريع</div>
+      <table class="report-table">
+        <tr><th>الفترة</th><th>الطلبات</th><th>المبيعات</th><th>المتوسط</th></tr>
+        <tr style="background:var(--accent-bg)"><td><strong>اليوم</strong></td><td>${todayOrders}</td><td><strong>${fmtCur(todaySales)}</strong></td><td>${todayOrders > 0 ? fmtCur(todaySales / todayOrders) : fmtCur(0)}</td></tr>
+        <tr style="background:var(--accent-bg)"><td><strong>هذا الشهر</strong></td><td>${monthOrders}</td><td><strong>${fmtCur(monthSales)}</strong></td><td>${monthOrders > 0 ? fmtCur(monthSales / monthOrders) : fmtCur(0)}</td></tr>
+        <tr class="total-row"><td><strong>الإجمالي</strong></td><td>${d.order_count}</td><td><strong>${fmtCur(d.total_sales)}</strong></td><td>${fmtCur(d.avg_order)}</td></tr>
+      </table>
+    </div>
+
+    <div class="report-section">
+      <div class="report-section-title">📅 المبيعات اليومية</div>
+      <table class="report-table">
+        <tr><th>${t("rptDate")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
+        ${(d.daily || []).slice(-14).map(day => {
+          const avg = day.count > 0 ? day.total / day.count : 0;
+          const isToday = day.date === today;
+          return '<tr class="report-drill' + (isToday ? '" style="background:var(--accent-bg)' : '') + '" onclick="applyReportDrill(\'day\', \'' + day.date + '\')" title="' + t("rptDrillHint") + '"><td>' + (isToday ? '<strong>' + day.date + '</strong>' : day.date) + '</td><td>' + day.count + '</td><td>' + fmtCur(day.total) + '</td><td>' + fmtCur(avg) + '</td></tr>';
+        }).join("")}
+        <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
+      </table>
+    </div>
+
+    <div class="report-section">
+      <div class="report-section-title">📆 المبيعات الشهرية</div>
+      <table class="report-table">
+        <tr><th>${t("rptMonth")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
+        ${months.map(([m, v]) => {
+          const avg = v.count > 0 ? v.total / v.count : 0;
+          const isThisMonth = m === thisMonth;
+          return '<tr class="report-drill' + (isThisMonth ? '" style="background:var(--accent-bg)' : '') + '" onclick="applyReportDrill(\'month\', \'' + m + '\')" title="' + t("rptDrillHint") + '"><td>' + (isThisMonth ? '<strong>' + m + '</strong>' : m) + '</td><td>' + v.count + '</td><td>' + fmtCur(v.total) + '</td><td>' + fmtCur(avg) + '</td></tr>';
+        }).join("")}
+        <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
+      </table>
+    </div>
+
     <div class="report-section">
       <div class="report-section-title">${t("rptSalesByMethod")}</div>
       <table class="report-table">
@@ -2596,6 +2991,7 @@ async function renderAR(c) {
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptARTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
     const d = await api("/api/reports/ar?from=" + encodeURIComponent(from || "") + "&to=" + encodeURIComponent(to || ""));
+    if (d.error) { c.innerHTML = `<span style="color:var(--danger)">${d.error}</span>`; return; }
     const s = d.summary;
     const recon = s.total_invoiced - (s.total_paid + s.total_open_due);
     const agingRows = [
@@ -2608,7 +3004,9 @@ async function renderAR(c) {
     (d.aging || []).forEach(a => { aging[a.bucket] = a; });
     c.innerHTML = `
       <div class="report-section">
-        <div class="report-section-title">${t("rptARTitle")} <span style="font-weight:400;font-size:11px;color:var(--muted)">${t("rptAsOf")} ${d.as_of}</span></div>
+        <div class="report-section-title">${t("rptARTitle")} <span style="font-weight:400;font-size:11px;color:var(--muted)">${t("rptAsOf")} ${d.as_of}</span>
+          <button class="btn btn-sm btn-info" style="margin-left:auto" onclick="printARReport()">🖨️ ${t("rptPrintBtn")}</button>
+        </div>
         <div class="report-kpi">
           <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(s.total_invoiced)}</div><div class="report-kpi-label">${t("rptTotalInvoiced")}</div></div>
           <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(s.total_paid)}</div><div class="report-kpi-label">${t("rptTotalCollected")}</div></div>
@@ -2634,36 +3032,77 @@ async function renderAR(c) {
       </div>
 
       <div class="report-section">
-        <div class="report-section-title">${t("rptAccountsByCustomer")} (${d.customers.length})</div>
-        <table class="report-table">
-          <tr><th>#</th><th>${t("rptCustomer")}</th><th>${t("rptInvoice")}</th><th>${t("rptDate")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptDays")}</th><th>${t("rptStatus")}</th><th></th></tr>
-          ${d.customers.length ? d.customers.map(x => `
-            <tr class="report-order-row" onclick="toggleArStatement(${x.id})">
-              <td>#${x.id}</td>
-              <td>${escapeHtml(x.customer_name)}</td>
-              <td>#${x.order_id || "-"}</td>
-              <td style="font-size:11px">${x.created_at}</td>
-              <td>${fmtCur(x.total)}</td>
-              <td style="color:var(--success)">${fmtCur(x.paid)}</td>
-              <td style="color:${x.due > 0 ? "var(--danger)" : "var(--muted)"};font-weight:bold">${fmtCur(x.due)}</td>
-              <td>${x.days_open}</td>
-              <td style="color:${x.status === "open" ? "var(--danger)" : "var(--success)"}">${x.status === "open" ? t("rptOpen") : t("rptSettled")}</td>
-              <td><button class="btn btn-sm" onclick="event.stopPropagation();toggleArStatement(${x.id})">${t("rptStatement")}</button></td>
-            </tr>
-            <tr id="ar-statement-${x.id}" class="report-order-detail" style="display:none">
-              <td colspan="10">
-                ${x.payments && x.payments.length ? `
-                  <div style="font-weight:bold;margin-bottom:6px;font-size:12px">${t("rptPaymentOpsFor")}: ${escapeHtml(x.customer_name)}</div>
-                  <table class="report-table report-table-sub">
-                    <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th></tr>
-                    ${x.payments.map(p => `<tr><td>#${p.id}</td><td>${p.date}</td><td style="color:var(--success)">+${fmtCur(p.amount)}</td><td>${methodName(p.method)}</td><td>${escapeHtml(p.employee || "")}</td></tr>`).join("")}
-                    <tr class="total-row"><td colspan="2">${t("rptTotalCollected")}</td><td>${fmtCur(x.paid)}</td><td colspan="2">${t("rptBalance")}: ${fmtCur(x.due)}</td></tr>
-                  </table>
-                  <div style="font-size:11px;color:var(--muted);margin-top:4px">${t("rptReconNote")}: ${fmtCur(x.total)} = ${fmtCur(x.paid)} + ${fmtCur(x.due)}</div>` :
-                  `<div style="font-size:11px;color:var(--muted)">${t("rptNoPayments")}</div>`}
-              </td>
-            </tr>`).join("") : `<tr><td colspan="10" style="text-align:center;color:var(--muted)">${t("rptNoAR")}</td></tr>`}
-        </table>
+        <div class="report-section-title">${t("rptAccountsByCustomer")} (${(() => {
+          const names = new Set(d.customers.map(x => x.customer_name));
+          return names.size;
+        })()})</div>
+        ${(() => {
+          const groups = {};
+          d.customers.forEach(x => {
+            if (!groups[x.customer_name]) groups[x.customer_name] = [];
+            groups[x.customer_name].push(x);
+          });
+          const sorted = Object.entries(groups).sort((a, b) => {
+            const aOpen = a[1].filter(r => r.status === "open").reduce((s, r) => s + parseFloat(r.due || 0), 0);
+            const bOpen = b[1].filter(r => r.status === "open").reduce((s, r) => s + parseFloat(r.due || 0), 0);
+            return bOpen - aOpen;
+          });
+          if (!sorted.length) return `<p style="color:var(--muted)">${t("rptNoAR")}</p>`;
+          return sorted.map(([name, invoices]) => {
+            const gTotal = invoices.reduce((s, r) => s + parseFloat(r.total || 0), 0);
+            const gPaid = invoices.reduce((s, r) => s + parseFloat(r.paid || 0), 0);
+            const gDue = invoices.reduce((s, r) => s + parseFloat(r.due || 0), 0);
+            const gOpen = invoices.filter(r => r.status === "open").length;
+            const gSettled = invoices.filter(r => r.status !== "open").length;
+            const gid = "grp-" + name.replace(/\s+/g, "-");
+            return `
+            <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card);cursor:pointer" onclick="toggleGroup('${gid}')">
+                <b style="font-size:13px;flex:1">${escapeHtml(name)}</b>
+                <span style="font-size:11px;color:var(--muted)">${invoices.length} فاتورة</span>
+                <span style="font-size:11px">${gOpen} ${t("rptOpen")} · ${gSettled} ${t("rptSettled")}</span>
+                <span style="font-size:12px;color:var(--success)">${fmtCur(gPaid)}</span>
+                <span style="font-size:13px;color:var(--danger);font-weight:bold">${fmtCur(gDue)}</span>
+                <span id="arrow-${gid}" style="font-size:11px">▼</span>
+              </div>
+              <div id="${gid}" style="display:none">
+                <table class="report-table" style="margin:0">
+                  <tr><th>#</th><th>${t("rptInvoice")}</th><th>${t("rptDate")}</th><th>${t("rptDueDate")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptDays")}</th><th>${t("rptStatus")}</th><th></th></tr>
+                  ${invoices.map(x => {
+                    const od = x.overdue_days > 0 && x.status === "open" ? `<span style="color:var(--danger);font-size:10px;font-weight:bold"> ⚠ ${x.overdue_days} ${t("rptOverdueDays")}</span>` : "";
+                    return `
+                    <tr class="report-order-row" onclick="toggleArStatement(${x.id})">
+                      <td>#${x.id}</td>
+                      <td>#${x.order_id || "-"}</td>
+                      <td style="font-size:11px">${(x.created_at || "").slice(0,10)}</td>
+                      <td style="font-size:11px;${x.overdue_days > 0 && x.status === 'open' ? 'color:var(--danger);font-weight:bold' : ''}">${x.due_date || "-"}${od}</td>
+                      <td>${fmtCur(x.total)}</td>
+                      <td style="color:var(--success)">${fmtCur(x.paid)}</td>
+                      <td style="color:${x.due > 0 ? "var(--danger)" : "var(--muted)"};font-weight:bold">${fmtCur(x.due)}</td>
+                      <td>${x.days_open}</td>
+                      <td style="color:${x.status === "open" ? "var(--danger)" : "var(--success)"}">${x.status === "open" ? t("rptOpen") : t("rptSettled")}</td>
+                      <td><button class="btn btn-sm" onclick="event.stopPropagation();toggleArStatement(${x.id})">${t("rptStatement")}</button></td>
+                    </tr>
+                    <tr id="ar-statement-${x.id}" class="report-order-detail" style="display:none">
+                      <td colspan="10">
+                        ${x.payments && x.payments.length ? `
+                          <div style="font-weight:bold;margin-bottom:6px;font-size:12px">${t("rptPaymentOpsFor")}: ${escapeHtml(x.customer_name)}</div>
+                          <table class="report-table report-table-sub">
+                            <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th></tr>
+                            ${x.payments.map(p => `<tr><td>#${p.id}</td><td>${p.date}</td><td style="color:var(--success)">+${fmtCur(p.amount)}</td><td>${methodName(p.method)}</td><td>${escapeHtml(p.employee || "")}</td></tr>`).join("")}
+                            <tr class="total-row"><td colspan="2">${t("rptTotalCollected")}</td><td>${fmtCur(x.paid)}</td><td colspan="2">${t("rptBalance")}: ${fmtCur(x.due)}</td></tr>
+                          </table>
+                          <div style="font-size:11px;color:var(--muted);margin-top:4px">${t("rptReconNote")}: ${fmtCur(x.total)} = ${fmtCur(x.paid)} + ${fmtCur(x.due)}</div>` :
+                          `<div style="font-size:11px;color:var(--muted)">${t("rptNoPayments")}</div>`}
+                      </td>
+                    </tr>`;
+                  }).join("")}
+                  <tr class="total-row"><td colspan="4">${t("rptTotal")}</td><td>${fmtCur(gTotal)}</td><td style="color:var(--success)">${fmtCur(gPaid)}</td><td style="color:var(--danger)">${fmtCur(gDue)}</td><td colspan="3"></td></tr>
+                </table>
+              </div>
+            </div>`;
+          }).join("");
+        })()}
       </div>
 
       <div class="report-section">
@@ -2679,6 +3118,223 @@ async function renderAR(c) {
 function toggleArStatement(id) {
   const el = document.getElementById("ar-statement-" + id);
   if (el) el.style.display = (el.style.display === "none") ? "" : "none";
+}
+
+function toggleGroup(gid) {
+  const el = document.getElementById(gid);
+  const arrow = document.getElementById("arrow-" + gid);
+  if (!el) return;
+  const show = el.style.display === "none";
+  el.style.display = show ? "" : "none";
+  if (arrow) arrow.textContent = show ? "▲" : "▼";
+}
+
+async function loadOverdueList() {
+  const el = document.getElementById("overdue-list-body");
+  if (!el) return;
+  el.innerHTML = `<p style="color:var(--muted)">${t("rptLoading")}</p>`;
+  try {
+    const d = await api("/api/credit/overdue");
+    if (!d.overdue || !d.overdue.length) {
+      el.innerHTML = `<p style="color:var(--success)">${t("rptNoOverdue")}</p>`;
+      return;
+    }
+    el.innerHTML = `
+      <div class="report-kpi">
+        <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${d.count}</div><div class="report-kpi-label">${t("rptOverdueCount")}</div></div>
+        <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(d.total_overdue)}</div><div class="report-kpi-label">${t("rptTotalOverdue")}</div></div>
+      </div>
+      <table class="report-table">
+        <tr><th>#</th><th>${t("rptCustomer")}</th><th>${t("rptInvoice")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptDueDate")}</th><th>${t("rptOverdueDays")}</th><th>${t("rptLastReminder")}</th><th></th></tr>
+        ${d.overdue.map(r => `
+          <tr>
+            <td>#${r.id}</td>
+            <td>${escapeHtml(r.customer_name)}</td>
+            <td>#${r.order_id || "-"}</td>
+            <td>${fmtCur(r.total)}</td>
+            <td style="color:var(--success)">${fmtCur(r.paid)}</td>
+            <td style="color:var(--danger);font-weight:bold">${fmtCur(r.due)}</td>
+            <td style="color:var(--danger)">${r.due_date}</td>
+            <td style="color:var(--danger);font-weight:bold">${r.overdue_days} يوم</td>
+            <td style="font-size:11px">${r.last_reminder || "-"}</td>
+            <td>
+              <button class="btn btn-sm btn-warning" onclick="sendOverdueReminder(${r.id},'${escapeHtml(r.customer_name)}',${r.due})">${t("rptSendReminder")}</button>
+            </td>
+          </tr>
+        `).join("")}
+      </table>`;
+  } catch (e) {
+    el.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`;
+  }
+}
+
+async function sendOverdueReminder(lid, name, due) {
+  const msg = prompt(`${t("rptSendReminder")} — ${name}\n${t("rptRemaining")}: ${fmtCur(due)}\n\n${t("rptDescription")}:`);
+  if (msg === null) return;
+  try {
+    await api("/api/credit/reminder", { method: "POST", body: JSON.stringify({ ledger_id: lid, method: "whatsapp", message: msg }) });
+    toast("✅ " + t("rptReminderSent"));
+    loadOverdueList();
+  } catch (e) {
+    toast("❌ " + e.message);
+  }
+}
+
+async function autoUpdateOverdue() {
+  try {
+    const d = await api("/api/credit/overdue/auto-update", { method: "POST", body: "{}" });
+    toast(`✅ ${t("rptAutoUpdate")}: ${d.updated} ${t("rptOverdueCount")}`);
+    loadOverdueList();
+  } catch (e) {
+    toast("❌ " + e.message);
+  }
+}
+
+function exportOverdueCSV() {
+  window.open("/api/credit/overdue/export", "_blank");
+}
+
+function printARReport() {
+  const el = document.getElementById("report-content");
+  if (!el) return;
+  const dir = document.documentElement.dir;
+  const w = window.open("", "_blank", "width=800,height=600");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptARTitle")}</title><style>
+    body{font-family:'Segoe UI',Tahoma,sans-serif;margin:15px;font-size:12px;color:#000}
+    h2{margin:4px 0;font-size:16px}.muted{font-size:11px;color:#555}
+    table{width:100%;border-collapse:collapse;margin:8px 0}th,td{padding:4px 6px;border:1px solid #ddd;font-size:11px;text-align:right}
+    th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
+    @media print{body{margin:10px}}
+  </style></head><body>
+    <h2>${RESTAURANT_NAME} — ${t("rptARTitle")}</h2>
+    <div class="muted">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
+    ${el.innerHTML}
+  </body></html>`);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 500);
+}
+
+function printAPReport() {
+  const el = document.getElementById("report-content");
+  if (!el) return;
+  const dir = document.documentElement.dir;
+  const w = window.open("", "_blank", "width=800,height=600");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptAPTitle")}</title><style>
+    body{font-family:'Segoe UI',Tahoma,sans-serif;margin:15px;font-size:12px;color:#000}
+    h2{margin:4px 0;font-size:16px}.muted{font-size:11px;color:#555}
+    table{width:100%;border-collapse:collapse;margin:8px 0}th,td{padding:4px 6px;border:1px solid #ddd;font-size:11px;text-align:right}
+    th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
+    @media print{body{margin:10px}}
+  </style></head><body>
+    <h2>${RESTAURANT_NAME} — ${t("rptAPTitle")}</h2>
+    <div class="muted">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
+    ${el.innerHTML}
+  </body></html>`);
+  w.document.close();
+  setTimeout(() => { w.print(); }, 500);
+}
+
+async function renderAP(c) {
+  c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptAPTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
+  try {
+    const [rows, summary] = await Promise.all([api("/api/supplier/list?status=open"), api("/api/supplier/summary")]);
+    c.innerHTML = `
+      <div class="report-section">
+        <div class="report-section-title">${t("rptAPTitle")}
+          <button class="btn btn-sm btn-info" style="margin-left:auto" onclick="printAPReport()">🖨️ ${t("rptPrintBtn")}</button>
+        </div>
+        <div class="report-kpi">
+          <div class="report-kpi-item"><div class="report-kpi-value">${summary.open_count}</div><div class="report-kpi-label">${t("rptOpenBalances")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(summary.remaining)}</div><div class="report-kpi-label">${t("rptTotalRemaining")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(summary.total_paid)}</div><div class="report-kpi-label">${t("rptTotalCollected")}</div></div>
+          <div class="report-kpi-item"><div class="report-kpi-value">${summary.settled_count}</div><div class="report-kpi-label">${t("rptSettledCount")}</div></div>
+        </div>
+      </div>
+      <div class="report-section">
+        <div style="margin-bottom:10px">
+          <button class="btn btn-success" onclick="openAddSupplierModal()">${t("rptAddSupplier")}</button>
+        </div>
+        <table class="report-table">
+          <tr><th>#</th><th>${t("rptSupplier")}</th><th>${t("rptPhone")}</th><th>${t("rptDescription")}</th><th>${t("rptTotal")}</th><th>${t("rptPaid")}</th><th>${t("rptRemaining")}</th><th>${t("rptDueDate")}</th><th></th></tr>
+          ${rows.length ? rows.map(r => {
+            const rem = r.total - r.paid;
+            const today = new Date().toISOString().slice(0,10);
+            const isOverdue = r.due_date && r.due_date < today;
+            return `<tr>
+              <td>#${r.id}</td>
+              <td>${escapeHtml(r.supplier_name)}</td>
+              <td>${escapeHtml(r.phone || "-")}</td>
+              <td style="font-size:11px">${escapeHtml(r.description || "-")}</td>
+              <td>${fmtCur(r.total)}</td>
+              <td style="color:var(--success)">${fmtCur(r.paid)}</td>
+              <td style="color:var(--danger);font-weight:bold">${fmtCur(rem)}</td>
+              <td style="${isOverdue ? 'color:var(--danger);font-weight:bold' : ''}">${r.due_date || "-"}${isOverdue ? " ⚠" : ""}</td>
+              <td><div style="display:flex;gap:4px">
+                <input type="number" id="supplier-pay-${r.id}" class="login-input" style="width:80px;padding:4px;font-size:12px" min="0">
+                <button class="btn btn-sm btn-success" onclick="paySupplier(${r.id}, ${r.total}, ${r.paid})">💵</button>
+              </div></td>
+            </tr>`;
+          }).join("") : `<tr><td colspan="9" style="text-align:center;color:var(--muted)">${t("rptNoRecords")}</td></tr>`}
+        </table>
+      </div>`;
+  } catch(e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
+}
+
+function openAddSupplierModal() {
+  const d = document.createElement("div");
+  d.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000";
+  d.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;width:400px;max-width:90vw">
+    <div style="font-weight:bold;margin-bottom:12px;font-size:14px">${t("rptAddSupplier")}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <input id="sup-name" class="login-input" placeholder="${t("rptSupplier")}">
+      <input id="sup-phone" class="login-input" placeholder="${t("rptPhone")}">
+      <input id="sup-desc" class="login-input" placeholder="${t("rptDescription")}">
+      <input id="sup-total" type="number" class="login-input" placeholder="${t("rptTotal")}" min="0">
+      <input id="sup-paid" type="number" class="login-input" placeholder="${t("rptPaid")}" min="0">
+      <input id="sup-due" type="date" class="login-input">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn" onclick="this.closest('div[style]').remove()">${t("rptClose")}</button>
+      <button class="btn btn-success" onclick="saveSupplier(this)">${t("rptSave")}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(d);
+}
+
+async function saveSupplier(btn) {
+  try {
+    await api("/api/supplier/add", { method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        supplier_name: document.getElementById("sup-name").value,
+        phone: document.getElementById("sup-phone").value,
+        description: document.getElementById("sup-desc").value,
+        total: parseFloat(document.getElementById("sup-total").value) || 0,
+        paid: parseFloat(document.getElementById("sup-paid").value) || 0,
+        due_date: document.getElementById("sup-due").value || null
+      })
+    });
+    btn.closest("div[style]").remove();
+    toast("✅ " + t("rptSaved"));
+    switchReportTab("ap");
+  } catch(e) { toast(e.message); }
+}
+
+async function paySupplier(lid, total, paid) {
+  const input = document.getElementById("supplier-pay-" + lid);
+  if (!input) return;
+  const amount = parseFloat(input.value) || 0;
+  const rem = total - paid;
+  if (amount <= 0) { toast(t("rptEnterValidAmount")); return; }
+  if (amount > rem + 0.001) { toast(t("rptAmountExceeds", { amt: fmtCur(rem) })); return; }
+  try {
+    const res = await api("/api/supplier/" + lid + "/pay", { method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ amount })
+    });
+    toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })));
+    switchReportTab("ap");
+  } catch(e) { toast(e.message); }
 }
 
 async function renderCancelled(c) {
@@ -2700,7 +3356,7 @@ async function renderCancelled(c) {
       <table class="report-table">
         <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptTotal")}</th><th>${t("rptReason")}</th></tr>
         ${d.items.length ? d.items.map(x => `<tr>
-          <td>#${x.id}</td><td>${x.date}</td><td>${x.table_num}</td>
+          <td>#${x.id}</td><td>${x.date}</td><td>${x.table_num}${x.table_section && x.table_section !== "hall" ? ` <span style="color:#6b7280;font-size:11px">(${t(x.table_section)})</span>` : ""}</td>
           <td>${escapeHtml(x.employee||"")}</td><td style="color:var(--danger)">${fmtCur(x.total||0)}</td>
           <td>${x.cancel_reason || escapeHtml(x.credit_name||"") || "—"}</td>
         </tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">${t("rptNoCancelled")}</td></tr>`}
@@ -2832,7 +3488,7 @@ async function loadCreditReport() {
           const cname = (r.customer_name || "").trim();
           return `<tr>
             <td>#${r.id}</td><td>${cname ? escapeHtml(cname) : '<span style="color:var(--muted)">—</span>'}</td>
-            <td>#${r.order_id || "-"}</td>
+            <td>#${r.order_id || "-"}${r.table_num ? `<br><span style="color:#6b7280;font-size:11px">${t("table")} ${r.table_num}${r.table_section && r.table_section !== "hall" ? " (" + t(r.table_section) + ")" : ""}</span>` : ""}</td>
             <td style="color:${r.status==='settled'?'var(--success)':'var(--info)'}">${r.status==='settled'?t("rptSettled"):'&nbsp;'}</td>
             <td>${fmtCur(r.total)}</td><td>${fmtCur(r.paid)}</td>
             <td style="color:${rem>0?'var(--danger)':'var(--muted)'}">${fmtCur(rem)}</td>
@@ -2885,6 +3541,46 @@ async function settleCredit(lid, total, paid) {
     const res = await api("/api/credit/settle", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ledger_id: lid, amount }) });
     toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })));
     loadCreditReport();
+  } catch (e) { toast(e.message); }
+}
+
+// ===== سند قبض مستقل (دفعة مقدمة للحفلات الخاصة) =====
+function openDepositModal() {
+  document.getElementById("dv-customer").value = "";
+  document.getElementById("dv-phone").value = "";
+  document.getElementById("dv-party-date").value = "";
+  document.getElementById("dv-desc").value = "";
+  document.getElementById("dv-amount").value = "";
+  document.getElementById("dv-method").value = "نقدي";
+  document.getElementById("dv-ref").value = "";
+  toggleDepositRef();
+  openModal("modal-sandqabd");
+  setTimeout(() => document.getElementById("dv-customer").focus(), 60);
+}
+
+function toggleDepositRef() {
+  const m = document.getElementById("dv-method").value;
+  const row = document.getElementById("dv-ref-row");
+  if (row) row.style.display = TRANSFER_METHODS.has(m) ? "" : "none";
+}
+
+async function confirmDepositVoucher() {
+  const customer = (document.getElementById("dv-customer").value || "").trim();
+  const phone = (document.getElementById("dv-phone").value || "").trim();
+  const party_date = (document.getElementById("dv-party-date").value || "").trim();
+  const desc = (document.getElementById("dv-desc").value || "").trim();
+  const amount = parseFloat(document.getElementById("dv-amount").value) || 0;
+  const method = document.getElementById("dv-method").value;
+  const ref = (document.getElementById("dv-ref").value || "").trim();
+  if (amount <= 0) { toast("⚠️ " + t("rptEnterValidAmount")); return; }
+  if (TRANSFER_METHODS.has(method) && !ref) { toast("⚠️ " + t("rptTransferRefRequired")); document.getElementById("dv-ref").focus(); return; }
+  try {
+    const res = await api("/api/deposit-voucher", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ customer_name: customer, phone, party_date, description: desc, amount, method, transfer_ref: ref || undefined }) });
+    if (res.ok && res.voucher) {
+      toast("✅ " + t("rptDepositCreated", { no: res.voucher.receipt_no }));
+      closeModal("modal-sandqabd");
+      printDepositVoucher(res.voucher);
+    }
   } catch (e) { toast(e.message); }
 }
 
@@ -3059,51 +3755,115 @@ function printReports() {
   const w = window.open("", "_blank", "width=800,height=600");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
   const dir = document.documentElement.dir;
-  let content = document.getElementById("report-content").innerHTML;
-  const detail = document.getElementById("report-detail");
-  if (detail) content += detail.innerHTML;
+  const from = document.getElementById("report-from") ? document.getElementById("report-from").value : "";
+  const to = document.getElementById("report-to") ? document.getElementById("report-to").value : "";
+  const d = reportData || {};
+  const label = getActiveFilterLabel();
+  const period = from || to ? (from || "؟") + " → " + (to || t("rptPresent")) : "";
+  const clone = document.getElementById("report-content").cloneNode(true);
+  clone.querySelectorAll("button, .report-order-detail, [onclick]").forEach(el => el.remove());
+  clone.querySelectorAll("tr").forEach(tr => { tr.removeAttribute("class"); tr.removeAttribute("onclick"); });
+  clone.querySelectorAll("td,th").forEach(td => {
+    td.removeAttribute("onclick"); td.removeAttribute("title");
+    td.style.borderBottom = "1px solid #eee";
+  });
+  let detail = "";
+  const det = document.getElementById("report-detail");
+  if (det) {
+    const dclone = det.cloneNode(true);
+    dclone.querySelectorAll("button, [onclick]").forEach(el => el.remove());
+    dclone.querySelectorAll(".report-order-detail").forEach(el => el.remove());
+    dclone.querySelectorAll("tr").forEach(tr => { tr.removeAttribute("class"); tr.removeAttribute("onclick"); });
+    dclone.querySelectorAll("td,th").forEach(td => { td.removeAttribute("onclick"); td.removeAttribute("title"); td.style.borderBottom = "1px solid #eee"; });
+    detail = dclone.outerHTML;
+  }
+  const totalRow = `<div class="print-summary">
+    <div><span>${t("rptPeriodSales")}:</span><b>${fmtCur(d.total_sales || 0)}</b></div>
+    <div><span>${t("rptOrderCount")}:</span><b>${d.order_count || 0}</b></div>
+    <div><span>${t("totalTax")}:</span><b>${fmtCur(d.total_tax || 0)}</b></div>
+    ${d.total_discount ? `<div><span>${t("rptDiscountsGiven")}:</span><b>-${fmtCur(d.total_discount)}</b></div>` : ""}
+    ${d.gross_profit !== undefined ? `<div><span>${t("rptGrossProfit")}:</span><b>${fmtCur(d.gross_profit)}</b></div>` : ""}
+    ${d.net_profit !== undefined ? `<div><span>${t("rptNetProfit")}:</span><b>${fmtCur(d.net_profit)}</b></div>` : ""}
+  </div>`;
   w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
     <style>
-      body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; direction: ${dir}; font-size: 12px; }
+      body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 24px; direction: ${dir}; font-size: 12px; color: #000; }
+      h1 { text-align: center; font-size: 20px; margin: 0 0 2px; }
+      .print-date { text-align: center; color: #666; font-size: 11px; margin-bottom: 16px; }
+      .print-meta { text-align: center; margin-bottom: 14px; font-size: 12px; }
+      .print-meta span { display: inline-block; margin: 0 10px; }
+      .print-summary { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 12px 0; padding: 10px; border: 1px solid #333; border-radius: 6px; }
+      .print-summary div { padding: 4px 10px; font-size: 12px; }
+      .print-summary b { margin-left: 4px; }
       .report-kpi { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
-      .report-kpi-item { flex: 1; min-width: 120px; text-align: center; border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
-      .report-kpi-value { font-size: 18px; font-weight: bold; color: #059669; }
-      .report-kpi-label { font-size: 11px; color: #666; }
-      .report-section { margin-bottom: 15px; border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
-      .report-section-title { font-size: 13px; font-weight: bold; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #ddd; }
+      .report-kpi-item { flex: 1; min-width: 120px; text-align: center; border: 1px solid #999; border-radius: 8px; padding: 10px; }
+      .report-kpi-value { font-size: 17px; font-weight: bold; }
+      .report-kpi-label { font-size: 10px; color: #555; }
+      .report-section { margin-bottom: 15px; border: 1px solid #999; border-radius: 8px; padding: 12px; page-break-inside: avoid; }
+      .report-section-title { font-size: 13px; font-weight: bold; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #999; }
       table { width: 100%; border-collapse: collapse; }
-      th { background: #f5f5f5; padding: 6px 8px; text-align: right; font-weight: 600; }
-      td { padding: 5px 8px; border-bottom: 1px solid #eee; }
-      .total-row td { font-weight: bold; border-top: 2px solid #333; }
-      h2 { text-align: center; margin-bottom: 10px; }
-      .print-date { text-align: center; color: #999; font-size: 10px; margin-bottom: 15px; }
+      th { background: #eee; padding: 6px 8px; text-align: right; font-weight: 700; border-bottom: 2px solid #333; }
+      td { padding: 5px 8px; }
+      .total-row td, .total-row th { font-weight: bold; border-top: 2px solid #333; }
+      .report-profit { color: #059669; font-weight: 600; }
+      .report-loss { color: #dc2626; font-weight: 600; }
+      .report-filter-badge { display: none; }
+      .report-order-detail { display: none; }
       @media print { body { padding: 10px; } }
     </style>
   </head><body>
-    <h2>${RESTAURANT_NAME} — ${t("rptReportTitle")}</h2>
-    <div class="print-date">${new Date().toLocaleString()}</div>
-    ${content}
-    <script>window.onload=function(){window.print();}<\/script>
+    <img src="/logo.png" alt="logo" style="width:40px;height:40px;display:block;margin:0 auto 4px;object-fit:contain">
+    <h1>${RESTAURANT_NAME}</h1>
+    <div class="print-date">${t("rptPrintTitle")} — ${new Date().toLocaleString()}</div>
+    ${period ? `<div class="print-meta"><span>${t("rptPeriod")}: ${period}</span>${label ? `<span>${t("rptFilters")}: ${escapeHtml(label)}</span>` : ""}</div>` : label ? `<div class="print-meta"><span>${t("rptFilters")}: ${escapeHtml(label)}</span></div>` : ""}
+    ${totalRow}
+    ${clone.outerHTML}
+    ${detail}
   </body></html>`);
   w.document.close();
+}
+
+function csvCell(v) {
+  return '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+}
+
+function tableToCsv(tbl) {
+  const rows = [];
+  tbl.querySelectorAll("tr").forEach(tr => {
+    if (tr.classList.contains("report-order-detail")) return;
+    const cells = [];
+    tr.querySelectorAll("th, td").forEach(td => {
+      if (td.querySelector("button, .btn")) return;
+      let txt = (td.textContent || "").trim().replace(/\s+/g, " ");
+      if (txt.startsWith("📦")) txt = txt.replace(/^\S+\s*/, "");
+      cells.push(csvCell(txt));
+    });
+    if (cells.length) rows.push(cells);
+  });
+  return rows;
 }
 
 function exportCSV() {
   if (!user || user.role !== "manager") return;
   const tables = document.querySelectorAll("#report-content table, #report-detail table");
-  let csv = "";
+  const lines = [];
+  lines.push(csvCell(RESTAURANT_NAME));
+  lines.push(csvCell(t("rptPrintTitle") + " — " + new Date().toLocaleString()));
+  const fromEl = document.getElementById("report-from");
+  const toEl = document.getElementById("report-to");
+  const from = fromEl ? fromEl.value : "";
+  const to = toEl ? toEl.value : "";
+  if (from || to) lines.push(csvCell(t("rptPeriod") + ": " + (from || "؟") + " → " + (to || t("rptPresent"))));
+  const label = getActiveFilterLabel();
+  if (label) lines.push(csvCell(t("rptFilters") + ": " + label));
+  lines.push("");
   tables.forEach((tbl, ti) => {
-    if (ti > 0) csv += "\n\n";
-    tbl.querySelectorAll("tr").forEach(tr => {
-      const cells = [];
-      tr.querySelectorAll("th, td").forEach(td => {
-        let txt = (td.textContent || "").trim().replace(/\s+/g, " ");
-        if (txt.startsWith("📦")) txt = txt.replace(/^\S+\s*/, "");
-        cells.push('"' + txt.replace(/"/g, '""') + '"');
-      });
-      csv += cells.join(",") + "\n";
-    });
+    const rows = tableToCsv(tbl);
+    if (!rows.length) return;
+    if (lines.length > 3) lines.push("");
+    rows.forEach(r => lines.push(r.join(",")));
   });
+  const csv = lines.join("\n");
   if (!csv) { toast("⚠️ " + t("rptNoOrdersMatch")); return; }
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
@@ -3140,6 +3900,9 @@ async function loadSettings() {
     document.getElementById("set-currency").value = d.currency;
     document.getElementById("set-autobackup").checked = !!d.auto_backup;
     document.getElementById("set-backup-freq").value = d.backup_freq || "daily";
+    const h = document.getElementById("set-day-close-hour");
+    if (h) h.value = d.day_close_remind_hour || 21;
+    if (d.day_close_remind_hour) DAY_CLOSE_REMIND_HOUR = parseInt(d.day_close_remind_hour, 10) || 21;
     CURRENCY = d.currency;
     TAX_RATE = d.tax_rate;
     RESTAURANT_NAME = d.restaurant_name;
@@ -3164,12 +3927,14 @@ async function saveSettings() {
         tax_rate: parseFloat(document.getElementById("set-tax").value),
         currency: document.getElementById("set-currency").value,
         auto_backup: document.getElementById("set-autobackup").checked,
-        backup_freq: document.getElementById("set-backup-freq").value
+        backup_freq: document.getElementById("set-backup-freq").value,
+        day_close_remind_hour: parseInt(document.getElementById("set-day-close-hour").value, 10) || 21
       })
     });
     TAX_RATE = res.tax_rate;
     CURRENCY = res.currency;
     RESTAURANT_NAME = res.restaurant_name;
+    if (res.day_close_remind_hour) DAY_CLOSE_REMIND_HOUR = parseInt(res.day_close_remind_hour, 10) || 21;
     applySettings();
     document.getElementById("set-tax").value = res.tax_rate;
     updateAutoBackupLabel();
@@ -3190,15 +3955,25 @@ function applySettings() {
   document.getElementById("total").textContent = fmtCur(0);
 }
 
+let currentEmployees = [];
 async function renderEmployees() {
   try {
     const emps = await api("/api/employees");
+    currentEmployees = emps;
     const me = user.id;
     document.getElementById("employees-list").innerHTML = emps.map(e => `
       <div class="menu-manage-row">
         <div class="mm-info">
-          <span class="mm-name">${e.name}</span>
+          <span class="mm-name">${escapeHtml(e.name)}</span>
           <span class="mm-role ${e.role}">${e.role === "manager" ? t("managerRole") : t("cashierRole")}</span>
+          ${e.status && e.status !== "active" ? `<span class="mm-role ${e.status}">${empStatusText(e.status)}</span>` : ""}
+          <div style="font-size:11px;color:var(--muted)">
+            ${e.phone ? `📞 ${escapeHtml(e.phone)}` : ""}
+            ${e.shift ? ` | 🕐 ${shiftText(e.shift)}` : ""}
+            ${e.department ? ` | 🏢 ${escapeHtml(e.department)}` : ""}
+            ${e.salary ? ` | 💰 ${fmtCur(e.salary)}` : ""}
+            ${e.role === "cashier" ? ` | 🏷️ خصم حتى ${e.discount_limit != null ? e.discount_limit : 20}%` : ""}
+          </div>
         </div>
         <div class="mm-actions">
           ${user.role === "manager" ? `
@@ -3210,18 +3985,57 @@ async function renderEmployees() {
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
 
+function empStatusText(s) {
+  if (s === "on_leave") return t("statusLeave");
+  if (s === "suspended") return t("statusSuspended");
+  return t("statusActive");
+}
+
+function shiftText(s) {
+  if (s === "morning") return t("shiftMorning");
+  if (s === "evening") return t("shiftEvening");
+  if (s === "night") return t("shiftNight");
+  if (s === "full") return t("shiftFull");
+  return s;
+}
+
 function editEmployee(id) {
   if (!user || user.role !== "manager") return;
   const row = document.querySelector(`#employees-list .menu-manage-row`);
   if (!row) return;
-  const name = prompt(t("newName"));
-  if (name === null) return;
-  const role = confirm(t("promoteManager")) ? "manager" : "cashier";
-  const pin = prompt(t("newPin")) || "";
-  updateEmployee(id, { name, role, pin });
+  const emp = currentEmployees.find(e => e.id === id);
+  if (!emp) return;
+  document.getElementById("emp-edit-id").value = emp.id;
+  document.getElementById("emp-edit-name").value = emp.name || "";
+  document.getElementById("emp-edit-role").value = emp.role || "cashier";
+  document.getElementById("emp-edit-phone").value = emp.phone || "";
+  document.getElementById("emp-edit-salary").value = emp.salary || "";
+  document.getElementById("emp-edit-hire").value = emp.hire_date || "";
+  document.getElementById("emp-edit-shift").value = emp.shift || "";
+  document.getElementById("emp-edit-dept").value = emp.department || "";
+  document.getElementById("emp-edit-disc-limit").value = (emp.discount_limit != null ? emp.discount_limit : 20);
+  document.getElementById("emp-edit-status").value = emp.status || "active";
+  document.getElementById("emp-edit-pin").value = "";
+  openModal("modal-employee");
 }
 
-async function updateEmployee(id, data) {
+async function saveEmployeeEdit() {
+  if (!user || user.role !== "manager") return;
+  const id = document.getElementById("emp-edit-id").value;
+  const name = document.getElementById("emp-edit-name").value.trim();
+  if (!name) { document.getElementById("settings-error").textContent = t("enterEmployeeName"); return; }
+  const data = {
+    name,
+    role: document.getElementById("emp-edit-role").value,
+    phone: document.getElementById("emp-edit-phone").value.trim(),
+    salary: document.getElementById("emp-edit-salary").value,
+    hire_date: document.getElementById("emp-edit-hire").value,
+    shift: document.getElementById("emp-edit-shift").value,
+    department: document.getElementById("emp-edit-dept").value.trim(),
+    discount_limit: document.getElementById("emp-edit-disc-limit").value,
+    status: document.getElementById("emp-edit-status").value,
+    pin: document.getElementById("emp-edit-pin").value.trim()
+  };
   try {
     await api("/api/employees/" + id, {
       method: "PUT",
@@ -3229,6 +4043,7 @@ async function updateEmployee(id, data) {
       body: JSON.stringify(data)
     });
     toast("✅ " + t("toast.employeeUpdated"));
+    closeModal("modal-employee");
     renderEmployees();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
@@ -3244,10 +4059,23 @@ async function addEmployee() {
     await api("/api/employees", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, role, pin })
+      body: JSON.stringify({
+        name, role, pin,
+        phone: document.getElementById("emp-phone").value.trim(),
+        salary: document.getElementById("emp-salary").value,
+        hire_date: document.getElementById("emp-hire").value,
+        shift: document.getElementById("emp-shift").value,
+        department: document.getElementById("emp-dept").value.trim(),
+        discount_limit: document.getElementById("emp-disc-limit").value
+      })
     });
     document.getElementById("emp-name").value = "";
     document.getElementById("emp-pin").value = "";
+    document.getElementById("emp-phone").value = "";
+    document.getElementById("emp-salary").value = "";
+    document.getElementById("emp-hire").value = "";
+    document.getElementById("emp-shift").value = "";
+    document.getElementById("emp-dept").value = "";
     toast("✅ " + t("toast.employeeAdded"));
     renderEmployees();
     loadEmployees();
@@ -3412,9 +4240,42 @@ async function backupRestoreOne(name) {
 
 // ===== إغلاق اليوم (للمدير) =====
 let dayData = null;
+let _dayRemindTimer = null;
+let DAY_CLOSE_REMIND_HOUR = 21;
+
+async function checkDayReminder() {
+  const el = document.getElementById("day-reminder");
+  if (!el) return;
+  if (!user) { el.style.display = "none"; return; }
+  try {
+    const d = await api("/api/day/status");
+    const hourNow = new Date().getHours() * 100 + new Date().getMinutes();
+    const lastClosed = d.last_closed || "";
+    const today = d.date || "";
+    const prevUnclosed = !!lastClosed && lastClosed !== today;
+    const late = hourNow >= DAY_CLOSE_REMIND_HOUR * 100;
+    if (!d.closed && (late || prevUnclosed)) {
+      el.style.display = "flex";
+      const msg = document.getElementById("day-reminder-msg");
+      if (msg) {
+        msg.textContent = prevUnclosed
+          ? "⏰ " + t("dayReminderPrev")
+          : "⏰ " + t("dayReminder");
+      }
+      return;
+    }
+    el.style.display = "none";
+  } catch (e) { /* تجاهل */ }
+}
+
+function startDayReminderPolling() {
+  if (_dayRemindTimer) { clearInterval(_dayRemindTimer); _dayRemindTimer = null; }
+  checkDayReminder();
+  _dayRemindTimer = setInterval(checkDayReminder, 5 * 60 * 1000);
+}
 
 async function showDayClose() {
-  if (!user || user.role !== "manager") return;
+  if (!user) return;
   document.getElementById("day-err").textContent = "";
   openModal("modal-day");
   await loadDayStatus();
@@ -3439,13 +4300,14 @@ function renderDay(d) {
   ).join("");
 
   const methodRows = d.by_method.map(m =>
-    `<tr><td>${m.method}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td></tr>`).join("");
+    `<tr><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td></tr>`).join("");
   const methods = `
     <div class="adv-section"><div class="adv-section-title">💰 ${t("salesByMethod")}</div>
     <table class="adv-table"><thead><tr><th>${t("method")}</th><th>${t("orders")}</th><th>${t("amount")}</th></tr></thead>
     <tbody>${methodRows || '<tr><td colspan="3">' + t("noOrdersToday") + '</td></tr>'}</tbody></table></div>`;
 
   let closeArea;
+  const isMgr = user && user.role === "manager";
   if (d.closed) {
     const cl = d.closure;
     const diff = cl.difference;
@@ -3458,7 +4320,7 @@ function renderDay(d) {
           <tr><td style="padding:4px;text-align:right">${t("countedCash")}</td><td style="text-align:left">${fmtCur(cl.counted_cash)}</td></tr>
           <tr><td style="padding:4px;text-align:right">${t("difference")}</td><td style="text-align:left;font-weight:bold;color:${diff < 0 ? "var(--danger)" : "var(--success)"}">${diff < 0 ? "" : "+"}${fmtCur(diff)}</td></tr>
         </table>
-        <button class="btn" style="margin-top:10px" onclick="reopenDay()">🔓 ${t("reopenDay")}</button>
+        ${isMgr ? '<button class="btn" style="margin-top:10px" onclick="reopenDay()">🔓 ' + t("reopenDay") + "</button>" : ""}
       </div>`;
   } else {
     const expected = d.expected_cash;
@@ -3490,6 +4352,7 @@ async function closeDay() {
     dayData = await api("/api/day/status");
     renderDay(dayData);
     dayPrint();
+    checkDayReminder();
   } catch (e) { document.getElementById("day-err").textContent = e.message; }
 }
 
@@ -3508,12 +4371,11 @@ function dayPrint() {
   const cl = d.closure || {};
   const row = (l, v, bold) => `<tr><td style="text-align:right;padding:3px 0">${l}</td><td style="text-align:left;padding:3px 0">${bold ? "<b>" : ""}${v}${bold ? "</b>" : ""}</td></tr>`;
   const methods = (cl.by_method || d.by_method || []).map(m =>
-    `<tr><td style="text-align:right;padding:3px 0">${m.method}</td><td style="text-align:center;padding:3px 0">${m.count}</td><td style="text-align:left;padding:3px 0">${fmtCur(m.total)}</td></tr>`).join("");
-  const w = window.open("", "_blank", "width=340,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+    `<tr><td style="text-align:right;padding:3px 0">${methodName(m.method)}</td><td style="text-align:center;padding:3px 0">${m.count}</td><td style="text-align:left;padding:3px 0">${fmtCur(m.total)}</td></tr>`).join("");
   const dir = document.documentElement.dir;
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("dayReport")}</title></head>
+  const html = `<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("dayReport")}</title></head>
     <body style="font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px">
+      <img src="/logo.png" alt="logo" style="width:30px;height:30px;object-fit:contain">
       <div style="font-size:18px;font-weight:bold">${RESTAURANT_NAME}</div>
       <div style="color:#555">📆 ${t("dayCloseReport")}<br><b>${d.date}</b></div>
       <div style="border-top:2px solid #000;border-bottom:2px solid #000;padding:6px 0;margin-top:8px">
@@ -3528,10 +4390,27 @@ function dayPrint() {
         ${row(t("difference"), (cl.difference ?? 0) < 0 ? "" : "+" + fmtCur(cl.difference ?? 0), true)}
       </div>
       <div style="margin-top:10px;color:#555;font-size:11px">${cl.closed_by ? t("closedBy") + ": " + cl.closed_by : ""}<br>${cl.closed_at || ""}</div>
-    </body></html>`);
-  w.document.close();
-  w.focus();
-  w.print();
+    </body></html>`;
+  hiddenPrint(html);
+}
+
+function hiddenPrint(html) {
+  const frame = document.createElement("iframe");
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument || frame.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => {
+    try {
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+    } catch (e) {
+      toast("⚠️ " + t("toast.allowPopups"));
+    }
+    setTimeout(() => { frame.remove(); }, 5000);
+  }, 500);
 }
 
 document.getElementById("paid").addEventListener("input", calcChange);
@@ -3575,10 +4454,12 @@ function posCacheSave(b) {
 }
 
 function applyBootstrapData(b) {
+  window.__boot = b;
   const s = b.settings || {};
   TAX_RATE = s.tax_rate;
   CURRENCY = s.currency;
   RESTAURANT_NAME = s.restaurant_name;
+  if (s.day_close_remind_hour) DAY_CLOSE_REMIND_HOUR = parseInt(s.day_close_remind_hour, 10) || 21;
   applySettings();
   MENU = b.menu || [];
   CATEGORY_ORDER = b.category_order || {};
@@ -3612,13 +4493,14 @@ async function init() {
     const b = await api("/api/bootstrap");
     applyBootstrapData(b);
     tableData = {};
-    for (const t of (b.tables || [])) tableData[t.num] = t;
+    for (const t of (b.tables || [])) tableData[t.id] = t;
     renderTables();
     updateStats();
     if (b.user) {
       user = b.user;
       document.getElementById("login-overlay").style.display = "none";
       updateUserBar();
+      startDayReminderPolling();
       if (b.low_stock && b.low_stock.length) {
         const names = b.low_stock.map(i => `${i.item_name} (${i.quantity} ${i.unit})`).join(", ");
         toast(`⚠️ ${t("lowStockWarning")}: ${names}`);
@@ -3670,7 +4552,7 @@ async function submitCancelRequest() {
     const res = await api("/api/order/cancel-request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_num: selectedTable, order_id: existingOrderId, reason })
+      body: JSON.stringify({ table_id: selectedTable, order_id: existingOrderId, reason })
     });
     if (res.ok) {
       toast("📩 تم إرسال طلب الإلغاء — بانتظار موافقة المدير");
@@ -3794,7 +4676,7 @@ async function checkCancelRequests(preCount) {
     btn.style.display = count > 0 ? "" : "none";
   } catch (e) {}
   if (!cancelPollInterval) {
-    cancelPollInterval = setInterval(checkCancelRequests, 15000);
+    cancelPollInterval = setInterval(checkCancelRequests, 30000);
   }
 }
 init();

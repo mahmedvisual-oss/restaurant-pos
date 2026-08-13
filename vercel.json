@@ -5,5 +5,43 @@
     "app.py": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/backup/cron",
+      "schedule": "30 2 * * *"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/style2.css",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/lang.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/app.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/kitchen.css",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/kitchen.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
 }

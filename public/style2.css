@@ -62,8 +62,28 @@ body {
   justify-content: space-between;
   padding: 0 20px;
 }
+.day-reminder {
+  position: sticky;
+  top: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  background: linear-gradient(90deg, #f59e0b, #f97316);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.day-reminder .btn { color: #fff; border-color: #fff; }
+.day-reminder:hover { filter: brightness(1.05); }
+#hidden-print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
 .logo { display: flex; align-items: center; gap: 12px; }
 .logo-emoji { font-size: 32px; filter: drop-shadow(0 2px 6px rgba(99,102,241,.4)); }
+.logo-img { width: 38px; height: 38px; object-fit: contain; border-radius: 8px; }
 .title { font-size: 18px; font-weight: bold; }
 .subtitle { font-size: 10px; color: var(--muted); }
 .top-actions { display: flex; gap: 6px; align-items: center; }
@@ -136,7 +156,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   padding: 10px;
   height: calc(100vh - 94px);
 }
-.col { background: var(--card); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+.col { background: var(--card); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; }
 .col-header { padding: 10px 14px; font-size: 14px; font-weight: bold; }
 .invoice-header {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -168,7 +188,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 
 /* القوائم القابلة للتمرير */
-.scroll-list { flex: 1; overflow-y: auto; padding: 0 10px 10px; }
+.scroll-list { flex: 1 1 0%; min-height: 0; overflow-y: auto; padding: 0 10px 10px; }
 .scroll-list::-webkit-scrollbar { width: 6px; }
 .scroll-list::-webkit-scrollbar-thumb { background: var(--hover); border-radius: 3px; }
 .acc-group { margin-bottom: 6px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--card); }
@@ -207,7 +227,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 
 /* السلة */
-.cart-list { padding-top: 4px; }
+.cart-list { padding-top: 4px; min-height: 90px; }
 .empty-cart { text-align: center; color: var(--muted); font-size: 12px; padding: 40px 0; line-height: 1.8; }
 .cart-item {
   background: var(--input); border: 1px solid var(--border); border-radius: 8px;
@@ -261,6 +281,13 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .promo-row { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-top: 1px solid var(--border); }
 .promo-input { flex: 1; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; text-transform: uppercase; }
 .promo-input::placeholder { text-transform: none; }
+
+.open-add-row { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+.open-name-input { flex: 1; min-width: 0; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 6px; font-size: 11px; }
+.open-item-btn { flex: 0 0 auto; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-weight: 600; padding: 4px 8px; font-size: 11px; transition: border-color .15s ease, box-shadow .15s ease; }
+.open-item-btn:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(99,102,241,.2); }
+.open-price-input { width: 90px; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 3px 6px; font-size: 12px; text-align: center; }
+.open-name-edit { width: 130px; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 3px 6px; font-size: 12px; font-weight: 600; }
 
 /* ═══════════════════════════════════════════
    الطاولات — تصميم احترافي
@@ -469,6 +496,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 @keyframes loginIn { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: scale(1); } }
 .login-emoji { font-size: 44px; filter: drop-shadow(0 4px 12px rgba(99,102,241,.4)); }
+.login-img { width: 96px; height: 96px; object-fit: contain; border-radius: 16px; margin-bottom: 6px; }
 .login-title { font-size: 20px; font-weight: bold; margin-top: 6px; }
 .login-sub { color: var(--muted); font-size: 12px; margin: 6px 0 20px; }
 .login-select, .login-input {
@@ -513,6 +541,8 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .mm-role { font-size: 10px; padding: 2px 6px; border-radius: 20px; }
 .mm-role.cashier { background: rgba(16, 185, 129, .15); color: var(--success); }
 .mm-role.manager { background: rgba(99, 102, 241, .15); color: #a5b4fc; }
+.mm-role.on_leave { background: rgba(245, 158, 11, .15); color: var(--warn); }
+.mm-role.suspended { background: rgba(239, 68, 68, .15); color: var(--danger); }
 .mm-actions { display: flex; gap: 4px; }
 
 .menu-cards-grid {
@@ -611,6 +641,11 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .cart-mod-tag {
   font-size: 9px; padding: 1px 5px; background: rgba(99,102,241,.12);
   color: var(--primary); border-radius: 3px; border: 1px solid rgba(99,102,241,.2);
+}
+.cart-item-note {
+  font-size: 11px; color: var(--muted); padding: 2px 8px 2px;
+  background: rgba(251,191,36,.08); border-left: 2px solid #f59e0b;
+  margin: 0 6px 3px; border-radius: 0 3px 3px 0;
 }
 
 /* Transfer Modal */
@@ -946,6 +981,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 @media (max-width: 768px) {
   .topbar { height: 52px; padding: 0 8px; }
   .logo-emoji { font-size: 22px; }
+  .logo-img { width: 32px; height: 32px; }
   .title { font-size: 13px; }
   .subtitle { font-size: 8px; }
   .top-actions .btn { padding: 5px 7px; font-size: 9px; }
@@ -1211,6 +1247,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   }
   .title { font-size: 12px; }
   .logo-emoji { font-size: 20px; }
+  .logo-img { width: 30px; height: 30px; }
 }
 
 /* تحسين اللمس - أزرار أكبر */
@@ -1240,6 +1277,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 @media (orientation: landscape) and (max-height: 500px) {
   .topbar { height: 44px; padding: 0 8px; }
   .logo-emoji { font-size: 18px; }
+  .logo-img { width: 28px; height: 28px; }
   .title { font-size: 12px; }
   .main {
     grid-template-columns: 1fr 1fr;
