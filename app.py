@@ -3250,12 +3250,16 @@ def api_tables():
     c = conn.cursor()
     rows = c.execute("SELECT table_id, COUNT(*) AS cnt FROM orders WHERE table_id IS NOT NULL AND status IN ('active','sent','ready') GROUP BY table_id").fetchall()
     active = {r["table_id"]: r["cnt"] for r in rows}
+    today = _now().strftime("%Y-%m-%d")
+    res = c.execute("SELECT DISTINCT table_id FROM reservations WHERE date = ? AND status != 'cancelled' AND table_id IS NOT NULL", (today,)).fetchall()
+    reserved = {r["table_id"] for r in res}
     tabs = c.execute("SELECT * FROM tables ORDER BY section, num").fetchall()
     conn.close()
     return jsonify([{"id": t["id"], "num": t["num"], "section": t["section"],
                      "pos_x": t["pos_x"], "pos_y": t["pos_y"],
                      "capacity": t["capacity"], "shape": t["shape"],
-                     "active": t["id"] in active, "orders": active.get(t["id"], 0)} for t in tabs])
+                     "active": t["id"] in active, "orders": active.get(t["id"], 0),
+                     "reserved": t["id"] in reserved} for t in tabs])
 
 
 @app.route("/api/tables", methods=["POST"])

@@ -389,6 +389,18 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .table-btn.occupied .table-num { color: #ea580c; }
 .table-btn.occupied .table-status { color: #ea580c; background: rgba(234,88,12,.1); }
 
+/* ── حالة الطاولة: محجوزة ── */
+.table-btn.reserved {
+  background: linear-gradient(135deg, rgba(168,85,247,.1), rgba(217,70,239,.06));
+  border-color: rgba(168,85,247,.45);
+  color: var(--text);
+}
+.table-btn.reserved::before { opacity: 1; background: linear-gradient(90deg, #a855f7, #d946ef); }
+.table-btn.reserved:hover { border-color: #a855f7; background: linear-gradient(135deg, rgba(168,85,247,.14), rgba(217,70,239,.1)); }
+.table-btn.reserved .status-dot { background: #a855f7; }
+.table-btn.reserved .table-num { color: #a855f7; }
+.table-btn.reserved .table-status { color: #a855f7; background: rgba(168,85,247,.12); }
+
 /* ── حالة الطاولة: محددة ── */
 .table-btn.selected {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -822,6 +834,26 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   transform: scale(1.08);
 }
 
+/* ── حالة الطاولة: محجوزة ── */
+.floor-table.reserved {
+  background: linear-gradient(135deg, #a855f7, #d946ef);
+  border: 2px solid #c084fc;
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(168,85,247,.45);
+  animation: table-pulse 2.5s infinite;
+}
+.floor-table.reserved .ft-num { color: #fff; }
+.floor-table.reserved .ft-cap { color: rgba(255,255,255,.75); }
+.floor-table.reserved:hover {
+  box-shadow: 0 6px 28px rgba(168,85,247,.55);
+  transform: scale(1.08);
+}
+.floor-table .ft-reserved {
+  font-size: 9px; font-weight: 700;
+  background: rgba(255,255,255,.18); color: #fff;
+  padding: 2px 6px; border-radius: 6px; margin-top: 3px;
+}
+
 /* ── حالة الطاولة: محددة ── */
 .floor-table.selected {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
@@ -880,6 +912,7 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 .floor-legend-dot.free { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.3); }
 .floor-legend-dot.busy { background: #ea580c; }
+.floor-legend-dot.reserved { background: #a855f7; }
 .floor-legend-dot.my { background: var(--primary); }
 
 /* تبويبات التقارير */

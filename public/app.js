@@ -1017,9 +1017,10 @@ function renderTables() {
     for (const tb of list) {
       const i = tb.num;
       const sel = selectedTable === tb.id;
-      const cls = sel ? "selected" : (tb.active ? "occupied" : "available");
-      const status = sel ? t("selected") : (tb.active ? t("occupied") : t("available"));
-      const dot = sel ? "✓" : (tb.active ? "✕" : "●");
+      const rsv = !tb.active && tb.reserved;
+      const cls = sel ? "selected" : (tb.active ? "occupied" : (rsv ? "reserved" : "available"));
+      const status = sel ? t("selected") : (tb.active ? t("occupied") : (rsv ? t("reserved") : t("available")));
+      const dot = sel ? "✓" : (tb.active ? "✕" : (rsv ? "📅" : "●"));
       const capacity = tb.capacity || 4;
       const orderInfo = tb.active && tb.order_total ? `<span class="table-order-total">${fmtCur(tb.order_total)}</span>` : "";
       const timeInfo = tb.active && tb.started_at ? `<span class="table-time">${getElapsedTime(tb.started_at)}</span>` : "";
@@ -1087,9 +1088,10 @@ function renderFloorPlan() {
 
   /* ── مفتاح الألوان ── */
   fp.innerHTML += `<div class="floor-legend">
-    <div class="floor-legend-item"><span class="floor-legend-dot free"></span> متاحة</div>
-    <div class="floor-legend-item"><span class="floor-legend-dot busy"></span> مشغولة</div>
-    <div class="floor-legend-item"><span class="floor-legend-dot my"></span> محددة</div>
+    <div class="floor-legend-item"><span class="floor-legend-dot free"></span> ${t("available")}</div>
+    <div class="floor-legend-item"><span class="floor-legend-dot busy"></span> ${t("occupied")}</div>
+    <div class="floor-legend-item"><span class="floor-legend-dot reserved"></span> ${t("reserved")}</div>
+    <div class="floor-legend-item"><span class="floor-legend-dot my"></span> ${t("selected")}</div>
   </div>`;
 
   /* ── أزرار تعديل المواقع ── */
@@ -1136,7 +1138,8 @@ function renderFloorPlan() {
     list.forEach((tb, idx) => {
       const n = tb.num;
       const sel = selectedTable === tb.id;
-      const cls = sel ? "selected" : (tb.active ? "occupied" : "available");
+      const rsv = !tb.active && tb.reserved;
+      const cls = sel ? "selected" : (tb.active ? "occupied" : (rsv ? "reserved" : "available"));
       let w, h;
       if (tb.shape === "rectangle") { w = 90; h = 55; }
       else if (tb.shape === "square") { w = 60; h = 60; }
@@ -1147,6 +1150,7 @@ function renderFloorPlan() {
       const py = (tb.pos_y != null && tb.pos_y > 0) ? tb.pos_y : z.startOffset.y + row * z.gapY;
       const orderInfo = tb.active && tb.orders ? `<span class="ft-order">${tb.orders} طلب</span>` : "";
       const timeInfo = tb.active ? `<span class="ft-time">⏱ ${getElapsedTime(tb.started_at)}</span>` : "";
+      const rsvInfo = rsv ? `<span class="ft-reserved">📅 ${t("reserved")}</span>` : "";
       fp.innerHTML += `<div class="floor-table ${cls} ${tb.shape || 'round'}" 
         style="width:${w}px;height:${h}px;left:${px}px;top:${py}px" 
         data-num="${n}" data-id="${tb.id}"
@@ -1157,6 +1161,7 @@ function renderFloorPlan() {
         <span class="ft-cap">👥 ${tb.capacity || 4}</span>
         ${orderInfo}
         ${timeInfo}
+        ${rsvInfo}
         ${isMgr ? `<span class="ft-delete" onclick="event.stopPropagation();deleteFloorTable(${tb.id})">✕</span>` : ""}
       </div>`;
     });
@@ -2322,6 +2327,7 @@ async function createReservation() {
     document.getElementById("res-new-notes").value = "";
     toast("✅ " + t("toast.reservationCreated"));
     loadReservationList();
+    loadTables();
   } catch (e) { toast(e.message); }
 }
 
@@ -2335,6 +2341,7 @@ async function updateReservation(id, status) {
     });
     toast("✅ " + t("toast.reservationUpdated"));
     loadReservationList();
+    loadTables();
   } catch (e) { toast(e.message); }
 }
 
