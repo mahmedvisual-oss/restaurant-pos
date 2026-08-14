@@ -266,25 +266,18 @@ if CLOUD_DB:
         _HTTP_POOL = None
 
 
-def _raw_conn():
-    if CLOUD_DB:
-        return _pool_take()
-    return sqlite3.connect(DB_PATH)
-
-
-# ===== بركة اتصالات Turso (حد الاتصالات المتزامنة = ~10) =====
-# كل _ts.connect يفتح بث HTTP إلى Turso. فتح اتصال جديد لكل طلب مع الاقتراع
-# الدوري والتبويبات المتعددة كان يستنزف حد الاتصالات ويُسقط الطلبات والاستيراد
-# على البارد ("Database connections limit exceeded"). نحتفظ ببركة صغيرة (<=3)
-# ونعيد استخدام الاتصالات مع قفل، فلا يتجاوز التزامن الحد أبداً ولا يحدث تسريب.
+# ===== اتصالات Turso المحدودة الالتزامن =====
+# كل _ts.connect يفتح بث HTTP إلى Turso. فتح بث جديد لكل طلب مع الاقتراع الدوري
+# والتبويبات المتعددة كان يستنزف حد الاتصالات ويُسقط الطلبات والاستيراد على البارد
+# ("Database connections limit exceeded"). كما أن إعادة استخدام بث قديم في بركة
+# يفشل بعد انتهاء صلاحية البث ("stream not found"). الحل: اتصال جديد لكل استخدام
+# (لا بث منتهٍ أبداً) مع سيمافور يحدّ التزامن إلى _CONN_MAX فلا يتجاوز الحد أبداً.
 if CLOUD_DB:
-    _CONN_POOL = []
-    _CONN_TOTAL = 0
     _CONN_MAX = 3
-    _CONN_LOCK = threading.Lock()
+    _CONN_SEM = threading.Semaphore(_CONN_MAX)
 
     class _TConn:
-        """غلاف: close() يعيد الاتصال للبركة بدل إغلاقه على Turso."""
+        """غلاف: close() يقفل البث فعلياً ويحرر فتحة التزامن."""
         __slots__ = ("_c",)
 
         def __init__(self, c):
@@ -301,31 +294,23 @@ if CLOUD_DB:
                 c.rollback()
             except Exception:
                 pass
-            with _CONN_LOCK:
-                if len(_CONN_POOL) < _CONN_MAX:
-                    _CONN_POOL.append(c)
-                else:
-                    try:
-                        c.close()
-                    except Exception:
-                        pass
+            try:
+                c.close()
+            except Exception:
+                pass
+            _CONN_SEM.release()
 
-    def _pool_take():
-        global _CONN_TOTAL
-        while True:
-            with _CONN_LOCK:
-                if _CONN_POOL:
-                    c = _CONN_POOL.pop()
-                elif _CONN_TOTAL < _CONN_MAX:
-                    _CONN_TOTAL += 1
-                    c = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
-                else:
-                    c = None
-            if c is not None:
-                break
-            time.sleep(0.05)
-        c.row_factory = lambda cur, row: row
-        return _TConn(c)
+    def _raw_conn():
+        if CLOUD_DB:
+            _CONN_SEM.acquire()
+            try:
+                c = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+            except Exception:
+                _CONN_SEM.release()
+                raise
+            c.row_factory = lambda cur, row: row
+            return _TConn(c)
+        return sqlite3.connect(DB_PATH)
 
 
 def get_db():
