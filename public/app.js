@@ -3815,6 +3815,7 @@ async function printReports() {
   const d = reportData || {};
   const label = getActiveFilterLabel();
   const period = from || to ? (from || "؟") + " → " + (to || t("rptPresent")) : "";
+  const compact = !!(document.getElementById("report-compact") && document.getElementById("report-compact").checked);
   const clone = document.getElementById("report-content").cloneNode(true);
   stripCharts(clone);
   clone.querySelectorAll("button, .report-order-detail, [onclick]").forEach(el => el.remove());
@@ -3828,10 +3829,27 @@ async function printReports() {
   if (det) {
     const dclone = det.cloneNode(true);
     dclone.querySelectorAll("button, [onclick]").forEach(el => el.remove());
-    dclone.querySelectorAll(".report-order-detail").forEach(el => { el.style.display = ""; });
+    if (compact) {
+      dclone.querySelectorAll(".report-order-detail").forEach(el => el.remove());
+      dclone.querySelectorAll("tr.report-order-row td:nth-child(6)").forEach(c => c.textContent = "");
+    } else {
+      dclone.querySelectorAll(".report-order-detail").forEach(el => { el.style.display = ""; });
+    }
     dclone.querySelectorAll("tr").forEach(tr => { tr.removeAttribute("class"); tr.removeAttribute("onclick"); });
     dclone.querySelectorAll("td,th").forEach(td => { td.removeAttribute("onclick"); td.removeAttribute("title"); td.style.borderBottom = "1px solid #eee"; });
     detail = dclone.outerHTML;
+    if (compact) {
+      const items = (d.top_items || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td>${i.qty}</td><td>${fmtCur(i.revenue)}</td></tr>`).join("");
+      if (items) {
+        const totQty = (d.top_items || []).reduce((s, i) => s + (i.qty || 0), 0);
+        const totRev = (d.top_items || []).reduce((s, i) => s + (i.revenue || 0), 0);
+        detail += `<div class="report-section">
+          <div class="report-section-title">📦 ${t("rptAllItems")}</div>
+          <table><tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptRevenue")}</th></tr>${items}
+          <tr class="total-row"><td>${t("rptTotal")}</td><td>${totQty}</td><td>${fmtCur(totRev)}</td></tr></table>
+        </div>`;
+      }
+    }
   }
   const summaryTabs = new Set(["overview", "profitloss", "tax", "employees", "inventory", "peak", "tables", "cashflow"]);
   const showSummary = user && user.role === "manager" && summaryTabs.has(currentReportTab) && typeof d.total_sales === "number";
@@ -3843,7 +3861,6 @@ async function printReports() {
     ${d.gross_profit !== undefined ? `<div><span>${t("rptGrossProfit")}:</span><b>${fmtCur(d.gross_profit)}</b></div>` : ""}
     ${d.net_profit !== undefined ? `<div><span>${t("rptNetProfit")}:</span><b>${fmtCur(d.net_profit)}</b></div>` : ""}
   </div>` : "";
-  const compact = !!(document.getElementById("report-compact") && document.getElementById("report-compact").checked);
   const compactCss = compact ? `
       @page { size: auto; margin: 3mm; }
       body { zoom: 0.55; font-size: 9px !important; padding: 8px !important; }
