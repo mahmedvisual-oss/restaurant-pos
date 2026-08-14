@@ -3862,21 +3862,22 @@ async function printReports() {
     ${d.net_profit !== undefined ? `<div><span>${t("rptNetProfit")}:</span><b>${fmtCur(d.net_profit)}</b></div>` : ""}
   </div>` : "";
   const compactCss = compact ? `
-      @page { size: auto; margin: 3mm; }
-      body { zoom: 0.55; font-size: 9px !important; padding: 8px !important; }
-      h1 { font-size: 13px !important; }
-      .print-date, .print-meta { font-size: 8px !important; margin-bottom: 6px !important; }
-      .print-summary { padding: 4px 8px !important; margin: 6px 0 !important; gap: 2px !important; }
-      .print-summary div { padding: 2px 6px !important; font-size: 9px !important; }
-      .report-kpi { gap: 4px !important; margin-bottom: 6px !important; }
-      .report-kpi-item { padding: 4px !important; min-width: 80px !important; }
+      @page { size: auto; margin: 4mm; }
+      body { zoom: 0.72; font-size: 10px !important; padding: 8px !important; }
+      h1 { font-size: 15px !important; margin-bottom: 1px !important; }
+      .print-date, .print-meta { font-size: 9px !important; margin-bottom: 4px !important; }
+      .print-body-box { border: 1px solid #333; padding: 6px; }
+      .print-summary { border: none !important; border-radius: 0 !important; padding: 2px 0 !important; margin: 2px 0 4px !important; gap: 0 !important; justify-content: flex-start !important; }
+      .print-summary div { padding: 0 12px 0 0 !important; font-size: 10px !important; }
+      .report-kpi { display: flex !important; gap: 0 !important; margin: 0 0 4px !important; }
+      .report-kpi-item { border: none !important; border-radius: 0 !important; padding: 0 !important; min-width: 0 !important; flex: none !important; text-align: left !important; margin-right: 14px; }
+      .report-kpi-item .report-kpi-value, .report-kpi-item .report-kpi-label { display: inline; }
       .report-kpi-value { font-size: 11px !important; }
-      .report-kpi-label { font-size: 8px !important; }
-      .report-section { padding: 4px 6px !important; margin-bottom: 6px !important; }
-      .report-section-title { font-size: 10px !important; margin-bottom: 3px !important; padding-bottom: 2px !important; }
-      table, .report-table { font-size: 8px !important; }
-      th, td { padding: 1px 3px !important; }
-      th { padding: 2px 3px !important; }
+      .report-kpi-label { font-size: 9px !important; }
+      .report-section { border: none !important; border-radius: 0 !important; padding: 0 !important; margin: 0 0 4px !important; page-break-inside: auto !important; }
+      .report-section-title { border-bottom: none !important; padding: 0 !important; margin: 0 0 2px !important; font-size: 10px !important; }
+      table, .report-table { font-size: 9px !important; }
+      th, td { padding: 2px 4px !important; }
     ` : "";
   hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
     <style>
@@ -3910,9 +3911,11 @@ async function printReports() {
     <h1>${RESTAURANT_NAME}</h1>
     <div class="print-date">${t("rptPrintTitle")} — ${new Date().toLocaleString()}</div>
     ${period ? `<div class="print-meta"><span>${t("rptPeriod")}: ${period}</span>${label ? `<span>${t("rptFilters")}: ${escapeHtml(label)}</span>` : ""}</div>` : label ? `<div class="print-meta"><span>${t("rptFilters")}: ${escapeHtml(label)}</span></div>` : ""}
+    <div class="print-body-box">
     ${totalRow}
     ${clone.outerHTML}
     ${detail}
+    </div>
   </body></html>`);
 }
 
