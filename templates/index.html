@@ -39,7 +39,7 @@
     <button class="btn btn-success" onclick="openDepositModal()" data-i18n="depositVoucher">🧾 سند قبض</button>
     <button class="btn btn-info" onclick="window.open('/kitchen', '_blank')" data-i18n="kitchen">🧑‍🍳 المطبخ</button>
     <button class="btn btn-warning" onclick="showReservationManager()" data-i18n="reservationTitle">📅 الحجوزات</button>
-    <button class="btn btn-warning" id="btn-day-close" style="display:none" onclick="showDayClose()" data-i18n="dayClose">📆 إغلاق اليوم</button>
+    <button class="btn btn-warning" id="btn-day-close" style="display:none" onclick="onDayButton()" data-i18n="dayClose">📆 إغلاق اليوم</button>
     <button class="btn btn-success" id="btn-menu-mgr" style="display:none" onclick="showMenuManager()" data-i18n="menuManage">🍽️ إدارة القائمة</button>
     <div class="lang-dropdown" id="manager-dropdown" style="display:none">
       <button class="btn btn-secondary" onclick="toggleManagerDropdown()" id="btn-manager">🛠️ <span data-i18n="managerTools">أدوات المدير</span></button>
@@ -48,7 +48,7 @@
         <button class="lang-option" onclick="showInventoryManager(); closeManagerDropdown();" data-i18n="inventoryTitle">📦 إدارة المخزون</button>
         <button class="lang-option" onclick="showLoyaltyManager(); closeManagerDropdown();" data-i18n="loyaltyTitle">⭐ نقاط الولاء</button>
         <button class="lang-option" onclick="showBackup(); closeManagerDropdown();" data-i18n="backup">💾 نسخ احتياطي</button>
-        <button class="lang-option" onclick="showDayClose(); closeManagerDropdown();" data-i18n="dayClose">📆 إغلاق اليوم</button>
+        <button class="lang-option" onclick="onDayButton(); closeManagerDropdown();" data-i18n="dayClose">📆 إغلاق اليوم</button>
         <button class="lang-option" onclick="showAudit(); closeManagerDropdown();" data-i18n="audit">🛡️ السجل</button>
       </div>
     </div>
@@ -971,7 +971,7 @@
       <button class="btn btn-block" style="margin:4px 0" onclick="showPromoManager();closeMobileMgrMenu()" data-i18n="promoTitle">🏷️ أكواد الخصم</button>
       <button class="btn btn-block" style="margin:4px 0" onclick="showInventoryManager();closeMobileMgrMenu()" data-i18n="inventoryTitle">📦 إدارة المخزون</button>
       <button class="btn btn-block" style="margin:4px 0" onclick="showReports();closeMobileMgrMenu()" data-i18n="reportsTitle">📊 التقارير</button>
-      <button class="btn btn-block" style="margin:4px 0" onclick="showDayClose();closeMobileMgrMenu()" data-i18n="dayClose">📆 إغلاق اليوم</button>
+      <button class="btn btn-block" style="margin:4px 0" onclick="onDayButton();closeMobileMgrMenu()" data-i18n="dayClose">📆 إغلاق اليوم</button>
     </div>
   </div>
 </div>

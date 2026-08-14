@@ -325,6 +325,7 @@ function updateUserBar() {
     mgrDropdown.style.display = isMgr ? "" : "none";
     const btnDayClose = document.getElementById("btn-day-close");
     if (btnDayClose) btnDayClose.style.display = "";
+    updateDayButton();
     if (btnMenuMgr) btnMenuMgr.style.display = isMgr ? "" : "none";
     if (shortcutBar) shortcutBar.style.display = smallScreen ? "none" : "flex";
     if (mobileNav) mobileNav.style.display = smallScreen ? "flex" : "none";
@@ -4281,6 +4282,37 @@ async function showDayClose() {
   await loadDayStatus();
 }
 
+async function updateDayButton() {
+  const btn = document.getElementById("btn-day-close");
+  if (!btn) return;
+  if (!user) { btn.style.display = "none"; return; }
+  btn.style.display = "";
+  try {
+    const d = await api("/api/day/status");
+    btn.dataset.closed = d.closed ? "1" : "0";
+    btn.innerHTML = (d.closed ? "📆 " : "📆 ") + t(d.closed ? "dayStart" : "dayClose");
+  } catch (e) {
+    btn.dataset.closed = "0";
+    btn.innerHTML = "📆 " + t("dayClose");
+  }
+}
+
+async function onDayButton() {
+  const btn = document.getElementById("btn-day-close");
+  const isClosed = btn && btn.dataset.closed === "1";
+  if (isClosed) {
+    if (!confirm(t("dayStartConfirm"))) return;
+    try {
+      await api("/api/day/start", { method: "POST" });
+      toast("📆 " + t("toast.dayStarted"));
+      await updateDayButton();
+      checkDayReminder();
+    } catch (e) { toast(e.message); }
+  } else {
+    showDayClose();
+  }
+}
+
 async function loadDayStatus() {
   try {
     dayData = await api("/api/day/status");
@@ -4353,6 +4385,7 @@ async function closeDay() {
     renderDay(dayData);
     dayPrint();
     checkDayReminder();
+    updateDayButton();
   } catch (e) { document.getElementById("day-err").textContent = e.message; }
 }
 
@@ -4362,6 +4395,7 @@ async function reopenDay() {
     await api("/api/day/reopen", { method: "POST" });
     toast("🔓 " + t("toast.dayReopened"));
     loadDayStatus();
+    updateDayButton();
   } catch (e) { document.getElementById("day-err").textContent = e.message; }
 }
 

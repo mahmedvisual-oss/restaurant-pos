@@ -3061,6 +3061,22 @@ def api_day_close():
     return jsonify({"ok": True, "id": cid, "date": today, **s, "difference": difference, "counted_cash": counted})
 
 
+@app.route("/api/day/start", methods=["POST"])
+def api_day_start():
+    """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    today = _now().strftime("%Y-%m-%d")
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM day_closures WHERE date=?", (today,))
+    conn.commit()
+    conn.close()
+    audit("day_start", f"بداية اليوم {today}")
+    return jsonify({"ok": True})
+
+
 @app.route("/api/day/reopen", methods=["POST"])
 def api_day_reopen():
     u, err, code = require_manager()
@@ -3069,8 +3085,8 @@ def api_day_reopen():
     today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
-    s = _day_summary(c, today)
-    cl = c.execute("SELECT * FROM day_closures WHERE date=?", (today,)).fetchone()
+    c.execute("DELETE FROM day_closures WHERE date=?", (today,))
+    conn.commit()
     conn.close()
     audit("day_reopen", f"إعادة فتح اليوم {today}")
     return jsonify({"ok": True})
