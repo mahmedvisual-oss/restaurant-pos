@@ -2540,12 +2540,16 @@ def api_customer_create():
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
     name = str(data.get("name", "")).strip()
-    phone = str(data.get("phone", "")).strip()
+    phone = str(data.get("phone", "")).strip() or None
     if not name:
         return jsonify({"error": "الاسم مطلوب"}), 400
     conn = get_db()
-    conn.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (name, phone))
-    conn.commit()
+    try:
+        conn.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (name, phone))
+        conn.commit()
+    except Exception:
+        conn.close()
+        return jsonify({"error": "رقم الهاتف مسجّل لعميل آخر"}), 409
     conn.close()
     return jsonify({"ok": True})
 
@@ -2557,13 +2561,17 @@ def api_customer_update(cid):
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
     name = str(data.get("name", "")).strip()
-    phone = str(data.get("phone", "")).strip()
+    phone = str(data.get("phone", "")).strip() or None
     points = int(data.get("points", 0))
     if not name:
         return jsonify({"error": "الاسم مطلوب"}), 400
     conn = get_db()
-    conn.execute("UPDATE customers SET name=?, phone=?, points=? WHERE id=?", (name, phone, points, cid))
-    conn.commit()
+    try:
+        conn.execute("UPDATE customers SET name=?, phone=?, points=? WHERE id=?", (name, phone, points, cid))
+        conn.commit()
+    except Exception:
+        conn.close()
+        return jsonify({"error": "رقم الهاتف مسجّل لعميل آخر"}), 409
     conn.close()
     return jsonify({"ok": True})
 

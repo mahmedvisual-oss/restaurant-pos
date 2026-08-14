@@ -221,6 +221,7 @@ function terr(msg) {
     "النسخة تالفة": "err.invalidBackup",
     "تعذر فتح النسخة": "err.cannotOpenFile",
     "تعذر قراءة الملف": "err.cannotOpenFile",
+    "رقم الهاتف مسجّل لعميل آخر": "custPhoneExists",
   };
   if (map[m]) return t(map[m]);
   if (m.indexOf("المبلغ المدفوع أقل من الإجمالي") === 0) return t("err.notEnough");
