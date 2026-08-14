@@ -2375,34 +2375,6 @@ function renderDailyChart(rows) {
   });
 }
 
-function renderTopItemsChart(rows) {
-  const el = document.getElementById("chart-top-items");
-  if (!rows.length) { el.style.display = "none"; return; }
-  el.style.display = "block";
-  const labels = rows.map(r => r.name);
-  const values = rows.map(r => r.qty);
-  const colors = ["#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16"];
-  chartInstances.topItems = new Chart(el, {
-    type: "bar",
-    data: { labels, datasets: [{ label: t("orders"), data: values, backgroundColor: colors.slice(0, rows.length) }] },
-    options: { responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } } }
-  });
-}
-
-function renderMethodChart(rows) {
-  const el = document.getElementById("chart-method");
-  if (!rows.length) { el.style.display = "none"; return; }
-  el.style.display = "block";
-  const labels = rows.map(r => methodName(r.payment_method));
-  const values = rows.map(r => r.total);
-  const colors = ["#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
-  chartInstances.method = new Chart(el, {
-    type: "doughnut",
-    data: { labels, datasets: [{ data: values, backgroundColor: colors.slice(0, rows.length) }] },
-    options: { responsive: true, maintainAspectRatio: false }
-  });
-}
-
 function renderHourChart(rows) {
   const el = document.getElementById("chart-hour");
   if (!rows.length) { el.style.display = "none"; return; }
@@ -2710,13 +2682,11 @@ async function switchReportTab(tab) {
 
 function renderReportTab() {
   const c = document.getElementById("report-content");
-  const charts = document.getElementById("report-charts");
-  charts.style.display = "none";
   // دمج التبويبات القديمة في نظرة عامة شاملة
   const tab = (currentReportTab === "daily" || currentReportTab === "monthly") ? "overview" : currentReportTab;
 
   switch (tab) {
-    case "overview": renderOverview(c); charts.style.display = ""; break;
+    case "overview": renderOverview(c); break;
     case "profitloss": renderProfitLoss(c); break;
     case "tax": renderTax(c); break;
     case "employees": renderEmployees(c); break;
@@ -2836,6 +2806,20 @@ function renderOverview(c) {
   });
   const months = Object.entries(monthly).sort((a, b) => b[0].localeCompare(a[0]));
 
+  const dailyData = d.daily || [];
+  const hourData = d.by_hour || [];
+
+  const avgOrder = (orders, sales) => orders > 0 ? fmtCur(sales / orders) : fmtCur(0);
+
+  const methodRows = (d.by_method || []).map(m => {
+    const pct = d.total_sales > 0 ? ((m.total / d.total_sales) * 100).toFixed(1) : 0;
+    return `<tr class="report-drill" onclick="applyReportDrill('method', '${escq(m.method)}')" title="${t("rptDrillHint")}"><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td><td>${pct}%</td></tr>`;
+  }).join("");
+
+  const topItemsRows = (d.top_items || []).slice(0, 10).map(i =>
+    `<tr class="report-drill" onclick="applyReportDrill('item', '${escq(i.name)}')" title="${t("rptDrillHint")}"><td>${i.name}</td><td>${i.qty}</td><td>${fmtCur(i.revenue)}</td></tr>`
+  ).join("");
+
   c.innerHTML = `
     <div class="report-kpi">
       <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.total_sales)}</div><div class="report-kpi-label">${t("rptTotalSales")}</div></div>
@@ -2845,36 +2829,27 @@ function renderOverview(c) {
     </div>
 
     <div class="report-section">
-      <div class="report-section-title">${t("rptQuickSummary")}</div>
+      <div class="report-section-title">${t("rptExecutiveSummary")}</div>
       <table class="report-table">
-        <tr><th>${t("rptPeriod")}</th><th>${t("rptOrders")}</th><th>${t("rptSales")}</th><th>${t("rptAvg")}</th></tr>
-        <tr style="background:var(--accent-bg)"><td><strong>${t("rptToday")}</strong></td><td>${todayOrders}</td><td><strong>${fmtCur(todaySales)}</strong></td><td>${todayOrders > 0 ? fmtCur(todaySales / todayOrders) : fmtCur(0)}</td></tr>
-        <tr style="background:var(--accent-bg)"><td><strong>${t("rptThisMonth")}</strong></td><td>${monthOrders}</td><td><strong>${fmtCur(monthSales)}</strong></td><td>${monthOrders > 0 ? fmtCur(monthSales / monthOrders) : fmtCur(0)}</td></tr>
-        <tr class="total-row"><td><strong>${t("rptTotal")}</strong></td><td>${d.order_count}</td><td><strong>${fmtCur(d.total_sales)}</strong></td><td>${fmtCur(d.avg_order)}</td></tr>
+        <tr><th></th><th>${t("rptToday")}</th><th>${t("rptThisMonth")}</th><th>${t("rptPeriod")}</th></tr>
+        <tr><th class="row-head">${t("rptOrders")}</th><td>${todayOrders}</td><td>${monthOrders}</td><td>${d.order_count}</td></tr>
+        <tr><th class="row-head">${t("rptSales")}</th><td>${fmtCur(todaySales)}</td><td>${fmtCur(monthSales)}</td><td>${fmtCur(d.total_sales)}</td></tr>
+        <tr class="total-row"><th class="row-head">${t("rptAvgOrder")}</th><td>${avgOrder(todayOrders, todaySales)}</td><td>${avgOrder(monthOrders, monthSales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
     </div>
 
-    <div class="report-section">
-      <div class="report-section-title">${t("rptDailySales")}</div>
-      <table class="report-table">
-        <tr><th>${t("rptDate")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
-        ${(d.daily || []).slice(-14).map(day => {
-          const avg = day.count > 0 ? day.total / day.count : 0;
-          const isToday = day.date === today;
-          return '<tr class="report-drill' + (isToday ? '" style="background:var(--accent-bg)' : '') + '" onclick="applyReportDrill(\'day\', \'' + day.date + '\')" title="' + t("rptDrillHint") + '"><td>' + (isToday ? '<strong>' + day.date + '</strong>' : day.date) + '</td><td>' + day.count + '</td><td>' + fmtCur(day.total) + '</td><td>' + fmtCur(avg) + '</td></tr>';
-        }).join("")}
-        <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
-      </table>
-    </div>
+    ${dailyData.length ? `<div class="report-section">
+      <div class="report-section-title">${t("rptSalesTrend")}</div>
+      <div style="height:220px;position:relative"><canvas id="chart-daily" style="width:100%;height:220px"></canvas></div>
+    </div>` : ""}
 
     <div class="report-section">
       <div class="report-section-title">${t("rptMonthlySales")}</div>
       <table class="report-table">
-        <tr><th>${t("rptMonth")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
+        <tr><th>${t("rptMonth")}</th><th>${t("rptOrders")}</th><th>${t("rptSales")}</th><th>${t("rptAvgOrder")}</th></tr>
         ${months.map(([m, v]) => {
-          const avg = v.count > 0 ? v.total / v.count : 0;
           const isThisMonth = m === thisMonth;
-          return '<tr class="report-drill' + (isThisMonth ? '" style="background:var(--accent-bg)' : '') + '" onclick="applyReportDrill(\'month\', \'' + m + '\')" title="' + t("rptDrillHint") + '"><td>' + (isThisMonth ? '<strong>' + m + '</strong>' : m) + '</td><td>' + v.count + '</td><td>' + fmtCur(v.total) + '</td><td>' + fmtCur(avg) + '</td></tr>';
+          return '<tr class="report-drill' + (isThisMonth ? '" style="background:var(--accent-bg)' : '') + '" onclick="applyReportDrill(\'month\', \'' + m + '\')" title="' + t("rptDrillHint") + '"><td>' + (isThisMonth ? '<strong>' + m + '</strong>' : m) + '</td><td>' + v.count + '</td><td>' + fmtCur(v.total) + '</td><td>' + fmtCur(v.count > 0 ? v.total / v.count : 0) + '</td></tr>';
         }).join("")}
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
@@ -2884,19 +2859,23 @@ function renderOverview(c) {
       <div class="report-section-title">${t("rptSalesByMethod")}</div>
       <table class="report-table">
         <tr><th>${t("rptMethod")}</th><th>${t("rptOrders")}</th><th>${t("rptAmount")}</th><th>${t("rptPercent")}</th></tr>
-        ${(d.by_method || []).map(m => {
-          const pct = d.total_sales > 0 ? ((m.total / d.total_sales) * 100).toFixed(1) : 0;
-          return `<tr class="report-drill" onclick="applyReportDrill('method', '${escq(m.method)}')" title="${t("rptDrillHint")}"><td>${methodName(m.method)}</td><td>${m.count}</td><td>${fmtCur(m.total)}</td><td>${pct}%</td></tr>`;
-        }).join("")}
+        ${methodRows || `<tr><td colspan="4" style="text-align:center;color:var(--muted)">${t("rptNoSales")}</td></tr>`}
+        <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>100%</td></tr>
       </table>
     </div>
+
     <div class="report-section">
       <div class="report-section-title">${t("rptTopItems")}</div>
       <table class="report-table">
         <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptRevenue")}</th></tr>
-        ${(d.top_items || []).slice(0, 10).map(i => `<tr class="report-drill" onclick="applyReportDrill('item', '${escq(i.name)}')" title="${t("rptDrillHint")}"><td>${i.name}</td><td>${i.qty}</td><td>${fmtCur(i.revenue)}</td></tr>`).join("")}
+        ${topItemsRows || `<tr><td colspan="3" style="text-align:center;color:var(--muted)">${t("rptNoSales")}</td></tr>`}
       </table>
-    </div>`;
+    </div>
+
+    ${hourData.length ? `<div class="report-section">
+      <div class="report-section-title">${t("advByHour")}</div>
+      <div style="height:220px;position:relative"><canvas id="chart-hour" style="width:100%;height:220px"></canvas></div>
+    </div>` : ""}`;
   renderCharts(d);
 }
 
@@ -3756,8 +3735,6 @@ function renderCharts(d) {
   loadChartJs().then(() => {
     try {
       renderDailyChart(d.daily || []);
-      renderTopItemsChart((d.top_items || []).slice(0, 6));
-      renderMethodChart(d.by_method || []);
       renderHourChart(d.by_hour || []);
     } catch (e) { /* تجاهل */ }
   }).catch(() => { /* تجاهل فشل تحميل مكتبة الرسوم */ });

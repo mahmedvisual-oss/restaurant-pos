@@ -930,6 +930,9 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .report-table td {
   padding: 5px 8px; border-bottom: 1px solid var(--border);
 }
+.report-table th.row-head {
+  text-align: right; background: transparent; color: var(--text); font-weight: 600;
+}
 .report-table tr:hover td { background: rgba(99,102,241,.05); }
 .report-table .total-row td {
   font-weight: bold; background: var(--card); border-top: 2px solid var(--border);
