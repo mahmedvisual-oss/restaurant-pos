@@ -3843,6 +3843,24 @@ async function printReports() {
     ${d.gross_profit !== undefined ? `<div><span>${t("rptGrossProfit")}:</span><b>${fmtCur(d.gross_profit)}</b></div>` : ""}
     ${d.net_profit !== undefined ? `<div><span>${t("rptNetProfit")}:</span><b>${fmtCur(d.net_profit)}</b></div>` : ""}
   </div>` : "";
+  const compact = !!(document.getElementById("report-compact") && document.getElementById("report-compact").checked);
+  const compactCss = compact ? `
+      @page { size: auto; margin: 3mm; }
+      body { zoom: 0.55; font-size: 9px !important; padding: 8px !important; }
+      h1 { font-size: 13px !important; }
+      .print-date, .print-meta { font-size: 8px !important; margin-bottom: 6px !important; }
+      .print-summary { padding: 4px 8px !important; margin: 6px 0 !important; gap: 2px !important; }
+      .print-summary div { padding: 2px 6px !important; font-size: 9px !important; }
+      .report-kpi { gap: 4px !important; margin-bottom: 6px !important; }
+      .report-kpi-item { padding: 4px !important; min-width: 80px !important; }
+      .report-kpi-value { font-size: 11px !important; }
+      .report-kpi-label { font-size: 8px !important; }
+      .report-section { padding: 4px 6px !important; margin-bottom: 6px !important; }
+      .report-section-title { font-size: 10px !important; margin-bottom: 3px !important; padding-bottom: 2px !important; }
+      table, .report-table { font-size: 8px !important; }
+      th, td { padding: 1px 3px !important; }
+      th { padding: 2px 3px !important; }
+    ` : "";
   hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
     <style>
       body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 24px; direction: ${dir}; font-size: 12px; color: #000; }
@@ -3868,6 +3886,7 @@ async function printReports() {
       .report-filter-badge { display: none; }
       .report-order-detail { display: table-row; }
       @media print { body { padding: 10px; } }
+      ${compactCss}
     </style>
   </head><body>
     <img src="/logo.png" alt="logo" style="width:40px;height:40px;display:block;margin:0 auto 4px;object-fit:contain">
