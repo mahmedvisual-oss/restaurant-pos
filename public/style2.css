@@ -278,6 +278,12 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 .guests-row { display: flex; align-items: center; gap: 8px; padding: 8px 14px; font-size: 12px; }
 .guests-input { width: 60px; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 6px; font-size: 13px; text-align: center; }
 
+/* شريط وصول الحاجز */
+#reservation-bar { display: none; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, rgba(168,85,247,.14), rgba(217,70,239,.05)); font-size: 12px; }
+.res-bar-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.res-bar-info b { color: #d946ef; }
+.res-bar-info span { color: var(--text); opacity: .85; }
+
 .promo-row { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-top: 1px solid var(--border); }
 .promo-input { flex: 1; background: var(--input); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 8px; font-size: 12px; text-transform: uppercase; }
 .promo-input::placeholder { text-transform: none; }

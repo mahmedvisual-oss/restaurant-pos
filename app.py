@@ -303,6 +303,7 @@ def _ensure_schema(conn, c, log=True):
             ("credit_name", "ALTER TABLE orders ADD COLUMN credit_name TEXT"),
             ("table_section", "ALTER TABLE orders ADD COLUMN table_section TEXT"),
             ("table_id", "ALTER TABLE orders ADD COLUMN table_id INTEGER"),
+            ("reservation_id", "ALTER TABLE orders ADD COLUMN reservation_id INTEGER"),
         ):
             if col not in ocols:
                 c.execute(ddl)
@@ -2493,6 +2494,49 @@ def api_reservation_update(rid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/reservation/table")
+def api_reservation_table():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    table_id = request.args.get("table_id")
+    if not table_id:
+        return jsonify([])
+    conn = get_db()
+    today = _now().strftime("%Y-%m-%d")
+    rows = conn.execute("SELECT * FROM reservations WHERE table_id=? AND date=? AND status IN ('pending','confirmed') ORDER BY time ASC",
+                        (table_id, today)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/reservation/arrive", methods=["POST"])
+def api_reservation_arrive():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    data = request.json or {}
+    table_id = data.get("table_id")
+    if not table_id:
+        return jsonify({"error": "اختر طاولة"}), 400
+    conn = get_db()
+    c = conn.cursor()
+    today = _now().strftime("%Y-%m-%d")
+    rsv = c.execute("SELECT * FROM reservations WHERE table_id=? AND date=? AND status IN ('pending','confirmed') ORDER BY time ASC LIMIT 1",
+                    (table_id, today)).fetchone()
+    if not rsv:
+        conn.close()
+        return jsonify({"error": "لا يوجد حجز اليوم لهذه الطاولة"}), 404
+    c.execute("UPDATE reservations SET status='arrived' WHERE id=?", (rsv["id"],))
+    oid = _open_order_id(c, table_id)
+    if oid:
+        c.execute("UPDATE orders SET reservation_id=? WHERE id=? AND reservation_id IS NULL", (rsv["id"], oid))
+    conn.commit()
+    conn.close()
+    audit("reservation_arrive", f"تسجيل وصول حاجز الحجز #{rsv['id']} - طاولة {rsv['table_num']} ({rsv['customer_name']})")
+    return jsonify({"ok": True, "reservation": dict(rsv)})
+
+
 @app.route("/api/login", methods=["POST"])
 def api_login():
     data = request.json or {}
@@ -3172,6 +3216,20 @@ def _serialize_items(items):
         return json.dumps([])
 
 
+def _attach_reservation(c, table_id, oid):
+    """يربط الطلب بحجز وصل حاجزه اليوم لنفس الطاولة."""
+    if not oid or not table_id:
+        return
+    try:
+        today = _now().strftime("%Y-%m-%d")
+        rsv = c.execute("SELECT id FROM reservations WHERE table_id=? AND date=? AND status='arrived' ORDER BY id DESC LIMIT 1",
+                        (table_id, today)).fetchone()
+        if rsv:
+            c.execute("UPDATE orders SET reservation_id=? WHERE id=? AND reservation_id IS NULL", (rsv["id"], oid))
+    except Exception:
+        pass
+
+
 def _open_order_id(c, table_id, order_id=None, new_order=False):
     if new_order:
         return None
@@ -3251,7 +3309,7 @@ def api_tables():
     rows = c.execute("SELECT table_id, COUNT(*) AS cnt FROM orders WHERE table_id IS NOT NULL AND status IN ('active','sent','ready') GROUP BY table_id").fetchall()
     active = {r["table_id"]: r["cnt"] for r in rows}
     today = _now().strftime("%Y-%m-%d")
-    res = c.execute("SELECT DISTINCT table_id FROM reservations WHERE date = ? AND status != 'cancelled' AND table_id IS NOT NULL", (today,)).fetchall()
+    res = c.execute("SELECT DISTINCT table_id FROM reservations WHERE date = ? AND status NOT IN ('cancelled','arrived') AND table_id IS NOT NULL", (today,)).fetchall()
     reserved = {r["table_id"] for r in res}
     tabs = c.execute("SELECT * FROM tables ORDER BY section, num").fetchall()
     conn.close()
@@ -3444,6 +3502,7 @@ def api_order_save():
                   (num, section, table_id, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now,
                    now, "sent"))
         oid = c.lastrowid
+    _attach_reservation(c, table_id, oid)
     conn.commit()
     conn.close()
     audit("save_order", f"حفظ طلب #{oid} - طاولة {num} - أصناف {len(items)}")
@@ -3477,6 +3536,7 @@ def api_order_send():
                   "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (num, section, table_id, items_str, 0, 0, discount, 0, "", u["name"], "sent", guests, now, now, "sent"))
         oid = c.lastrowid
+    _attach_reservation(c, table_id, oid)
     conn.commit()
     conn.close()
     audit("send_to_kitchen", f"إرسال طلب #{oid} للمطبخ - طاولة {num} - أصناف {len(items)}")

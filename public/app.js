@@ -1303,6 +1303,7 @@ async function selectTable(id) {
   const capacity = tb ? tb.capacity || 4 : 4;
   document.getElementById("table-badge").innerHTML = `🪑 ${t("table")} ${tb.num} <span style="font-size:10px;color:#e0e7ff">👥 ${capacity}</span>`;
   await loadTableOrder(id);
+  showReservationBar(id);
   renderTables();
   if (window.innerWidth <= 768) { switchPanel("cart"); }
 }
@@ -2288,7 +2289,15 @@ async function loadReservationList() {
     const items = await api("/api/reservation/list");
     const el = document.getElementById("reservation-list");
     if (!items.length) { el.innerHTML = `<div class="empty-state">${t("empty")}</div>`; return; }
-    el.innerHTML = items.map(r => `<div class="emp-row" style="display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${r.status === "confirmed" ? "var(--success)" : r.status === "cancelled" ? "var(--danger)" : "var(--warning)"}">
+    el.innerHTML = items.map(r => {
+      const border = r.status === "confirmed" ? "var(--success)" : r.status === "cancelled" ? "var(--danger)" : r.status === "arrived" ? "var(--primary)" : "var(--warning)";
+      const actions = r.status === "arrived"
+        ? `<span style="color:var(--primary);font-size:12px;font-weight:700;white-space:nowrap">✅ ${t("reservationArrived")}</span>`
+        : `<div style="display:flex;gap:4px;flex-shrink:0">
+             ${r.status === "pending" ? `<button class="btn btn-success" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'confirmed')" data-i18n="confirm">✓</button>` : ""}
+             ${r.status !== "cancelled" ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'cancelled')">✕</button>` : ""}
+           </div>`;
+      return `<div class="emp-row" style="display:flex;justify-content:space-between;align-items:center;border-left:3px solid ${border}">
       <div>
         <b>${escapeHtml(r.customer_name)}</b>
         <div style="font-size:12px;color:var(--text)">
@@ -2297,12 +2306,53 @@ async function loadReservationList() {
           ${r.notes ? `<br><i>${escapeHtml(r.notes)}</i>` : ""}
         </div>
       </div>
-      <div style="display:flex;gap:4px;flex-shrink:0">
-        ${r.status === "pending" ? `<button class="btn btn-success" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'confirmed')" data-i18n="confirm">✓</button>` : ""}
-        ${r.status !== "cancelled" ? `<button class="btn btn-danger" style="padding:4px 8px;font-size:12px" onclick="updateReservation(${r.id}, 'cancelled')">✕</button>` : ""}
-      </div>
-    </div>`).join("");
+      ${actions}
+    </div>`;
+    }).join("");
   } catch (e) { toast(e.message); }
+}
+
+async function showReservationBar(id) {
+  const el = document.getElementById("reservation-bar");
+  if (!el) return;
+  const tb = tableData[id];
+  if (!tb || !tb.reserved) { el.style.display = "none"; return; }
+  try {
+    const list = await api("/api/reservation/table?table_id=" + id);
+    const r = list[0];
+    if (!r) { el.style.display = "none"; return; }
+    el.innerHTML = `
+      <div class="res-bar-info">
+        <b>📅 ${t("reservationFor")} ${escapeHtml(r.customer_name)}</b>
+        <span>👥 ${r.guests} ${t("guests")} | ${r.time}${r.notes ? " — " + escapeHtml(r.notes) : ""}</span>
+      </div>
+      <button class="btn btn-success" style="padding:6px 10px;font-size:12px;flex-shrink:0" onclick="arriveReservation(${r.id})">✅ ${t("arriveGuest")}</button>
+      <button class="btn" style="padding:6px 8px;font-size:12px;flex-shrink:0" onclick="dismissReservationBar()">✕</button>
+    `;
+    el.style.display = "flex";
+  } catch (e) { el.style.display = "none"; }
+}
+
+async function arriveReservation() {
+  if (!user) return;
+  try {
+    const res = await api("/api/reservation/arrive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table_id: selectedTable })
+    });
+    toast("✅ " + t("toast.arrivalRegistered"));
+    if (res.reservation && res.reservation.guests) document.getElementById("guests").value = res.reservation.guests;
+    const el = document.getElementById("reservation-bar");
+    if (el) el.style.display = "none";
+    loadTables();
+    loadReservationList();
+  } catch (e) { toast(e.message); }
+}
+
+function dismissReservationBar() {
+  const el = document.getElementById("reservation-bar");
+  if (el) el.style.display = "none";
 }
 
 async function createReservation() {
