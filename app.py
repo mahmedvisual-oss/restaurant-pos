@@ -414,6 +414,28 @@ def _ensure_schema(conn, c, log=True):
         if log:
             print("ENSURE OVERPAID CLEANUP ERR:", repr(e))
     try:
+        # أعمدة سندات القبض وربط العملاء بالآجل (تُنفَّذ دائماً على السحابة/المحلي)
+        _cp_cols = [r[1] for r in c.execute("PRAGMA table_info(credit_payments)").fetchall()]
+        if "receipt_no" not in _cp_cols:
+            c.execute("ALTER TABLE credit_payments ADD COLUMN receipt_no TEXT")
+    except Exception as e:
+        if log:
+            print("ENSURE CREDIT PAYMENTS COL ERR:", repr(e))
+    try:
+        _cl_cols = [r[1] for r in c.execute("PRAGMA table_info(credit_ledger)").fetchall()]
+        if "customer_id" not in _cl_cols:
+            c.execute("ALTER TABLE credit_ledger ADD COLUMN customer_id INTEGER")
+    except Exception as e:
+        if log:
+            print("ENSURE CREDIT LEDGER COL ERR:", repr(e))
+    try:
+        _o_cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+        if "credit_phone" not in _o_cols:
+            c.execute("ALTER TABLE orders ADD COLUMN credit_phone TEXT")
+    except Exception as e:
+        if log:
+            print("ENSURE ORDERS CREDIT PHONE ERR:", repr(e))
+    try:
         # إزالة سجلات خصم الأوامر المحذوفة (لا تبقى أيتاماً)
         c.execute("DELETE FROM discount_log WHERE order_id IS NOT NULL AND order_id NOT IN (SELECT id FROM orders)")
     except Exception as e:
