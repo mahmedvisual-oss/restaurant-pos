@@ -311,6 +311,7 @@ if CLOUD_DB:
                         pass
 
     def _pool_take():
+        global _CONN_TOTAL
         while True:
             with _CONN_LOCK:
                 if _CONN_POOL:
