@@ -799,6 +799,8 @@ def init_db():
         c.execute("ALTER TABLE credit_ledger ADD COLUMN table_id INTEGER")
     if "table_section" not in cols_cl:
         c.execute("ALTER TABLE credit_ledger ADD COLUMN table_section TEXT")
+    if "customer_id" not in cols_cl:
+        c.execute("ALTER TABLE credit_ledger ADD COLUMN customer_id INTEGER")
     # backfill: سجّل الطلبات الآجلة القديمة المدفوعة/الجزئية في credit_ledger إذا لم تُسجل بعد
     c.execute("SELECT id, table_num, table_section, total, paid, credit_name, date FROM orders "
               "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
@@ -2364,6 +2366,106 @@ def api_customer_list():
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/api/customer/analytics")
+def api_customer_analytics():
+    """مرجع العملاء: لكل عميل إجمالي الأموال/المدفوع/المتبقي/آخر دفعة/طرق الدفع والفواتير."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    q = (request.args.get("q") or "").strip().lower()
+    conn = get_db()
+    c = conn.cursor()
+    customers = c.execute("SELECT id, name, phone, points FROM customers ORDER BY name").fetchall()
+    ledgers = c.execute("SELECT id, customer_id, customer_name, phone, order_id, table_num, total, paid, status, created_at, due_date FROM credit_ledger").fetchall()
+    pandas = c.execute("SELECT ledger_id, amount, method, employee, date FROM credit_payments").fetchall()
+    conn.close()
+    # دفع مسددة: ledger_id -> [payments]
+    pays_by = {}
+    for p in pandas:
+        pays_by.setdefault(p["ledger_id"], []).append(dict(p))
+    # فهرسة العملاء المسجلين
+    phone_to_cid = {}
+    name_to_cid = {}
+    for cu in customers:
+        if cu["phone"]:
+            phone_to_cid[str(cu["phone"]).strip().lower()] = cu["id"]
+        name_to_cid[(cu["name"] or "").strip().lower()] = cu["id"]
+    customers_map = {cu["id"]: cu for cu in customers}
+
+    def resolve_key(l):
+        if l["customer_id"] and l["customer_id"] in customers_map:
+            return ("id", l["customer_id"])
+        if l["phone"] and str(l["phone"]).strip().lower() in phone_to_cid:
+            return ("id", phone_to_cid[str(l["phone"]).strip().lower()])
+        nm = (l["customer_name"] or "").strip().lower()
+        if nm in name_to_cid:
+            return ("id", name_to_cid[nm])
+        return ("name", nm or "—")
+
+    agg = {}
+
+    def ensure(key):
+        a = agg.get(key)
+        if not a:
+            a = {"key": key, "cid": None, "name": "", "phone": "", "points": 0,
+                 "total": 0.0, "paid": 0.0, "remaining": 0.0,
+                 "open_count": 0, "settled_count": 0,
+                 "methods": {}, "last_payment": None, "invoices": []}
+            agg[key] = a
+        return a
+
+    # تسجيل العملاء الموجودين (حتى لو بلا ذمم)
+    for cu in customers:
+        a = ensure(("id", cu["id"]))
+        a["cid"] = cu["id"]
+        a["name"] = cu["name"] or ""
+        a["phone"] = cu["phone"] or ""
+        a["points"] = cu["points"] or 0
+
+    for l in ledgers:
+        a = ensure(resolve_key(l))
+        if not a["name"]:
+            a["name"] = l["customer_name"] or ""
+        if not a["phone"]:
+            a["phone"] = l["phone"] or ""
+        a["total"] = round(a["total"] + (l["total"] or 0), 2)
+        a["paid"] = round(a["paid"] + (l["paid"] or 0), 2)
+        if l["status"] == "open":
+            a["open_count"] += 1
+        else:
+            a["settled_count"] += 1
+        inv = {"ledger_id": l["id"], "order_id": l["order_id"], "table_num": l["table_num"],
+               "date": l["created_at"], "due_date": l["due_date"],
+               "total": l["total"] or 0, "paid": l["paid"] or 0,
+               "remaining": round((l["total"] or 0) - (l["paid"] or 0), 2),
+               "status": l["status"],
+               "payments": pays_by.get(l["id"], [])}
+        a["invoices"].append(inv)
+        for p in pays_by.get(l["id"], []):
+            m = p["method"] or "نقدي"
+            a["methods"][m] = round(a["methods"].get(m, 0) + (p["amount"] or 0), 2)
+            pd = (p["date"] or "")[:10]
+            if not a["last_payment"] or pd > a["last_payment"]:
+                a["last_payment"] = pd
+
+    result = []
+    for a in agg.values():
+        a["remaining"] = round(a["total"] - a["paid"], 2)
+        a["methods"] = [{"method": k, "amount": v} for k, v in sorted(a["methods"].items(), key=lambda x: -x[1])]
+        a["invoices"].sort(key=lambda x: x["date"] or "", reverse=True)
+        result.append(a)
+
+    if q:
+        result = [a for a in result if q in a["name"].lower() or q in a["phone"].lower()]
+
+    result.sort(key=lambda a: (-a["remaining"], a["name"]))
+    totals = {"invoiced": round(sum(a["total"] for a in result), 2),
+              "paid": round(sum(a["paid"] for a in result), 2),
+              "remaining": round(sum(a["remaining"] for a in result), 2),
+              "count": len(result)}
+    return jsonify({"customers": result, "totals": totals})
+
+
 @app.route("/api/customer", methods=["POST"])
 def api_customer_create():
     u = require_user()
@@ -3774,11 +3876,27 @@ def _do_pay(u, data):
     # 3c) نظام الآجل: credit_ledger + credit_payments
     if payment_method == "آجل":
         cname = _sql_lit((credit_name or "").strip() or "عميل آجل")
+        # ربط/إنشاء عميل تلقائياً في قاعدة بيانات العملاء
+        cid_lit = "NULL"
+        try:
+            cname_raw = (credit_name or "").strip() or "عميل آجل"
+            cph = str(data.get("credit_phone") or "").strip() or None
+            cust = None
+            if cph:
+                cust = c.execute("SELECT id FROM customers WHERE phone=?", (cph,)).fetchone()
+            if not cust:
+                cust = c.execute("SELECT id FROM customers WHERE lower(name)=lower(?) LIMIT 1", (cname_raw,)).fetchone()
+            if not cust:
+                c.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (cname_raw, cph))
+                cust = {"id": c.lastrowid}
+            cid_lit = str(int(cust["id"]))
+        except Exception:
+            cid_lit = "NULL"
         ledger_paid = min(paid, total)
         overpaid = paid > total
         S.append(
-            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date) "
-            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)});"
+            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
         )
         if ledger_paid > 0:
             S.append(

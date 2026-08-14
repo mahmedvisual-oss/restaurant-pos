@@ -1696,7 +1696,7 @@ async function confirmPayment() {
     const res = await api("/api/order/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     closeModal("pay-modal");
     toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
@@ -2267,7 +2267,151 @@ async function loadCustomerList() {
   } catch (e) { toast(e.message); }
 }
 
-// ===== الحجوزات =====
+// ===== قاعدة بيانات العملاء =====
+let customersDb = [];
+const CUST_PAY_METHODS = ["نقدي", "مانديري", "BCA", "آجل", "كيروس"];
+
+function custKey(c) {
+  return c.key && c.key[0] === "id" ? "cid-" + c.key[1] : "cname-" + encodeURIComponent(c.key ? c.key[1] : (c.name || ""));
+}
+
+function customerDbByPhone(name) {
+  if (!name) return "";
+  const n = String(name).trim().toLowerCase();
+  const c = customersDb.find(x => (x.name || "").toLowerCase() === n || (x.phone || "") === n);
+  return c ? (c.phone || "") : "";
+}
+
+async function showCustomersDb() {
+  if (!user) return;
+  openModal("customers-modal");
+  await loadCustomersDb();
+}
+
+async function loadCustomersDb() {
+  try {
+    const d = await api("/api/customer/analytics");
+    customersDb = d.customers || [];
+    const dl = document.getElementById("credit-customers");
+    if (dl) dl.innerHTML = `<option value="${d.customers.map(c => String(c.name).replace(/"/g, "&quot;")).join('"></option><option value="')}"></option>`;
+    renderCustomersDb(d.totals || {});
+  } catch (e) { toast(e.message); }
+}
+
+function renderCustomersDb(totals) {
+  const q = (document.getElementById("cust-search")?.value || "").trim().toLowerCase();
+  const list = q ? customersDb.filter(c => (c.name || "").toLowerCase().includes(q) || (c.phone || "").toLowerCase().includes(q)) : customersDb;
+  const kpi = document.getElementById("cust-kpi");
+  if (kpi) {
+    kpi.innerHTML = `
+      <div class="report-kpi-item"><div class="report-kpi-value">${totals.count}</div><div class="report-kpi-label">${t("custCount")}</div></div>
+      <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(totals.invoiced)}</div><div class="report-kpi-label">${t("custTotal")}</div></div>
+      <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(totals.paid)}</div><div class="report-kpi-label">${t("custPaid")}</div></div>
+      <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(totals.remaining)}</div><div class="report-kpi-label">${t("custRemaining")}</div></div>`;
+  }
+  const el = document.getElementById("customers-list");
+  if (!list.length) { el.innerHTML = `<div class="empty-state">${t("custNoCustomers")}</div>`; return; }
+  el.innerHTML = list.map(c => {
+    const key = custKey(c);
+    const methods = c.methods.map(m => `<span class="cust-method-chip">${methodName(m.method)}: ${fmtCur(m.amount)}</span>`).join(" ");
+    return `
+      <div class="emp-row cust-row" onclick="toggleCustomerInvoices('${key}')">
+        <div style="flex:1;min-width:0">
+          <b>${escapeHtml(c.name || "—")}</b> ${c.cid ? "" : '<span class="cust-imp">' + t("custImplicit") + "</span>"} ${c.cid ? `<button class="btn btn-sm" style="padding:0 6px;font-size:11px" onclick="event.stopPropagation();editCustomerDb(${c.cid}, '${escq(c.name)}', '${escq(c.phone || "")}')" title="${t("custEdit")}">✏️</button>` : ""}
+          ${c.phone ? `<div style="font-size:12px;color:var(--text)">📱 ${escapeHtml(c.phone)}</div>` : ""}
+          <div style="font-size:11px;color:var(--muted)">${c.open_count} ${t("custOpen")} · ${c.settled_count} ${t("custSettled")} · <span style="color:var(--primary)">⭐ ${c.points}</span></div>
+          ${methods ? `<div style="margin-top:3px">${methods}</div>` : ""}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0">
+          <span style="font-size:11px;color:var(--muted)">${t("custTotal")}: <b>${fmtCur(c.total)}</b></span>
+          <span style="font-size:11px;color:var(--success)">${t("custPaid")}: ${fmtCur(c.paid)}</span>
+          <span style="font-size:13px;color:var(--danger);font-weight:700">${t("custRemaining")}: ${fmtCur(c.remaining)}</span>
+          ${c.last_payment ? `<span style="font-size:10px;color:var(--muted)">${t("custLastPay")}: ${c.last_payment}</span>` : ""}
+        </div>
+        <span class="cust-chev">▼</span>
+      </div>
+      <div id="cust-detail-${key}" class="cust-detail" style="display:none"></div>`;
+  }).join("");
+}
+
+async function toggleCustomerInvoices(key) {
+  const box = document.getElementById("cust-detail-" + key);
+  if (!box) return;
+  if (box.style.display !== "none") { box.style.display = "none"; return; }
+  const c = customersDb.find(x => custKey(x) === key);
+  if (!c) return;
+  box.innerHTML = c.invoices.length ? c.invoices.map(inv => `
+    <div class="cust-invoice">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">
+        <b>${t("custInvoice")} #${inv.ledger_id}${inv.order_id ? ` · ${t("rptTable")} ${inv.table_num || "-"}` : ""} · ${inv.date || ""}</b>
+        <span style="color:${inv.status === "open" ? "var(--warning)" : "var(--success)"}">${inv.status === "open" ? t("custOpen") : t("custSettled")}</span>
+      </div>
+      <div style="display:flex;gap:14px;font-size:12px;flex-wrap:wrap;margin:4px 0">
+        <span>${t("custTotal")}: <b>${fmtCur(inv.total)}</b></span>
+        <span style="color:var(--success)">${t("custPaid")}: ${fmtCur(inv.paid)}</span>
+        <span style="color:var(--danger);font-weight:700">${t("custRemaining")}: ${fmtCur(inv.remaining)}</span>
+      </div>
+      ${inv.payments.length ? `<div style="font-size:11px;margin:4px 0">${t("custPayments")}:<br>${inv.payments.map(p => `&nbsp;&nbsp;· ${p.date || ""} — ${methodName(p.method)} — <b>${fmtCur(p.amount)}</b> (${escapeHtml(p.employee || "")})`).join("<br>")}</div>` : ""}
+      ${inv.status === "open" && inv.remaining > 0 ? `<button class="btn btn-success btn-sm" onclick="event.stopPropagation();payCustomerLedger(${inv.ledger_id}, ${inv.remaining})">💵 ${t("custPayNow")}</button>` : ""}
+    </div>`).join("") : `<div class="empty-state">${t("custNoData")}</div>`;
+  box.style.display = "";
+}
+
+function payCustomerLedger(lid, remaining) {
+  const d = document.createElement("div");
+  d.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1100";
+  d.innerHTML = `<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;width:360px;max-width:92vw">
+    <div style="font-weight:bold;margin-bottom:12px">💵 ${t("custPayNow")} — ${t("custRemaining")}: ${fmtCur(remaining)}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <input id="cust-pay-amount" type="number" class="login-input" value="${remaining}" min="0" step="0.01" placeholder="${t("custAmount")}">
+      <select id="cust-pay-method" class="login-input">${CUST_PAY_METHODS.map(m => `<option value="${m}">${methodName(m)}</option>`).join("")}</select>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn" onclick="this.closest('div[style]').remove()">${t("rptClose")}</button>
+      <button class="btn btn-success" onclick="confirmCustomerPay(this, ${lid}, ${remaining})">${t("custConfirmPay")}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(d);
+}
+
+async function confirmCustomerPay(btn, lid, remaining) {
+  const amount = parseFloat(document.getElementById("cust-pay-amount").value) || 0;
+  const method = document.getElementById("cust-pay-method").value;
+  if (amount <= 0) { toast("⚠️ " + t("custEnterPay")); return; }
+  if (amount > remaining + 0.001) { toast("⚠️ " + t("custPayExceeds", { amt: fmtCur(remaining) })); return; }
+  try {
+    await api("/api/credit/settle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ledger_id: lid, amount, method }) });
+    btn.closest("div[style]").remove();
+    toast("✅ " + t("toast.custPaymentDone"));
+    loadCustomersDb();
+  } catch (e) { toast(e.message); }
+}
+
+async function addCustomerDb() {
+  const name = (document.getElementById("cust-new-name")?.value || "").trim();
+  const phone = (document.getElementById("cust-new-phone")?.value || "").trim();
+  if (!name) { toast("⚠️ " + t("custNameRequired")); return; }
+  try {
+    await api("/api/customer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, phone }) });
+    document.getElementById("cust-new-name").value = "";
+    document.getElementById("cust-new-phone").value = "";
+    toast("✅ " + t("toast.customerAdded"));
+    loadCustomersDb();
+  } catch (e) { toast(e.message); }
+}
+
+async function editCustomerDb(cid, curName, curPhone) {
+  const name = prompt(t("custEditName"), curName);
+  if (name === null) return;
+  const phone = prompt(t("custEditPhone"), curPhone || "");
+  if (phone === null) return;
+  try {
+    await api("/api/customer/" + cid, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), phone: phone.trim(), points: 0 }) });
+    toast("✅ " + t("toast.customerUpdated"));
+    loadCustomersDb();
+  } catch (e) { toast(e.message); }
+}
+
 async function showReservationManager() {
   if (!user) return;
   openModal("modal-reservation");

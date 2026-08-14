@@ -39,6 +39,7 @@
     <button class="btn btn-success" onclick="openDepositModal()" data-i18n="depositVoucher">🧾 سند قبض</button>
     <button class="btn btn-info" onclick="window.open('/kitchen', '_blank')" data-i18n="kitchen">🧑‍🍳 المطبخ</button>
     <button class="btn btn-warning" onclick="showReservationManager()" data-i18n="reservationTitle">📅 الحجوزات</button>
+    <button class="btn btn-secondary" onclick="showCustomersDb()" data-i18n="customersTitle">👥 العملاء</button>
     <button class="btn btn-warning" id="btn-day-close" style="display:none" onclick="onDayButton()" data-i18n="dayClose">📆 إغلاق اليوم</button>
     <button class="btn btn-success" id="btn-menu-mgr" style="display:none" onclick="showMenuManager()" data-i18n="menuManage">🍽️ إدارة القائمة</button>
     <div class="lang-dropdown" id="manager-dropdown" style="display:none">
@@ -202,7 +203,8 @@
       </div>
       <div id="credit-name-row" style="display:none;margin-top:8px">
         <div class="pay-label" data-i18n="creditNameLabel">📝 اسم صاحب الآجل:</div>
-        <input id="credit-name" type="text" class="pay-input" data-i18n="creditNamePh" placeholder="اكتب الاسم هنا..." maxlength="50" style="text-transform:none">
+        <input id="credit-name" type="text" class="pay-input" data-i18n="creditNamePh" placeholder="اكتب الاسم هنا..." maxlength="50" style="text-transform:none" list="credit-customers">
+        <datalist id="credit-customers"></datalist>
       </div>
       <div id="transfer-row" style="display:none;margin-top:8px">
         <div class="pay-label">🏦 رقم مرجع التحويل <span style="color:var(--danger)">*</span>:</div>
@@ -667,6 +669,25 @@
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modal-loyalty')" data-i18n="close">✕ إغلاق</button>
+    </div>
+  </div>
+</div>
+
+<div id="customers-modal" class="modal">
+  <div class="modal-content" style="width:840px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span data-i18n="customersTitle">👥 قاعدة بيانات العملاء</span>
+      <span class="modal-x" onclick="closeModal('customers-modal')">✕</span>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <input id="cust-new-name" class="login-input" data-i18n="custNamePh" placeholder="اسم العميل..." style="flex:1;min-width:140px">
+        <input id="cust-new-phone" class="login-input" data-i18n="custPhonePh" placeholder="الهاتف..." style="flex:1;min-width:140px">
+        <button class="btn btn-success" onclick="addCustomerDb()" data-i18n="addCustomer">➕ إضافة عميل</button>
+      </div>
+      <input id="cust-search" class="login-input" oninput="renderCustomersDb()" data-i18n="custSearchPh" placeholder="🔎 بحث بالاسم أو الهاتف..." style="width:100%;margin-bottom:8px">
+      <div id="cust-kpi" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div id="customers-list"></div>
     </div>
   </div>
 </div>
