@@ -2709,7 +2709,7 @@ function renderReportDetail() {
             <td>${fmtCur(o.total)}</td>
             <td><button class="btn btn-sm" onclick="event.stopPropagation();reprintInvoice(${o.id})" title="${t("rptReprint")}">🖨️ ${t("rptReprint")}</button></td>
           </tr>
-          <tr id="order-detail-${o.id}" class="report-order-detail" style="display:none">
+          <tr id="order-detail-${o.id}" class="report-order-detail">
             <td colspan="8">
               <table class="report-table report-table-sub">
                 <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptPrice")}</th><th>${t("rptAmount")}</th></tr>
@@ -3828,7 +3828,7 @@ async function printReports() {
   if (det) {
     const dclone = det.cloneNode(true);
     dclone.querySelectorAll("button, [onclick]").forEach(el => el.remove());
-    dclone.querySelectorAll(".report-order-detail").forEach(el => el.remove());
+    dclone.querySelectorAll(".report-order-detail").forEach(el => { el.style.display = ""; });
     dclone.querySelectorAll("tr").forEach(tr => { tr.removeAttribute("class"); tr.removeAttribute("onclick"); });
     dclone.querySelectorAll("td,th").forEach(td => { td.removeAttribute("onclick"); td.removeAttribute("title"); td.style.borderBottom = "1px solid #eee"; });
     detail = dclone.outerHTML;
@@ -3866,7 +3866,7 @@ async function printReports() {
       .report-profit { color: #059669; font-weight: 600; }
       .report-loss { color: #dc2626; font-weight: 600; }
       .report-filter-badge { display: none; }
-      .report-order-detail { display: none; }
+      .report-order-detail { display: table-row; }
       @media print { body { padding: 10px; } }
     </style>
   </head><body>
