@@ -268,10 +268,63 @@ if CLOUD_DB:
 
 def _raw_conn():
     if CLOUD_DB:
-        conn = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
-        conn.row_factory = lambda cur, row: row
-        return conn
+        return _pool_take()
     return sqlite3.connect(DB_PATH)
+
+
+# ===== بركة اتصالات Turso (حد الاتصالات المتزامنة = ~10) =====
+# كل _ts.connect يفتح بث HTTP إلى Turso. فتح اتصال جديد لكل طلب مع الاقتراع
+# الدوري والتبويبات المتعددة كان يستنزف حد الاتصالات ويُسقط الطلبات والاستيراد
+# على البارد ("Database connections limit exceeded"). نحتفظ ببركة صغيرة (<=3)
+# ونعيد استخدام الاتصالات مع قفل، فلا يتجاوز التزامن الحد أبداً ولا يحدث تسريب.
+if CLOUD_DB:
+    _CONN_POOL = []
+    _CONN_TOTAL = 0
+    _CONN_MAX = 3
+    _CONN_LOCK = threading.Lock()
+
+    class _TConn:
+        """غلاف: close() يعيد الاتصال للبركة بدل إغلاقه على Turso."""
+        __slots__ = ("_c",)
+
+        def __init__(self, c):
+            self._c = c
+
+        def __getattr__(self, name):
+            return getattr(self._c, name)
+
+        def close(self):
+            c, self._c = self._c, None
+            if c is None:
+                return
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            with _CONN_LOCK:
+                if len(_CONN_POOL) < _CONN_MAX:
+                    _CONN_POOL.append(c)
+                else:
+                    try:
+                        c.close()
+                    except Exception:
+                        pass
+
+    def _pool_take():
+        while True:
+            with _CONN_LOCK:
+                if _CONN_POOL:
+                    c = _CONN_POOL.pop()
+                elif _CONN_TOTAL < _CONN_MAX:
+                    _CONN_TOTAL += 1
+                    c = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+                else:
+                    c = None
+            if c is not None:
+                break
+            time.sleep(0.05)
+        c.row_factory = lambda cur, row: row
+        return _TConn(c)
 
 
 def get_db():
@@ -826,6 +879,8 @@ def init_db():
     cols_cp = [r[1] for r in c.execute("PRAGMA table_info(credit_payments)")]
     if "receipt_no" not in cols_cp:
         c.execute("ALTER TABLE credit_payments ADD COLUMN receipt_no TEXT")
+    # تهجير الأعمدة أولاً (credit_name/table_section/...) قبل أي backfill يعتمد عليها
+    _ensure_schema(conn, c, log=False)
     # backfill: سجّل الطلبات الآجلة القديمة المدفوعة/الجزئية في credit_ledger إذا لم تُسجل بعد
     c.execute("SELECT id, table_num, table_section, total, paid, credit_name, date FROM orders "
               "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
@@ -4876,5 +4931,12 @@ if __name__ == "__main__":
     app.run(host="0.0.0.0", port=port, debug=False)
 
 
-# تهيئة قاعدة البيانات عند الاستيراد (للسحابة عبر Gunicorn)
-init_db()
+# تهيئة قاعدة البيانات عند الاستيراد (للسحابة عبر Gunicorn).
+# الفشل هنا (حد اتصالات مزدحم مثلاً) يجب ألا يُسقط العملية/الاستيراد:
+# الأعمدة والجداول موجودة أصلاً على السحابة، وستُعاد محاولة التهيئة عند أول طلب.
+try:
+    init_db()
+except Exception:
+    import traceback
+    traceback.print_exc()
+    print("INIT DB NOT READY YET - will retry per request via _ensure_schema")
