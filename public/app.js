@@ -2538,6 +2538,14 @@ let filterOptionsCache = { method: [], employee: [], item: [], table: [] };
 let filterOptionsSeeded = false;
 let creditFilterStatus = "open";
 let creditSearchVal = "";
+let _reportLoadPending = Promise.resolve();
+function trackReportLoad(p) {
+  _reportLoadPending = Promise.resolve(p).catch(() => {});
+  return p;
+}
+function waitReportLoad() {
+  return _reportLoadPending;
+}
 
 function escq(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
 
@@ -2637,6 +2645,7 @@ async function loadReportData() {
     reportData = await api("/api/reports/advanced?" + buildReportQuery());
     renderReportTab();
     populateReportFilters();
+    await waitReportLoad();
     await loadReportDetail();
   } catch (e) { toast(e.message); }
 }
@@ -2748,7 +2757,7 @@ async function loadDiscountsLog(from, to) {
     const q = new URLSearchParams();
     if (from) q.set("from", from);
     if (to) q.set("to", to);
-    const res = await api("/api/reports/discounts" + (q.toString() ? "?" + q.toString() : ""));
+    const res = await trackReportLoad(api("/api/reports/discounts" + (q.toString() ? "?" + q.toString() : "")));
     const rows = res.discounts || [];
     el.innerHTML = `<div class="report-section">
       <div class="report-section-title">🏷️ ${t("rptDiscounts")}</div>
@@ -2779,7 +2788,7 @@ async function loadDepositVouchers() {
   try {
     const from = document.getElementById("report-from").value;
     const to = document.getElementById("report-to").value;
-    const d = await api("/api/deposit-vouchers?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to));
+    const d = await trackReportLoad(api("/api/deposit-vouchers?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)));
     el.innerHTML = `
       <div class="report-section">
         <div class="report-section-title">🎉 ${t("rptDepositVouchers")}</div>
@@ -2991,7 +3000,7 @@ async function renderAR(c) {
   const to = document.getElementById("report-to").value;
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptARTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
-    const d = await api("/api/reports/ar?from=" + encodeURIComponent(from || "") + "&to=" + encodeURIComponent(to || ""));
+    const d = await trackReportLoad(api("/api/reports/ar?from=" + encodeURIComponent(from || "") + "&to=" + encodeURIComponent(to || "")));
     if (d.error) { c.innerHTML = `<span style="color:var(--danger)">${d.error}</span>`; return; }
     const s = d.summary;
     const recon = s.total_invoiced - (s.total_paid + s.total_open_due);
@@ -3195,52 +3204,54 @@ function exportOverdueCSV() {
   window.open("/api/credit/overdue/export", "_blank");
 }
 
-function printARReport() {
+async function printARReport() {
+  await waitReportLoad();
   const el = document.getElementById("report-content");
   if (!el) return;
   const dir = document.documentElement.dir;
-  const w = window.open("", "_blank", "width=800,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptARTitle")}</title><style>
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll("button, [onclick], input, select, textarea").forEach(n => n.remove());
+  clone.querySelectorAll("[id^='grp-'], [id^='arrow-']").forEach(n => n.style.display = "none");
+  hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptARTitle")}</title><style>
     body{font-family:'Segoe UI',Tahoma,sans-serif;margin:15px;font-size:12px;color:#000}
     h2{margin:4px 0;font-size:16px}.muted{font-size:11px;color:#555}
     table{width:100%;border-collapse:collapse;margin:8px 0}th,td{padding:4px 6px;border:1px solid #ddd;font-size:11px;text-align:right}
     th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
     @media print{body{margin:10px}}
   </style></head><body>
-    <h2>${RESTAURANT_NAME} — ${t("rptARTitle")}</h2>
-    <div class="muted">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
-    ${el.innerHTML}
+    <img src="/logo.png" alt="logo" style="width:32px;height:32px;display:block;margin:0 auto 4px;object-fit:contain">
+    <h2 style="text-align:center">${RESTAURANT_NAME} — ${t("rptARTitle")}</h2>
+    <div class="muted" style="text-align:center">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
+    ${clone.innerHTML}
   </body></html>`);
-  w.document.close();
-  setTimeout(() => { w.print(); }, 500);
 }
 
-function printAPReport() {
+async function printAPReport() {
+  await waitReportLoad();
   const el = document.getElementById("report-content");
   if (!el) return;
   const dir = document.documentElement.dir;
-  const w = window.open("", "_blank", "width=800,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptAPTitle")}</title><style>
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll("button, [onclick], input, select, textarea").forEach(n => n.remove());
+  clone.querySelectorAll("[id^='grp-'], [id^='arrow-']").forEach(n => n.style.display = "none");
+  hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptAPTitle")}</title><style>
     body{font-family:'Segoe UI',Tahoma,sans-serif;margin:15px;font-size:12px;color:#000}
     h2{margin:4px 0;font-size:16px}.muted{font-size:11px;color:#555}
     table{width:100%;border-collapse:collapse;margin:8px 0}th,td{padding:4px 6px;border:1px solid #ddd;font-size:11px;text-align:right}
     th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
     @media print{body{margin:10px}}
   </style></head><body>
-    <h2>${RESTAURANT_NAME} — ${t("rptAPTitle")}</h2>
-    <div class="muted">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
-    ${el.innerHTML}
+    <img src="/logo.png" alt="logo" style="width:32px;height:32px;display:block;margin:0 auto 4px;object-fit:contain">
+    <h2 style="text-align:center">${RESTAURANT_NAME} — ${t("rptAPTitle")}</h2>
+    <div class="muted" style="text-align:center">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
+    ${clone.innerHTML}
   </body></html>`);
-  w.document.close();
-  setTimeout(() => { w.print(); }, 500);
 }
 
 async function renderAP(c) {
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptAPTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
-    const [rows, summary] = await Promise.all([api("/api/supplier/list?status=open"), api("/api/supplier/summary")]);
+    const [rows, summary] = await trackReportLoad(Promise.all([api("/api/supplier/list?status=open"), api("/api/supplier/summary")]));
     c.innerHTML = `
       <div class="report-section">
         <div class="report-section-title">${t("rptAPTitle")}
@@ -3343,9 +3354,9 @@ async function renderCancelled(c) {
   const to = document.getElementById("report-to").value;
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptCancelledTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
-    const d = await api("/api/reports/cancelled?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to));
+    const d = await trackReportLoad(api("/api/reports/cancelled?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)));
     let refunds = { items: [], total: 0 };
-    try { refunds = await api("/api/refunds?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)); } catch (e) {}
+    try { refunds = await trackReportLoad(api("/api/refunds?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to))); } catch (e) {}
     const el = c.querySelector(".report-section");
     el.innerHTML = `
       <div class="report-section-title">${t("rptCancelledTitle")}</div>
@@ -3469,10 +3480,10 @@ async function loadCreditReport() {
   const body = document.getElementById("credit-report-body");
   if (!body) return;
   try {
-    const [rows, summary] = await Promise.all([
+    const [rows, summary] = await trackReportLoad(Promise.all([
       api("/api/credit/list?status=" + encodeURIComponent(creditFilterStatus||"") + "&q=" + encodeURIComponent(creditSearchVal||"")),
       api("/api/credit/summary")
-    ]);
+    ]));
     const rowsF = (creditSearchVal||"").trim() ? rows : rows;
     body.innerHTML = `
       <div class="report-kpi">
@@ -3596,7 +3607,7 @@ async function loadExpenseList() {
   const el = document.getElementById("expense-report-content");
   if (!el) return;
   try {
-    const d = await api("/api/expenses?from=" + (reportData && reportData.from !== "البداية" ? encodeURIComponent(document.getElementById("report-from").value || "") : "") + "&to=" + encodeURIComponent(document.getElementById("report-to").value || ""));
+    const d = await trackReportLoad(api("/api/expenses?from=" + (reportData && reportData.from !== "البداية" ? encodeURIComponent(document.getElementById("report-from").value || "") : "") + "&to=" + encodeURIComponent(document.getElementById("report-to").value || "")));
     el.innerHTML = `
       <div class="report-section-title">${t("rptExpenseTitle")}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -3649,7 +3660,7 @@ async function renderIncome(c) {
   const to = document.getElementById("report-to").value;
   c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptIncomeTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
   try {
-    const d = await api("/api/reports/income?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to));
+    const d = await trackReportLoad(api("/api/reports/income?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)));
     const netColor = d.net_income >= 0 ? "report-profit" : "report-loss";
     c.innerHTML = `
       <div class="report-section">
@@ -3752,9 +3763,8 @@ function renderCharts(d) {
   }).catch(() => { /* تجاهل فشل تحميل مكتبة الرسوم */ });
 }
 
-function printReports() {
-  const w = window.open("", "_blank", "width=800,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+async function printReports() {
+  await waitReportLoad();
   const dir = document.documentElement.dir;
   const from = document.getElementById("report-from") ? document.getElementById("report-from").value : "";
   const to = document.getElementById("report-to") ? document.getElementById("report-to").value : "";
@@ -3778,15 +3788,17 @@ function printReports() {
     dclone.querySelectorAll("td,th").forEach(td => { td.removeAttribute("onclick"); td.removeAttribute("title"); td.style.borderBottom = "1px solid #eee"; });
     detail = dclone.outerHTML;
   }
-  const totalRow = `<div class="print-summary">
+  const summaryTabs = new Set(["overview", "profitloss", "tax", "employees", "inventory", "peak", "tables", "cashflow"]);
+  const showSummary = user && user.role === "manager" && summaryTabs.has(currentReportTab) && typeof d.total_sales === "number";
+  const totalRow = showSummary ? `<div class="print-summary">
     <div><span>${t("rptPeriodSales")}:</span><b>${fmtCur(d.total_sales || 0)}</b></div>
     <div><span>${t("rptOrderCount")}:</span><b>${d.order_count || 0}</b></div>
     <div><span>${t("totalTax")}:</span><b>${fmtCur(d.total_tax || 0)}</b></div>
     ${d.total_discount ? `<div><span>${t("rptDiscountsGiven")}:</span><b>-${fmtCur(d.total_discount)}</b></div>` : ""}
     ${d.gross_profit !== undefined ? `<div><span>${t("rptGrossProfit")}:</span><b>${fmtCur(d.gross_profit)}</b></div>` : ""}
     ${d.net_profit !== undefined ? `<div><span>${t("rptNetProfit")}:</span><b>${fmtCur(d.net_profit)}</b></div>` : ""}
-  </div>`;
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
+  </div>` : "";
+  hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptPrintTitle")}</title>
     <style>
       body { font-family: 'Segoe UI', Tahoma, sans-serif; padding: 24px; direction: ${dir}; font-size: 12px; color: #000; }
       h1 { text-align: center; font-size: 20px; margin: 0 0 2px; }
@@ -3821,7 +3833,6 @@ function printReports() {
     ${clone.outerHTML}
     ${detail}
   </body></html>`);
-  w.document.close();
 }
 
 function csvCell(v) {
@@ -3844,8 +3855,9 @@ function tableToCsv(tbl) {
   return rows;
 }
 
-function exportCSV() {
-  if (!user || user.role !== "manager") return;
+async function exportCSV() {
+  if (!user) { toast(t("err.loginFirst")); return; }
+  await waitReportLoad();
   const tables = document.querySelectorAll("#report-content table, #report-detail table");
   const lines = [];
   lines.push(csvCell(RESTAURANT_NAME));
@@ -3865,7 +3877,7 @@ function exportCSV() {
     rows.forEach(r => lines.push(r.join(",")));
   });
   const csv = lines.join("\n");
-  if (!csv) { toast("⚠️ " + t("rptNoOrdersMatch")); return; }
+  if (!csv || !csv.replace(/(""|[^"\n])/g, "").trim()) { toast("⚠️ " + t("rptNoOrdersMatch")); return; }
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
