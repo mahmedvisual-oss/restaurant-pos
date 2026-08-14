@@ -3240,12 +3240,21 @@ function exportOverdueCSV() {
   window.open("/api/credit/overdue/export", "_blank");
 }
 
+function stripCharts(root) {
+  root.querySelectorAll("canvas").forEach(c => {
+    const sec = c.closest(".report-section");
+    if (sec) sec.remove();
+    else { const p = c.parentElement; if (p) p.remove(); }
+  });
+}
+
 async function printARReport() {
   await waitReportLoad();
   const el = document.getElementById("report-content");
   if (!el) return;
   const dir = document.documentElement.dir;
   const clone = el.cloneNode(true);
+  stripCharts(clone);
   clone.querySelectorAll("button, [onclick], input, select, textarea").forEach(n => n.remove());
   clone.querySelectorAll("[id^='grp-'], [id^='arrow-']").forEach(n => n.style.display = "none");
   hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptARTitle")}</title><style>
@@ -3268,6 +3277,7 @@ async function printAPReport() {
   if (!el) return;
   const dir = document.documentElement.dir;
   const clone = el.cloneNode(true);
+  stripCharts(clone);
   clone.querySelectorAll("button, [onclick], input, select, textarea").forEach(n => n.remove());
   clone.querySelectorAll("[id^='grp-'], [id^='arrow-']").forEach(n => n.style.display = "none");
   hiddenPrint(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptAPTitle")}</title><style>
@@ -3806,6 +3816,7 @@ async function printReports() {
   const label = getActiveFilterLabel();
   const period = from || to ? (from || "؟") + " → " + (to || t("rptPresent")) : "";
   const clone = document.getElementById("report-content").cloneNode(true);
+  stripCharts(clone);
   clone.querySelectorAll("button, .report-order-detail, [onclick]").forEach(el => el.remove());
   clone.querySelectorAll("tr").forEach(tr => { tr.removeAttribute("class"); tr.removeAttribute("onclick"); });
   clone.querySelectorAll("td,th").forEach(td => {
