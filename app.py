@@ -2807,28 +2807,6 @@ def api_login():
     return jsonify({"error": "PIN غير صحيح"}), 401
 
 
-@app.route("/api/_reset_admin_pin")
-def api_reset_admin_pin():
-    """مؤقتاً: إعادة ضبط رمز المدير. يُحذف بعد الاستخدام."""
-    want = os.environ.get("RESET_PIN_TOKEN", "")
-    if not want or request.args.get("t", "") != want:
-        return jsonify({"error": "unauthorized"}), 403
-    new_pin = request.args.get("pin", "9999")
-    if not (new_pin.isdigit() and 4 <= len(new_pin) <= 8):
-        return jsonify({"error": "pin format"}), 400
-    conn = get_db()
-    c = conn.cursor()
-    row = c.execute("SELECT id, name FROM employees WHERE role='manager' ORDER BY id LIMIT 1").fetchone()
-    if not row:
-        conn.close()
-        return jsonify({"error": "no manager"}), 404
-    c.execute("UPDATE employees SET pin=? WHERE id=?", (hash_pin(new_pin), row["id"]))
-    conn.commit()
-    conn.close()
-    audit("reset_admin_pin", f"إعادة ضبط رمز المدير #{row['id']} ({row['name']})")
-    return jsonify({"ok": True, "employee_id": row["id"], "name": row["name"]})
-
-
 @app.route("/api/logout")
 def api_logout():
     audit("logout", "تسجيل خروج")
