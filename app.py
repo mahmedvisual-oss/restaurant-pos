@@ -4035,6 +4035,7 @@ def _report_filtered(c, from_d, to_d, args):
     employee = (args.get("employee") or "").strip()
     item = (args.get("item") or "").strip()
     table = (args.get("table") or "").strip()
+    customer = (args.get("customer") or "").strip()
     day = (args.get("day") or "").strip()
     month = (args.get("month") or "").strip()
     hour = (args.get("hour") or "").strip()
@@ -4045,6 +4046,8 @@ def _report_filtered(c, from_d, to_d, args):
         if employee and (r["employee"] or "") != employee:
             continue
         if table and str(r["table_num"] or "") != table:
+            continue
+        if customer and customer.lower() not in (r["credit_name"] or "").lower():
             continue
         date_str = r["date"] or ""
         if day and date_str[:10] != day:

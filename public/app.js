@@ -2706,8 +2706,8 @@ async function loadCashierReport() {
 let currentReportTab = "overview";
 let reportData = {};
 let reportOrders = [];
-let reportFilters = { method: "", employee: "", item: "", table: "", day: "", month: "", hour: "", section: "" };
-let filterOptionsCache = { method: [], employee: [], item: [], table: [] };
+let reportFilters = { method: "", employee: "", item: "", table: "", customer: "", day: "", month: "", hour: "", section: "" };
+let filterOptionsCache = { method: [], employee: [], item: [], table: [], customer: [] };
 let filterOptionsSeeded = false;
 let creditFilterStatus = "open";
 let creditSearchVal = "";
@@ -2728,7 +2728,7 @@ function buildReportQuery() {
   const to = document.getElementById("report-to").value;
   if (from) p.push("from=" + encodeURIComponent(from));
   if (to) p.push("to=" + encodeURIComponent(to));
-  for (const k of ["method", "employee", "item", "table", "day", "month", "hour", "section"]) {
+  for (const k of ["method", "employee", "item", "table", "customer", "day", "month", "hour", "section"]) {
     const v = reportFilters[k];
     if (v !== "") p.push(k + "=" + encodeURIComponent(v));
   }
@@ -2741,6 +2741,7 @@ function getActiveFilterLabel() {
   if (reportFilters.employee) parts.push(t("rptEmployee") + ": " + reportFilters.employee);
   if (reportFilters.item) parts.push(t("rptItem") + ": " + reportFilters.item);
   if (reportFilters.table) parts.push(t("rptTable") + ": " + reportFilters.table);
+  if (reportFilters.customer) parts.push(t("rptCustomer") + ": " + reportFilters.customer);
   if (reportFilters.day) parts.push(t("rptDate") + ": " + reportFilters.day);
   if (reportFilters.month) parts.push(t("rptMonth") + ": " + reportFilters.month);
   if (reportFilters.hour !== "") parts.push(t("rptHour") + ": " + reportFilters.hour + ":00");
@@ -2755,15 +2756,15 @@ function setReportFilter(k, v) {
 
 function applyReportDrill(k, v) {
   reportFilters[k] = v || "";
-  const map = { method: "filter-method", employee: "filter-employee", item: "filter-item", table: "filter-table" };
+  const map = { method: "filter-method", employee: "filter-employee", item: "filter-item", table: "filter-table", customer: "filter-customer" };
   const id = map[k];
   if (id) { const el = document.getElementById(id); if (el) el.value = v || ""; }
   loadReportData();
 }
 
 function clearReportFilters() {
-  reportFilters = { method: "", employee: "", item: "", table: "", day: "", month: "", hour: "", section: "" };
-  ["filter-method", "filter-employee", "filter-item", "filter-table"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+  reportFilters = { method: "", employee: "", item: "", table: "", customer: "", day: "", month: "", hour: "", section: "" };
+  ["filter-method", "filter-employee", "filter-item", "filter-table", "filter-customer"].forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
   loadReportData();
 }
 
@@ -2793,6 +2794,10 @@ async function seedFilterOptions() {
     cache.item = mergeFilterOptions(cache.item, (d.top_items || []).map(i => i.name));
     cache.table = mergeFilterOptions(cache.table, Object.values(tableData).map(t => String(t.num)));
     cache.table.sort((a, b) => Number(a) - Number(b));
+    try {
+      const cu = await api("/api/customer/analytics");
+      cache.customer = mergeFilterOptions(cache.customer, (cu.customers || []).map(x => (x.name || "").trim()).filter(Boolean));
+    } catch (e) {}
     populateReportFilters();
   } catch (e) {}
 }
@@ -2805,10 +2810,12 @@ function populateReportFilters() {
   cache.item = mergeFilterOptions(cache.item, (d.top_items || []).map(i => i.name));
   cache.table = mergeFilterOptions(cache.table, Object.values(tableData).map(t => String(t.num)));
   cache.table.sort((a, b) => Number(a) - Number(b));
+  cache.customer = mergeFilterOptions(cache.customer, (d.orders || []).map(o => (o.credit_name || "").trim()).filter(Boolean));
   fillSelect("filter-method", cache.method, reportFilters.method);
   fillSelect("filter-employee", cache.employee, reportFilters.employee);
   fillSelect("filter-item", cache.item, reportFilters.item);
   fillSelect("filter-table", cache.table, reportFilters.table);
+  fillSelect("filter-customer", cache.customer, reportFilters.customer);
   const hint = document.getElementById("report-drill-hint");
   if (hint) hint.style.display = "";
 }
@@ -2844,17 +2851,18 @@ function renderReportDetail() {
       <div class="report-section-title">${t("rptDetailsTitle")} (${orders.length})</div>
       ${label ? `<div class="report-filter-badge">🔎 ${label} <button class="btn btn-sm" onclick="clearReportFilters()">${t("rptClearFilters")}</button></div>` : ""}
       <table class="report-table">
-        <tr><th>#</th><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptMethod")}</th><th>${t("rptItems")}</th><th>${t("rptTotal")}</th><th></th></tr>
+        <tr><th>#</th><th>${t("rptTime")}</th><th>${t("rptTable")}</th><th>${t("rptCashier")}</th><th>${t("rptMethod")}</th><th>${t("rptCustomer")}</th><th>${t("rptItems")}</th><th>${t("rptTotal")}</th><th></th></tr>
         ${shown.length ? shown.map(o => `
           <tr class="report-order-row" onclick="toggleReportOrderDetail(${o.id})" title="${t("rptDrillHint")}">
             <td>#${o.id}</td><td>${o.date}</td><td>${o.table_num || "-"}${o.table_section && o.table_section !== "hall" ? ` <span style="color:#6b7280;font-size:11px">(${t(o.table_section)})</span>` : ""}</td>
-            <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}${o.credit_name ? ` <span style="color:#d97706">· ${escapeHtml(o.credit_name)}</span>` : ""}</td>
+            <td>${escapeHtml(o.employee)}</td><td>${methodName(o.payment_method)}</td>
+            <td>${o.credit_name ? `<button class="btn btn-sm" style="padding:2px 6px" onclick="event.stopPropagation();followCustomer(decodeURIComponent('${encodeURIComponent(o.credit_name)}'))" title="${t("rptFollowCustomer")}">👁 ${escapeHtml(o.credit_name)}</button>` : '<span style="color:var(--muted)">—</span>'}</td>
             <td>${(o.items || []).map(i => `${i.qty || 1}× ${escapeHtml(i.name)}`).join(", ")}</td>
             <td>${fmtCur(o.total)}</td>
             <td><button class="btn btn-sm" onclick="event.stopPropagation();reprintInvoice(${o.id})" title="${t("rptReprint")}">🖨️ ${t("rptReprint")}</button></td>
           </tr>
           <tr id="order-detail-${o.id}" class="report-order-detail">
-            <td colspan="8">
+            <td colspan="9">
               <table class="report-table report-table-sub">
                 <tr><th>${t("rptItem")}</th><th>${t("rptQty")}</th><th>${t("rptPrice")}</th><th>${t("rptAmount")}</th></tr>
                 ${(o.items || []).map(i => `<tr><td>${escapeHtml(i.name)}</td><td>${i.qty || 1}</td><td>${fmtCur(i.price)}</td><td>${fmtCur(i.subtotal != null ? i.subtotal : (i.price * (i.qty || 1)))}</td></tr>`).join("")}
@@ -2863,7 +2871,7 @@ function renderReportDetail() {
                 <tr class="total-row"><td colspan="3">${t("rptTotal")}</td><td>${fmtCur(o.total)}</td></tr>
               </table>
             </td>
-          </tr>`).join("") : `<tr><td colspan="8" style="text-align:center;color:var(--muted)">${t("rptNoOrdersMatch")}</td></tr>`}
+          </tr>`).join("") : `<tr><td colspan="9" style="text-align:center;color:var(--muted)">${t("rptNoOrdersMatch")}</td></tr>`}
       </table>
       ${orders.length > max ? `<div style="font-size:11px;color:var(--muted);margin-top:6px">${t("rptShowingFirst", { n: max, total: orders.length })}</div>` : ""}
     </div>`;
@@ -2872,6 +2880,13 @@ function renderReportDetail() {
 function toggleReportOrderDetail(id) {
   const el = document.getElementById("order-detail-" + id);
   if (el) el.style.display = (el.style.display === "none") ? "" : "none";
+}
+
+function followCustomer(name) {
+  if (!name) return;
+  const el = document.getElementById("cust-search");
+  if (el) el.value = name;
+  showCustomersDb();
 }
 
 async function switchReportTab(tab) {
