@@ -801,6 +801,9 @@ def init_db():
         c.execute("ALTER TABLE credit_ledger ADD COLUMN table_section TEXT")
     if "customer_id" not in cols_cl:
         c.execute("ALTER TABLE credit_ledger ADD COLUMN customer_id INTEGER")
+    cols_cp = [r[1] for r in c.execute("PRAGMA table_info(credit_payments)")]
+    if "receipt_no" not in cols_cp:
+        c.execute("ALTER TABLE credit_payments ADD COLUMN receipt_no TEXT")
     # backfill: سجّل الطلبات الآجلة القديمة المدفوعة/الجزئية في credit_ledger إذا لم تُسجل بعد
     c.execute("SELECT id, table_num, table_section, total, paid, credit_name, date FROM orders "
               "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
@@ -2111,7 +2114,6 @@ def api_credit_payments(lid):
     conn.close()
     return jsonify([dict(r) for r in rows])
 
-
 @app.route("/api/credit/summary")
 def api_credit_summary():
     u = require_user()
@@ -2169,10 +2171,49 @@ def api_credit_settle():
     c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
               "VALUES (?,?,?,?, datetime('now','localtime'))",
               (lid, amount, method, u["name"]))
+    pid = c.lastrowid
+    receipt_no = "CP-%d-%05d" % (_now().year, pid)
+    c.execute("UPDATE credit_payments SET receipt_no=? WHERE id=?", (receipt_no, pid))
     conn.commit()
     conn.close()
-    audit("credit_pay", f"تحصيل آجل #{lid} بمبلغ {amount:.2f} ({method})")
-    return jsonify({"ok": True, "remaining": remaining, "status": status})
+    receipt = {"receipt_no": receipt_no, "ledger_id": lid, "customer_name": row["customer_name"],
+               "phone": row["phone"] or "", "amount": amount, "method": method,
+               "employee": u["name"], "date": _now_sql()}
+    audit("credit_pay", f"تحصيل آجل #{lid} بمبلغ {amount:.2f} ({method}) - {receipt_no}")
+    return jsonify({"ok": True, "remaining": remaining, "status": status, "receipt": receipt})
+
+
+@app.route("/api/credit/receipts")
+def api_credit_receipts():
+    """سندات قبض تحصيل الآجل (لتقرير سندات القبض)."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    from_d = (request.args.get("from") or "").strip()
+    to_d = (request.args.get("to") or "").strip()
+    conn = get_db()
+    c = conn.cursor()
+    where = "1=1"
+    params = []
+    if from_d:
+        where += " AND date(p.date) >= ?"
+        params.append(from_d)
+    if to_d:
+        where += " AND date(p.date) <= ?"
+        params.append(to_d)
+    rows = c.execute(
+        f"SELECT p.id, p.receipt_no, p.ledger_id, p.amount, p.method, p.employee, p.date, "
+        f"l.customer_name, l.phone, l.order_id, l.table_num "
+        f"FROM credit_payments p LEFT JOIN credit_ledger l ON p.ledger_id=l.id "
+        f"WHERE {where} ORDER BY p.id DESC", params).fetchall()
+    conn.close()
+    items = [{"id": r["id"], "receipt_no": r["receipt_no"], "ledger_id": r["ledger_id"],
+              "customer_name": r["customer_name"] or "", "phone": r["phone"] or "",
+              "order_id": r["order_id"], "table_num": r["table_num"],
+              "amount": round(r["amount"] or 0, 2), "method": r["method"] or "نقدي",
+              "employee": r["employee"] or "", "date": r["date"] or ""} for r in rows]
+    total = round(sum(i["amount"] for i in items), 2)
+    return jsonify({"items": items, "count": len(items), "total": total})
 
 
 # ===== ذمم المدينة (المورّدين) =====
@@ -2377,7 +2418,11 @@ def api_customer_analytics():
     c = conn.cursor()
     customers = c.execute("SELECT id, name, phone, points FROM customers ORDER BY name").fetchall()
     ledgers = c.execute("SELECT id, customer_id, customer_name, phone, order_id, table_num, total, paid, status, created_at, due_date FROM credit_ledger").fetchall()
-    pandas = c.execute("SELECT ledger_id, amount, method, employee, date FROM credit_payments").fetchall()
+    pandas = c.execute("SELECT ledger_id, amount, method, employee, receipt_no, date FROM credit_payments").fetchall()
+    try:
+        dv_rows = c.execute("SELECT id, receipt_no, customer_name, phone, party_date, description, amount, method, transfer_ref, employee, date FROM deposit_vouchers").fetchall()
+    except Exception:
+        dv_rows = []
     conn.close()
     # دفع مسددة: ledger_id -> [payments]
     pays_by = {}
@@ -2410,7 +2455,7 @@ def api_customer_analytics():
             a = {"key": key, "cid": None, "name": "", "phone": "", "points": 0,
                  "total": 0.0, "paid": 0.0, "remaining": 0.0,
                  "open_count": 0, "settled_count": 0,
-                 "methods": {}, "last_payment": None, "invoices": []}
+                 "methods": {}, "last_payment": None, "invoices": [], "receipts": []}
             agg[key] = a
         return a
 
@@ -2447,12 +2492,34 @@ def api_customer_analytics():
             pd = (p["date"] or "")[:10]
             if not a["last_payment"] or pd > a["last_payment"]:
                 a["last_payment"] = pd
+            if p.get("receipt_no"):
+                a["receipts"].append({"receipt_no": p["receipt_no"], "kind": "credit_payment",
+                                      "date": p["date"] or "", "amount": p["amount"] or 0,
+                                      "method": m, "employee": p["employee"] or "",
+                                      "ledger_id": p["ledger_id"]})
+
+    # سندات قبض الحفلات (مقدمات) لنفس العميل
+    dv_by_phone = {}
+    dv_by_name = {}
+    for v in dv_rows:
+        if v["phone"]:
+            dv_by_phone.setdefault(str(v["phone"]).strip().lower(), []).append(v)
+        dv_by_name.setdefault((v["customer_name"] or "").strip().lower(), []).append(v)
+    for a in list(agg.values()):
+        a_phone = (a.get("phone") or "").strip().lower()
+        for v in (dv_by_phone.get(a_phone, []) if a_phone else []) + dv_by_name.get((a.get("name") or "").strip().lower(), []):
+            if v["receipt_no"] and not any(r["receipt_no"] == v["receipt_no"] for r in a["receipts"]):
+                a["receipts"].append({"receipt_no": v["receipt_no"], "kind": "deposit",
+                                      "date": v["date"] or "", "amount": v["amount"] or 0,
+                                      "method": v["method"] or "نقدي", "employee": v["employee"] or "",
+                                      "party_date": v["party_date"] or ""})
 
     result = []
     for a in agg.values():
         a["remaining"] = round(a["total"] - a["paid"], 2)
         a["methods"] = [{"method": k, "amount": v} for k, v in sorted(a["methods"].items(), key=lambda x: -x[1])]
         a["invoices"].sort(key=lambda x: x["date"] or "", reverse=True)
+        a["receipts"].sort(key=lambda x: x["date"] or "", reverse=True)
         result.append(a)
 
     if q:

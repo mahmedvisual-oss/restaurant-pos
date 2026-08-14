@@ -1944,6 +1944,76 @@ function printDepositVoucher(r) {
   w.close();
 }
 
+// ===== سند قبض (تحصيل آجل من العميل) =====
+function printCreditReceipt(r) {
+  const name = RESTAURANT_NAME;
+  const dir = document.documentElement.dir;
+  const w = window.open("", "_blank", "width=340,height=650");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  const methodN = METHOD_NAMES[r.method] ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar) : (r.method || "نقدي");
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("creditVoucher")} ${r.receipt_no}</title><style>
+    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
+    h3{margin:4px 0}.muted{font-size:11px;color:#555}
+    .dash{border-top:1px dashed #000;margin:6px 0}
+    table{width:100%;border-collapse:collapse}td{padding:3px 0}
+    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
+    .logo{font-size:24px;margin:4px 0}
+    .badge{background:#2563eb;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
+    .summary-box{background:#eff6ff;border:1px solid #93c5fd;border-radius:4px;padding:8px;margin:6px 0}
+    .amount-big{font-size:20px;font-weight:bold;color:#2563eb}
+    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
+    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
+  </style></head><body>
+    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
+    <h3>${name}</h3>
+    <div class="muted">${t("appSubtitle")}</div>
+    <div class="badge">💵 ${t("creditVoucher")}</div>
+    <div class="muted">${t("dvReceiptNo")}: <b>${r.receipt_no}</b></div>
+    <div class="dash"></div>
+    <table>
+      <tr><td class="right">${t("dvPCustomer")}</td><td class="left">${escapeHtml(r.customer_name || "—")}</td></tr>
+      ${r.phone ? `<tr><td class="right">${t("dvPPhone")}</td><td class="left">${escapeHtml(r.phone)}</td></tr>` : ""}
+      ${r.ledger_id ? `<tr><td class="right">${t("custInvoice")}</td><td class="left">#${r.ledger_id}</td></tr>` : ""}
+      <tr><td class="right">${t("dvPDate")}</td><td class="left">${r.date}</td></tr>
+      <tr><td class="right">${t("dvPCashier")}</td><td class="left">${escapeHtml(r.employee || "")}</td></tr>
+    </table>
+    <div class="dash"></div>
+    <div class="summary-box">
+      <table>
+        <tr><td class="right">${t("paidAmount")}</td><td class="left amount-big">${fmtCur(r.amount)}</td></tr>
+        <tr><td class="right">${t("dvPMethod")}</td><td class="left">${methodN}</td></tr>
+      </table>
+    </div>
+    <div class="dash"></div>
+    <div class="sig">
+      <div>${t("dvPSignReceiver")}<div class="line">${t("dvPSignCustomer")}</div></div>
+      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
+      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
+    </div>
+    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
+    <div class="muted">${new Date().toLocaleString()}</div>
+  </body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
+
+function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+  if (kind === "deposit") { printDepositVoucher(r); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r); return; }
+  toast("⚠️ " + t("rptNoPrintData"));
+}
+
 function toggleDiscountDropdown() {
   document.getElementById("discount-menu").classList.toggle("show");
 }
@@ -2351,9 +2421,18 @@ async function toggleCustomerInvoices(key) {
         <span style="color:var(--success)">${t("custPaid")}: ${fmtCur(inv.paid)}</span>
         <span style="color:var(--danger);font-weight:700">${t("custRemaining")}: ${fmtCur(inv.remaining)}</span>
       </div>
-      ${inv.payments.length ? `<div style="font-size:11px;margin:4px 0">${t("custPayments")}:<br>${inv.payments.map(p => `&nbsp;&nbsp;· ${p.date || ""} — ${methodName(p.method)} — <b>${fmtCur(p.amount)}</b> (${escapeHtml(p.employee || "")})`).join("<br>")}</div>` : ""}
+      ${inv.payments.length ? `<div style="font-size:11px;margin:4px 0">${t("custPayments")}:<br>${inv.payments.map(p => `&nbsp;&nbsp;· ${p.date || ""} — ${methodName(p.method)} — <b>${fmtCur(p.amount)}</b>${p.receipt_no ? ` — ${t("rptReceiptNo")} <b>${escapeHtml(p.receipt_no)}</b>` : ""} (${escapeHtml(p.employee || "")})`).join("<br>")}</div>` : ""}
       ${inv.status === "open" && inv.remaining > 0 ? `<button class="btn btn-success btn-sm" onclick="event.stopPropagation();payCustomerLedger(${inv.ledger_id}, ${inv.remaining})">💵 ${t("custPayNow")}</button>` : ""}
     </div>`).join("") : `<div class="empty-state">${t("custNoData")}</div>`;
+  if ((c.receipts || []).length) {
+    box.innerHTML += `<div style="margin-top:10px;font-weight:bold;font-size:12px">${t("creditVoucherTitle")}</div>
+      ${c.receipts.map(r => `
+        <div class="cust-invoice" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;font-size:12px">
+          <span>${r.kind === "deposit" ? "🧾 " + t("depositVoucher") : r.kind === "credit_payment" ? "💵 " + t("creditVoucher") : "↩️ " + t("rptRefundTitle")} · <b>${escapeHtml(r.receipt_no || "—")}</b> · ${r.date || ""}</span>
+          <span style="color:${r.kind === "refund" ? "var(--danger)" : "var(--success)"}">${methodName(r.method)}: ${fmtCur(r.amount)}</span>
+          ${r.kind !== "refund" ? `<button class="btn btn-sm" onclick="printCustReceipt('${r.kind}', '${encodeURIComponent(r.receipt_no || "")}', '${encodeURIComponent(c.name || "")}', '${encodeURIComponent(c.phone || "")}', ${Number(r.amount) || 0}, '${r.method || "نقدي"}', '${encodeURIComponent(r.date || "")}', ${Number(r.ledger_id) || 0})">${t("rptPrintReceipt")}</button>` : ""}
+        </div>`).join("")}`;
+  }
   box.style.display = "";
 }
 
@@ -2380,9 +2459,10 @@ async function confirmCustomerPay(btn, lid, remaining) {
   if (amount <= 0) { toast("⚠️ " + t("custEnterPay")); return; }
   if (amount > remaining + 0.001) { toast("⚠️ " + t("custPayExceeds", { amt: fmtCur(remaining) })); return; }
   try {
-    await api("/api/credit/settle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ledger_id: lid, amount, method }) });
+    const res = await api("/api/credit/settle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ledger_id: lid, amount, method }) });
     btn.closest("div[style]").remove();
-    toast("✅ " + t("toast.custPaymentDone"));
+    toast("✅ " + t("toast.custPaymentDone") + (res.receipt ? " — " + t("rptReceiptNo") + " " + res.receipt.receipt_no : ""));
+    if (res.receipt) printCreditReceipt(res.receipt);
     loadCustomersDb();
   } catch (e) { toast(e.message); }
 }
@@ -3711,16 +3791,37 @@ async function loadCreditReport() {
             <td style="color:${rem>0?'var(--danger)':'var(--muted)'}">${fmtCur(rem)}</td>
             <td>${r.src==='ledger' ? `<button class="btn btn-sm" onclick="showCreditPayments(${r.id})">👁 ${t("rptPayments")}</button>` : '<span style="color:var(--muted)">—</span>'}</td>
             <td>
-              ${r.status==='open' ? `<div style="display:flex;gap:4px">
+              ${r.status==='open' ? `<div style="display:flex;gap:4px;flex-wrap:wrap">
                 <input type="number" id="credit-pay-${r.id}" class="login-input" style="width:90px;padding:4px;font-size:12px" placeholder="${t("rptAmount")}" min="0">
+                <select id="credit-pay-method-${r.id}" class="login-input" style="width:auto;padding:4px;font-size:12px">${CUST_PAY_METHODS.map(m => `<option value="${m}">${methodName(m)}</option>`).join("")}</select>
                 <button class="btn btn-sm btn-success" onclick="settleCredit(${r.id}, ${r.total}, ${r.paid})">💵</button>
               </div>` : `<span style="color:var(--muted)">—</span>`}
             </td>
           </tr>`;
         }).join("") : `<tr><td colspan="9" style="text-align:center;color:var(--muted)">${t("rptNoRecords")}</td></tr>`}
       </table>`;
+    try {
+      const rc = await trackReportLoad(api("/api/credit/receipts?from=" + encodeURIComponent(reportFrom()) + "&to=" + encodeURIComponent(reportTo())));
+      body.innerHTML += `
+        <div class="report-section-title" style="margin-top:18px">${t("creditVoucherTitle")}</div>
+        ${rc.items.length ? `<table class="report-table">
+          <tr><th>${t("rptReceiptNo")}</th><th>${t("rptDate")}</th><th>${t("rptCustomer")}</th><th>${t("custInvoice")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th><th>${t("rptAmount")}</th><th></th></tr>
+          ${rc.items.map(rcp => `<tr>
+            <td><b>${escapeHtml(rcp.receipt_no || "—")}</b></td><td>${rcp.date}</td>
+            <td>${escapeHtml(rcp.customer_name || "—")}</td>
+            <td>${rcp.order_id ? "#" + rcp.order_id : (rcp.ledger_id ? "#" + rcp.ledger_id : "—")}</td>
+            <td>${methodName(rcp.method)}</td><td>${escapeHtml(rcp.employee || "")}</td>
+            <td style="color:var(--success)">${fmtCur(rcp.amount)}</td>
+            <td><button class="btn btn-sm" onclick="printCustReceipt('credit_payment', '${encodeURIComponent(rcp.receipt_no || "")}', '${encodeURIComponent(rcp.customer_name || "")}', '${encodeURIComponent(rcp.phone || "")}', ${Number(rcp.amount) || 0}, '${rcp.method || "نقدي"}', '${encodeURIComponent(rcp.date || "")}', ${Number(rcp.ledger_id) || 0})">${t("rptPrintReceipt")}</button></td>
+          </tr>`).join("")}
+          <tr class="total-row"><td colspan="6">${t("rptTotal")}</td><td style="color:var(--success)">${fmtCur(rc.total)}</td><td></td></tr>
+        </table>` : `<p style="color:var(--muted);font-size:12px">${t("rptNoCreditReceipts")}</p>`}`;
+    } catch (e) {}
   } catch (e) { body.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
 }
+
+function reportFrom() { return (document.getElementById("report-from")?.value) || ""; }
+function reportTo() { return (document.getElementById("report-to")?.value) || ""; }
 
 async function showCreditPayments(lid) {
   try {
@@ -3728,7 +3829,7 @@ async function showCreditPayments(lid) {
     const html = rows.length ? rows.map(p => `
       <div style="display:flex;justify-content:space-between;padding:6px 4px;border-bottom:1px solid var(--border);font-size:13px">
         <span>${p.date}</span>
-        <span>${methodName(p.method)}</span>
+        <span>${methodName(p.method)}${p.receipt_no ? ` · <b>${escapeHtml(p.receipt_no)}</b>` : ""}</span>
         <b>${fmtCur(p.amount)}</b>
       </div>`).join("") : `<div style="color:var(--muted);text-align:center;padding:10px">${t("rptNoPayments")}</div>`;
     const d = document.createElement("div");
@@ -3755,8 +3856,11 @@ async function settleCredit(lid, total, paid) {
   if (amount <= 0) { toast(t("rptEnterValidAmount")); return; }
   if (amount > rem + 0.001) { toast(t("rptAmountExceeds", { amt: fmtCur(rem) })); return; }
   try {
-    const res = await api("/api/credit/settle", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ledger_id: lid, amount }) });
-    toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })));
+    const methodEl = document.getElementById("credit-pay-method-" + lid);
+    const method = methodEl ? methodEl.value : "نقدي";
+    const res = await api("/api/credit/settle", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ ledger_id: lid, amount, method }) });
+    toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })) + (res.receipt ? " — " + t("rptReceiptNo") + " " + res.receipt.receipt_no : ""));
+    if (res.receipt) printCreditReceipt(res.receipt);
     loadCreditReport();
   } catch (e) { toast(e.message); }
 }
