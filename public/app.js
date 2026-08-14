@@ -1775,8 +1775,8 @@ function printReceipt(o) {
       <tr><td class="right">${t("orderLabel")} #${o.order_id}</td><td class="left">${o.date}</td></tr>
       <tr><td class="right">${t("table")}: ${o.table_num}${o.table_section && o.table_section !== "hall" ? " (" + t(o.table_section) + ")" : ""}</td><td class="left">${t("cashier")}: ${o.employee}</td></tr>
       <tr><td class="right">${t("guestsLabel")} ${o.guests || 1}</td><td class="left">${t("paymentMethod")} ${methodName(o.payment_method)}</td></tr>
-      ${o.credit_name ? `<tr><td class="right" style="color:#d97706;font-weight:bold">📝 صاحب الآجل</td><td class="left" style="font-weight:bold">${o.credit_name}</td></tr>` : ""}
-      ${o.transfer_ref ? `<tr><td class="right" style="color:#2563eb;font-weight:bold">🏦 مرجع التحويل</td><td class="left" style="font-weight:bold">${escapeHtml(o.transfer_ref)}${o.transfer_name ? " (" + escapeHtml(o.transfer_name) + ")" : ""}</td></tr>` : ""}
+      ${o.credit_name ? `<tr><td class="right" style="color:#d97706;font-weight:bold">${t("creditNameLabel")}</td><td class="left" style="font-weight:bold">${o.credit_name}</td></tr>` : ""}
+      ${o.transfer_ref ? `<tr><td class="right" style="color:#2563eb;font-weight:bold">${t("dvPTransferRef")}</td><td class="left" style="font-weight:bold">${escapeHtml(o.transfer_ref)}${o.transfer_name ? " (" + escapeHtml(o.transfer_name) + ")" : ""}</td></tr>` : ""}
     </table>
     <div class="dash"></div>
     <table>${rows}</table>
@@ -1822,7 +1822,7 @@ function printRefundReceipt(r) {
   const w = window.open("", "_blank", "width=340,height=700");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
   const methodName = METHOD_NAMES[r.refund_method] ? (METHOD_NAMES[r.refund_method][currentLang] || METHOD_NAMES[r.refund_method].ar) : (r.refund_method || "نقدي");
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>سند مردودات ${r.receipt_no}</title><style>
+  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptRefundTitle")} ${r.receipt_no}</title><style>
     body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
     h3{margin:4px 0}.muted{font-size:11px;color:#555}
     .dash{border-top:1px dashed #000;margin:6px 0}
@@ -1837,38 +1837,38 @@ function printRefundReceipt(r) {
     <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
     <h3>${name}</h3>
     <div class="muted">${t("appSubtitle")}</div>
-    <div class="badge">🧾 سند مردودات (استرداد)</div>
-    <div class="muted">رقم السند: <b>${r.receipt_no}</b></div>
+    <div class="badge">${t("rptRefundBadge")}</div>
+    <div class="muted">${t("rptReceiptNo")}: <b>${r.receipt_no}</b></div>
     <div class="dash"></div>
     <table>
-      <tr><td class="right">الفاتورة الأصلية</td><td class="left">#${r.order_id}</td></tr>
-      <tr><td class="right">الطاولة</td><td class="left">${r.table_num || "—"}</td></tr>
-      <tr><td class="right">التاريخ</td><td class="left">${r.date}</td></tr>
-      <tr><td class="right">الأصناف المرتجعة:</td></tr>
+      <tr><td class="right">${t("rptOriginalInvoice")}</td><td class="left">#${r.order_id}</td></tr>
+      <tr><td class="right">${t("rptTable")}</td><td class="left">${r.table_num || "—"}</td></tr>
+      <tr><td class="right">${t("rptDate")}</td><td class="left">${r.date}</td></tr>
+      <tr><td class="right">${t("rptReturnedItems")}:</td></tr>
     </table>
     <div class="dash"></div>
     <table>${rows}</table>
     <div class="dash"></div>
     <div class="summary-box">
       <table>
-        <tr><td class="right">المجموع الفرعي</td><td class="left">${fmtCur(r.subtotal)}</td></tr>
-        <tr><td class="right">الضريبة</td><td class="left">${fmtCur(r.tax)}</td></tr>
-        ${r.discount > 0 ? `<tr><td class="right" style="color:#d97706">الخصم</td><td class="left" style="color:#d97706">-${fmtCur(r.discount)}</td></tr>` : ""}
-        <tr class="tot"><td class="right">إجمالي المردود</td><td class="left" style="color:#dc2626">${fmtCur(r.total)}</td></tr>
+        <tr><td class="right">${t("rptSubtotal")}</td><td class="left">${fmtCur(r.subtotal)}</td></tr>
+        <tr><td class="right">${t("tax")}</td><td class="left">${fmtCur(r.tax)}</td></tr>
+        ${r.discount > 0 ? `<tr><td class="right" style="color:#d97706">${t("discount")}</td><td class="left" style="color:#d97706">-${fmtCur(r.discount)}</td></tr>` : ""}
+        <tr class="tot"><td class="right">${t("rptTotalRefund")}</td><td class="left" style="color:#dc2626">${fmtCur(r.total)}</td></tr>
       </table>
     </div>
     <table>
-      <tr><td class="right">طريقة الرد</td><td class="left">${methodName}</td></tr>
-      ${r.refund_ref ? `<tr><td class="right">مرجع الرد</td><td class="left">${escapeHtml(r.refund_ref)}</td></tr>` : ""}
-      ${r.reason ? `<tr><td class="right">سبب الرد</td><td class="left">${escapeHtml(r.reason)}</td></tr>` : ""}
-      <tr><td class="right">الكاشير</td><td class="left">${escapeHtml(r.requested_by || "")}</td></tr>
-      <tr><td class="right">المعتمد (المدير)</td><td class="left">${escapeHtml(r.approved_by || "")}</td></tr>
+      <tr><td class="right">${t("rptRefundMethod")}</td><td class="left">${methodName}</td></tr>
+      ${r.refund_ref ? `<tr><td class="right">${t("rptRefundRefLabel")}</td><td class="left">${escapeHtml(r.refund_ref)}</td></tr>` : ""}
+      ${r.reason ? `<tr><td class="right">${t("rptRefundReason")}</td><td class="left">${escapeHtml(r.reason)}</td></tr>` : ""}
+      <tr><td class="right">${t("rptCashier")}</td><td class="left">${escapeHtml(r.requested_by || "")}</td></tr>
+      <tr><td class="right">${t("rptApprovedBy")}</td><td class="left">${escapeHtml(r.approved_by || "")}</td></tr>
     </table>
     <div class="dash"></div>
     <div class="sig">
-      <div>توقيع المستلم<div class="line">العميل</div></div>
-      <div>الكاشير<div class="line">الكاشير</div></div>
-      <div>المراجع/المدير<div class="line">المدير</div></div>
+      <div>${t("rptSignature")}<div class="line">${t("dvPSignCustomer")}</div></div>
+      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
+      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
     </div>
     <div class="muted" style="margin-top:10px">${t("thanks")}</div>
     <div class="muted">${new Date().toLocaleString()}</div>
@@ -2845,17 +2845,17 @@ function renderOverview(c) {
     </div>
 
     <div class="report-section">
-      <div class="report-section-title">📋 ملخص سريع</div>
+      <div class="report-section-title">${t("rptQuickSummary")}</div>
       <table class="report-table">
-        <tr><th>الفترة</th><th>الطلبات</th><th>المبيعات</th><th>المتوسط</th></tr>
-        <tr style="background:var(--accent-bg)"><td><strong>اليوم</strong></td><td>${todayOrders}</td><td><strong>${fmtCur(todaySales)}</strong></td><td>${todayOrders > 0 ? fmtCur(todaySales / todayOrders) : fmtCur(0)}</td></tr>
-        <tr style="background:var(--accent-bg)"><td><strong>هذا الشهر</strong></td><td>${monthOrders}</td><td><strong>${fmtCur(monthSales)}</strong></td><td>${monthOrders > 0 ? fmtCur(monthSales / monthOrders) : fmtCur(0)}</td></tr>
-        <tr class="total-row"><td><strong>الإجمالي</strong></td><td>${d.order_count}</td><td><strong>${fmtCur(d.total_sales)}</strong></td><td>${fmtCur(d.avg_order)}</td></tr>
+        <tr><th>${t("rptPeriod")}</th><th>${t("rptOrders")}</th><th>${t("rptSales")}</th><th>${t("rptAvg")}</th></tr>
+        <tr style="background:var(--accent-bg)"><td><strong>${t("rptToday")}</strong></td><td>${todayOrders}</td><td><strong>${fmtCur(todaySales)}</strong></td><td>${todayOrders > 0 ? fmtCur(todaySales / todayOrders) : fmtCur(0)}</td></tr>
+        <tr style="background:var(--accent-bg)"><td><strong>${t("rptThisMonth")}</strong></td><td>${monthOrders}</td><td><strong>${fmtCur(monthSales)}</strong></td><td>${monthOrders > 0 ? fmtCur(monthSales / monthOrders) : fmtCur(0)}</td></tr>
+        <tr class="total-row"><td><strong>${t("rptTotal")}</strong></td><td>${d.order_count}</td><td><strong>${fmtCur(d.total_sales)}</strong></td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
     </div>
 
     <div class="report-section">
-      <div class="report-section-title">📅 المبيعات اليومية</div>
+      <div class="report-section-title">${t("rptDailySales")}</div>
       <table class="report-table">
         <tr><th>${t("rptDate")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
         ${(d.daily || []).slice(-14).map(day => {
@@ -2868,7 +2868,7 @@ function renderOverview(c) {
     </div>
 
     <div class="report-section">
-      <div class="report-section-title">📆 المبيعات الشهرية</div>
+      <div class="report-section-title">${t("rptMonthlySales")}</div>
       <table class="report-table">
         <tr><th>${t("rptMonth")}</th><th>${t("rptOrders")}</th><th>${t("rptTotalSales")}</th><th>${t("rptAvg")}</th></tr>
         ${months.map(([m, v]) => {
@@ -3069,7 +3069,7 @@ async function renderAR(c) {
             <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
               <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card);cursor:pointer" onclick="toggleGroup('${gid}')">
                 <b style="font-size:13px;flex:1">${escapeHtml(name)}</b>
-                <span style="font-size:11px;color:var(--muted)">${invoices.length} فاتورة</span>
+                <span style="font-size:11px;color:var(--muted)">${invoices.length} ${t("rptInvoices")}</span>
                 <span style="font-size:11px">${gOpen} ${t("rptOpen")} · ${gSettled} ${t("rptSettled")}</span>
                 <span style="font-size:12px;color:var(--success)">${fmtCur(gPaid)}</span>
                 <span style="font-size:13px;color:var(--danger);font-weight:bold">${fmtCur(gDue)}</span>
@@ -3165,7 +3165,7 @@ async function loadOverdueList() {
             <td style="color:var(--success)">${fmtCur(r.paid)}</td>
             <td style="color:var(--danger);font-weight:bold">${fmtCur(r.due)}</td>
             <td style="color:var(--danger)">${r.due_date}</td>
-            <td style="color:var(--danger);font-weight:bold">${r.overdue_days} يوم</td>
+            <td style="color:var(--danger);font-weight:bold">${r.overdue_days} ${t("rptDays")}</td>
             <td style="font-size:11px">${r.last_reminder || "-"}</td>
             <td>
               <button class="btn btn-sm btn-warning" onclick="sendOverdueReminder(${r.id},'${escapeHtml(r.customer_name)}',${r.due})">${t("rptSendReminder")}</button>
@@ -3373,18 +3373,18 @@ async function renderCancelled(c) {
           <td>${x.cancel_reason || escapeHtml(x.credit_name||"") || "—"}</td>
         </tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">${t("rptNoCancelled")}</td></tr>`}
       </table>
-      <div class="report-section-title" style="margin-top:18px">🧾 سندات المردودات (استرداد بعد الدفع)</div>
+      <div class="report-section-title" style="margin-top:18px">${t("rptRefundReceipts")}</div>
       ${refunds.items.length ? `<table class="report-table">
-        <tr><th>رقم السند</th><th>${t("rptDate")}</th><th>الفاتورة</th><th>طريقة الرد</th><th>المرجع</th><th>المبلغ</th><th></th></tr>
+        <tr><th>${t("rptReceiptNo")}</th><th>${t("rptDate")}</th><th>${t("rptInvoice")}</th><th>${t("rptRefundMethod")}</th><th>${t("rptRef")}</th><th>${t("rptAmount")}</th><th></th></tr>
         ${refunds.items.map(rr => `<tr>
           <td><b>${rr.receipt_no}</b></td><td>${rr.date}</td><td>#${rr.order_id}</td>
           <td>${methodName(rr.refund_method)}</td>
           <td>${escapeHtml(rr.refund_ref||"") || "—"}</td>
           <td style="color:var(--danger)">${fmtCur(rr.total)}</td>
-          <td><button class="btn btn-sm" onclick="printRefundReceipt(${JSON.stringify(rr).replace(/"/g, "&quot;")})">🖨️ طباعة السند</button></td>
+          <td><button class="btn btn-sm" onclick="printRefundReceipt(${JSON.stringify(rr).replace(/"/g, "&quot;")})">${t("rptPrintReceipt")}</button></td>
         </tr>`).join("")}
         <tr class="total-row"><td colspan="5">${t("rptTotal")}</td><td style="color:var(--danger)">${fmtCur(refunds.total)}</td><td></td></tr>
-      </table>` : `<p style="color:var(--muted);font-size:12px">لا توجد سندات مردودات في الفترة</p>`}`;
+      </table>` : `<p style="color:var(--muted);font-size:12px">${t("rptNoRefundsInPeriod")}</p>`}`;
   } catch (e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
 }
 
