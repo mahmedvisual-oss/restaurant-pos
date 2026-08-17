@@ -1402,3 +1402,23 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 
 .inv-link-row { display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+
+/* MOBILE_POS_PANEL_NAV_V2 */
+@media (max-width: 768px) {
+  html, body { height: 100%; overflow: hidden; }
+  body { padding-bottom: 0; }
+  .main { display: block !important; height: calc(100dvh - 60px) !important; min-height: 0 !important; overflow: hidden !important; }
+  .main > .col[data-panel] { width: 100% !important; min-width: 0 !important; max-width: none !important; margin: 0 !important; border-radius: 0 !important; }
+  .main > .col[data-panel].mobile-panel-active { display: flex !important; flex-direction: column !important; }
+  .main > .col[data-panel]:not(.mobile-panel-active) { display: none !important; }
+  .mobile-nav { z-index: 1000 !important; padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
+  .mobile-nav-btn { position: relative; min-width: 62px; flex: 1 1 0; }
+  .mobile-nav-btn.active { background: var(--accent, #6366f1) !important; color: #fff !important; transform: translateY(-2px); }
+  .mob-badge { position: absolute; top: 3px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #ef4444; color: #fff; font-size: 10px; font-weight: 800; }
+  .mobile-panel-active .scroll-list { min-height: 0; flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch; }
+  .mobile-panel-active .cart-list { min-height: 0; flex: 1 1 auto; }
+  .mobile-panel-active .summary { flex: 0 0 auto; }
+  .mobile-panel-active .actions { flex: 0 0 auto; max-height: 42vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .mobile-panel-active[data-panel="tables"] #tables-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .mobile-panel-active[data-panel="menu"] #menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+}

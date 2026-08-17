@@ -5074,3 +5074,68 @@ async function checkCancelRequests(preCount) {
   }
 }
 init();
+
+
+/* MOBILE_POS_PANEL_NAV_V2 */
+function switchPanel(panel) {
+  const isSmall = window.innerWidth <= 768;
+  const panels = document.querySelectorAll('.main > .col[data-panel]');
+  if (!isSmall) {
+    panels.forEach(el => {
+      el.style.removeProperty('display');
+      el.classList.remove('mobile-panel-active');
+    });
+    document.querySelectorAll('#mobile-nav .mobile-nav-btn').forEach(b => b.classList.remove('active'));
+    return;
+  }
+
+  const valid = ['menu', 'cart', 'tables'];
+  if (!valid.includes(panel)) panel = 'menu';
+
+  panels.forEach(el => {
+    const active = el.dataset.panel === panel;
+    el.style.display = active ? 'flex' : 'none';
+    el.classList.toggle('mobile-panel-active', active);
+    if (active) {
+      el.style.flexDirection = 'column';
+      el.style.minHeight = 'calc(100dvh - 116px)';
+      el.style.height = 'calc(100dvh - 116px)';
+      el.style.maxHeight = 'calc(100dvh - 116px)';
+    }
+  });
+
+  document.querySelectorAll('#mobile-nav .mobile-nav-btn[data-panel-btn]').forEach(b => {
+    b.classList.toggle('active', b.dataset.panelBtn === panel);
+  });
+
+  const main = document.querySelector('.main');
+  if (main) {
+    main.style.display = 'block';
+    main.style.height = 'calc(100dvh - 60px)';
+    main.style.minHeight = '0';
+    main.style.overflow = 'hidden';
+  }
+}
+
+function updateMobileCartBadge() {
+  const badge = document.getElementById('mobile-cart-badge');
+  if (!badge) return;
+  const count = cart.reduce((n, item) => n + (parseInt(item.qty) || 0), 0);
+  badge.textContent = count > 99 ? '99+' : String(count);
+  badge.style.display = count > 0 ? 'inline-flex' : 'none';
+}
+
+const _originalRenderCartMobilePatch = renderCart;
+renderCart = function() {
+  _originalRenderCartMobilePatch();
+  updateMobileCartBadge();
+};
+
+window.addEventListener('resize', function() {
+  if (window.innerWidth <= 768) {
+    const active = document.querySelector('.main > .col.mobile-panel-active');
+    switchPanel(active ? active.dataset.panel : 'menu');
+  } else {
+    switchPanel('menu');
+  }
+});
