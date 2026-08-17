@@ -1499,3 +1499,72 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   .top-actions .btn { min-width: 40px !important; min-height: 40px !important; padding: 4px !important; }
   .zoom-controls button, .floor-zoom button, .zoom-btn { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; }
 }
+
+/* MOBILE_ACTIONS_LAYOUT_V4 */
+@media (max-width: 768px) {
+  /* كل أزرار الإجراءات داخل مساحة الشاشة */
+  .actions {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    padding: 8px 10px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .actions-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    gap: 8px !important;
+    overflow: visible !important;
+  }
+  .actions-row .btn,
+  .actions-row button,
+  .actions .btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    white-space: normal !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-height: 46px !important;
+    padding: 9px 8px !important;
+    font-size: 12px !important;
+    line-height: 1.25 !important;
+    touch-action: manipulation !important;
+  }
+  /* سند القبض يأخذ عرض الصف كاملًا حتى لا يخرج عن الشاشة */
+  .actions-row .btn[data-action="deposit-voucher"],
+  .actions-row #btn-deposit-voucher,
+  .actions-row #deposit-voucher-btn,
+  .actions-row button[onclick*="deposit"],
+  .actions-row button[onclick*="Deposit"],
+  .actions-row button[title*="سند قبض"] {
+    grid-column: 1 / -1 !important;
+  }
+  /* إذا لم يكن الزر يحمل selector معروف، نضمن عدم خروجه بصريًا */
+  .actions-row > * { min-width: 0 !important; }
+}
+
+@media (max-width: 400px) {
+  .actions { padding-left: 8px !important; padding-right: 8px !important; }
+  .actions-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 6px !important; }
+  .actions-row .btn,
+  .actions-row button,
+  .actions .btn {
+    min-height: 44px !important;
+    padding: 7px 5px !important;
+    font-size: 10px !important;
+  }
+}
+
+@media (max-width: 340px) {
+  .actions-row { grid-template-columns: 1fr !important; }
+  .actions-row .btn,
+  .actions-row button,
+  .actions .btn { font-size: 11px !important; }
+}
