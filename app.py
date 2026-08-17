@@ -4348,7 +4348,7 @@ def api_reports_advanced():
     expenses_total = round(c.execute(exp_sql, exp_params).fetchone()["t"], 2)
 
     # تحصيل الآجل خلال الفترة (تدفقات دافعة)
-    cr_sql = "SELECT COALESCE(SUM(amount),0) AS t FROM credit_payments WHERE 1=1"
+    cr_sql = "SELECT COALESCE(SUM(amount),0) AS t FROM credit_payments WHERE COALESCE(method, '') != 'آجل'"
     cr_params = []
     if from_d:
         cr_sql += " AND date(date) >= ?"
@@ -4427,10 +4427,10 @@ def api_reports_ar():
 
     rows = c.execute("SELECT * FROM credit_ledger ORDER BY id DESC").fetchall()
     paymap = {}
-    for p in c.execute("SELECT * FROM credit_payments ORDER BY date ASC, id ASC").fetchall():
+    for p in c.execute("SELECT * FROM credit_payments WHERE COALESCE(method, '') != 'آجل' ORDER BY date ASC, id ASC").fetchall():
         paymap.setdefault(p["ledger_id"], []).append(dict(p))
 
-    pmt_where = "1=1"
+    pmt_where = "COALESCE(p.method, '') != 'آجل'"
     pmt_params = []
     if from_d:
         pmt_where += " AND date(p.date) >= ?"
@@ -4923,7 +4923,7 @@ def api_reports_income():
     by_method = [{"method": k, "count": v["count"], "paid": v["paid"], "total": v["total"]} for k, v in sorted(by_method.items())]
 
     # تحصيل الآجل خلال الفترة
-    cr_where = "1=1"
+    cr_where = "COALESCE(method, '') != 'آجل'"
     cr_params = []
     if from_d:
         cr_where += " AND date(date) >= ?"
