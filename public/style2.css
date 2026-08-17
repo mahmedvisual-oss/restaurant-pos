@@ -1647,3 +1647,216 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   .top-actions > .btn, .top-actions > .lang-dropdown { min-width: 42px !important; }
   .top-actions > .btn { padding: 6px 8px !important; font-size: 11px !important; }
 }
+
+/* MOBILE_UI_FINAL_V6 */
+@media (max-width: 768px) {
+  :root { --mobile-nav-h: 64px; --mobile-top-h: 58px; }
+  html, body { width:100%; max-width:100%; overflow:hidden !important; }
+  body { height:100dvh !important; padding:0 !important; }
+
+  /* رأس الهاتف: لا يضغط المحتوى ولا يقص الأزرار */
+  .topbar {
+    height:auto !important;
+    min-height:var(--mobile-top-h) !important;
+    width:100% !important;
+    max-width:100% !important;
+    padding:6px 8px !important;
+    display:flex !important;
+    align-items:center !important;
+    gap:6px !important;
+    overflow:visible !important;
+  }
+  .topbar .logo {
+    flex:0 0 auto !important;
+    width:auto !important;
+    max-width:32vw !important;
+    min-width:0 !important;
+  }
+  .top-actions {
+    flex:1 1 auto !important;
+    min-width:0 !important;
+    max-width:100% !important;
+    display:flex !important;
+    flex-wrap:nowrap !important;
+    gap:5px !important;
+    overflow-x:auto !important;
+    overflow-y:visible !important;
+    overscroll-behavior-x:contain;
+    -webkit-overflow-scrolling:touch !important;
+    scrollbar-width:thin;
+    padding:3px 2px !important;
+    touch-action:pan-x !important;
+  }
+  .top-actions > * {
+    flex:0 0 auto !important;
+    min-width:44px !important;
+    max-width:none !important;
+  }
+  .top-actions > .btn {
+    min-height:44px !important;
+    white-space:nowrap !important;
+    padding:7px 10px !important;
+  }
+
+  /* سند القبض متاح دائمًا بدل أن يضيع داخل شريط الأزرار */
+  .top-actions > button[onclick="openDepositModal()"] {
+    position:fixed !important;
+    right:10px !important;
+    bottom:calc(var(--mobile-nav-h) + 10px + env(safe-area-inset-bottom, 0px)) !important;
+    z-index:12000 !important;
+    min-width:110px !important;
+    min-height:48px !important;
+    padding:8px 12px !important;
+    border-radius:12px !important;
+    box-shadow:0 6px 18px rgba(0,0,0,.35) !important;
+    transform:none !important;
+  }
+
+  /* لا تترك مساحة أفقية مخفية بسبب الأزرار */
+  .main {
+    width:100% !important;
+    max-width:100% !important;
+    margin:0 !important;
+    padding:0 !important;
+    height:calc(100dvh - var(--mobile-top-h)) !important;
+    overflow:hidden !important;
+  }
+  .main > .col[data-panel] {
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+    margin:0 !important;
+    border-radius:0 !important;
+    overflow:hidden !important;
+    padding-bottom:10px !important;
+  }
+  .main > .col[data-panel].mobile-panel-active {
+    display:flex !important;
+    flex-direction:column !important;
+    height:100% !important;
+    max-height:100% !important;
+    min-height:0 !important;
+  }
+
+  /* القائمة والطاولات والفاتورة: التمرير داخل اللوحة فقط */
+  .mobile-panel-active .scroll-list,
+  .mobile-panel-active #menu-list,
+  .mobile-panel-active #tables-list,
+  .mobile-panel-active #floor-plan,
+  .mobile-panel-active .cart-list {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    max-width:100% !important;
+    overflow:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+    touch-action:pan-x pan-y !important;
+  }
+  .mobile-panel-active .actions,
+  .mobile-panel-active .summary { flex:0 0 auto !important; max-width:100% !important; }
+
+  /* كل أزرار الفاتورة داخل العرض */
+  .actions, .actions-row {
+    width:100% !important;
+    max-width:100% !important;
+    box-sizing:border-box !important;
+    overflow-x:hidden !important;
+  }
+  .actions-row {
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:7px !important;
+  }
+  .actions-row > button,
+  .actions-row > .btn,
+  .actions button,
+  .actions .btn {
+    width:100% !important;
+    min-width:0 !important;
+    max-width:100% !important;
+    min-height:46px !important;
+    margin:0 !important;
+    padding:8px !important;
+    white-space:normal !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    touch-action:manipulation !important;
+  }
+
+  /* مخطط الطاولات وأزرار التكبير */
+  .floor-plan {
+    position:relative !important;
+    width:100% !important;
+    max-width:100% !important;
+    min-height:0 !important;
+    overflow:auto !important;
+    touch-action:pan-x pan-y !important;
+    -webkit-overflow-scrolling:touch !important;
+  }
+  .floor-plan button,
+  .floor-plan .btn,
+  .zoom-controls button,
+  .floor-zoom button,
+  .zoom-btn {
+    pointer-events:auto !important;
+    touch-action:manipulation !important;
+    min-width:44px !important;
+    min-height:44px !important;
+  }
+  .zoom-controls, .floor-zoom {
+    z-index:500 !important;
+    pointer-events:auto !important;
+  }
+
+  /* النوافذ المنبثقة لا تتجاوز الشاشة */
+  .modal { padding:8px !important; z-index:20000 !important; }
+  .modal-content {
+    width:min(96vw,560px) !important;
+    max-width:96vw !important;
+    max-height:calc(100dvh - 16px) !important;
+    overflow:hidden !important;
+    margin:auto !important;
+  }
+  .modal-body {
+    max-height:calc(100dvh - 110px) !important;
+    overflow:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+  }
+  .modal-actions {
+    display:grid !important;
+    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+    gap:8px !important;
+  }
+  .modal-actions .btn { min-width:0 !important; min-height:46px !important; }
+
+  /* الشريط السفلي فوق كل المحتوى وبمساحة آمنة */
+  .mobile-nav {
+    position:fixed !important;
+    left:0 !important;
+    right:0 !important;
+    bottom:0 !important;
+    width:100% !important;
+    min-height:var(--mobile-nav-h) !important;
+    padding-bottom:env(safe-area-inset-bottom,0px) !important;
+    z-index:15000 !important;
+    overflow-x:auto !important;
+    -webkit-overflow-scrolling:touch !important;
+  }
+  .mobile-nav-btn {
+    flex:1 0 62px !important;
+    min-width:62px !important;
+    min-height:52px !important;
+    touch-action:manipulation !important;
+  }
+
+  /* منع أي عنصر من صناعة عرض أكبر من الشاشة */
+  img, video, canvas, table, input, select, textarea { max-width:100% !important; }
+}
+
+@media (max-width:400px) {
+  .topbar .logo { max-width:27vw !important; }
+  .top-actions > .btn { min-width:42px !important; min-height:42px !important; padding:6px 8px !important; font-size:11px !important; }
+  .actions-row { grid-template-columns:1fr !important; }
+  .actions-row > button, .actions-row > .btn { min-height:44px !important; }
+  .mobile-nav-btn { flex-basis:58px !important; min-width:58px !important; }
+  .top-actions > button[onclick="openDepositModal()"] { min-width:104px !important; font-size:12px !important; }
+}
