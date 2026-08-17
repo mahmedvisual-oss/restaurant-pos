@@ -1422,3 +1422,80 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   .mobile-panel-active[data-panel="tables"] #tables-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .mobile-panel-active[data-panel="menu"] #menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 }
+
+/* MOBILE_TOUCH_CONTROLS_V3 */
+@media (max-width: 768px) {
+  /* لا تقطع عناصر التحكم أو قوائم التكبير */
+  .topbar, .top-actions, .size-dropdown, .lang-dropdown, .manager-dropdown, .mgr-dropdown {
+    position: relative;
+    z-index: 5000;
+  }
+  .top-actions { overflow: visible !important; max-width: 100%; }
+  .size-dropdown-menu, #size-menu, .lang-dropdown-menu, #lang-menu, .mgr-dropdown-menu, #manager-menu {
+    z-index: 10000 !important;
+    pointer-events: auto !important;
+    max-height: 70vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* أزرار التكبير/التصغير وأي أزرار عائمة فوق مخطط الطاولات */
+  .floor-plan { position: relative !important; overflow: auto !important; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
+  .floor-plan button, .floor-plan .btn, .zoom-controls, .floor-zoom, .zoom-btn,
+  [class*="zoom"], [id*="zoom"] {
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+  .zoom-controls, .floor-zoom {
+    position: absolute !important;
+    z-index: 200 !important;
+    inset-inline-end: 10px !important;
+    top: 10px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+  .zoom-controls button, .floor-zoom button, .zoom-btn {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 20px !important;
+    border-radius: 10px !important;
+    position: relative !important;
+    z-index: 201 !important;
+  }
+
+  /* أي أزرار بيضاء/فاتحة لا تجعلها تختفي على الخلفية */
+  .floor-plan button, .table-view-toggle button, .floor-controls button {
+    min-width: 44px;
+    min-height: 44px;
+    pointer-events: auto !important;
+  }
+
+  /* لا تجعل شريط التنقل يغطي آخر أزرار الشاشة */
+  .main { padding-bottom: 0 !important; }
+  .main > .col[data-panel] { padding-bottom: 12px !important; }
+  .main > .col[data-panel].mobile-panel-active { height: calc(100dvh - 112px) !important; max-height: calc(100dvh - 112px) !important; }
+  .mobile-nav { position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important; z-index: 9000 !important; }
+
+  /* أزرار التحكم العامة: مساحة لمس حقيقية */
+  button, .btn, .cat-btn, .table-btn, .acc-item, .pay-method, input, select {
+    touch-action: manipulation;
+  }
+  button, .btn, .cat-btn, .pay-method { -webkit-user-select: none; user-select: none; }
+
+  /* قائمة الحجم/التكبير تكون قابلة للوصول حتى في أعلى الشاشة */
+  #size-dropdown { position: relative !important; z-index: 10001 !important; }
+  #size-menu { position: absolute !important; z-index: 10002 !important; }
+}
+
+@media (max-width: 400px) {
+  .top-actions { gap: 2px !important; }
+  .top-actions .btn { min-width: 40px !important; min-height: 40px !important; padding: 4px !important; }
+  .zoom-controls button, .floor-zoom button, .zoom-btn { width: 42px !important; height: 42px !important; min-width: 42px !important; min-height: 42px !important; }
+}
