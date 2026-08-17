@@ -880,9 +880,12 @@ def init_db():
                   "VALUES (?,?,?,?,?,?,?,?,?,?)",
                   (cname, ro["id"], None, ro["table_num"], ro["table_section"] if "table_section" in ro.keys() else None, ro["total"], closed_paid, "open", ro["date"] or _now_sql(), due))
         lid = c.lastrowid
-        if closed_paid > 0:
-            c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-                      "VALUES (?,?,?,?,?)", (lid, closed_paid, "آجل", "مدير", ro["date"] or _now_sql()))
+        # IMPORTANT: creating an invoice on credit is NOT a collection.
+        # Do not create credit_payments here; payments are created only by an
+        # actual collection/receipt endpoint. Legacy fake rows are cleaned below.
+    # Remove legacy rows that were incorrectly created with the invoice method "آجل".
+    # They are not real collections and must never inflate customer payments.
+    c.execute("DELETE FROM credit_payments WHERE method='آجل'")
     # تنظيف الدفع الزائد القديم: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)
     c.execute("UPDATE credit_ledger SET paid=total WHERE paid > total")
     c.execute("UPDATE credit_payments SET amount=(SELECT total FROM credit_ledger WHERE credit_ledger.id=credit_payments.ledger_id) "
