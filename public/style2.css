@@ -1568,3 +1568,82 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   .actions-row button,
   .actions .btn { font-size: 11px !important; }
 }
+
+/* MOBILE_TOP_ACTIONS_V5 */
+@media (max-width: 768px) {
+  .topbar {
+    position: relative !important;
+    z-index: 9500 !important;
+    min-height: 56px !important;
+    height: auto !important;
+    overflow: visible !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+  .topbar .logo {
+    flex: 0 0 auto !important;
+    max-width: 38vw !important;
+    min-width: 0 !important;
+  }
+  .topbar .logo > div { min-width: 0 !important; }
+  .topbar .logo .title, .topbar .logo .subtitle {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+  .top-actions {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: auto !important;
+    max-width: none !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 5px !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: thin !important;
+    padding: 3px 4px !important;
+    touch-action: pan-x !important;
+  }
+  .top-actions > .btn,
+  .top-actions > .lang-dropdown,
+  .top-actions > .user-box {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 44px !important;
+    max-width: none !important;
+  }
+  .top-actions > .btn {
+    min-height: 44px !important;
+    padding: 7px 10px !important;
+    white-space: nowrap !important;
+  }
+  .top-actions .user-box { display: flex !important; align-items: center !important; gap: 4px !important; }
+  .top-actions .lang-dropdown { position: relative !important; z-index: 10000 !important; }
+  .top-actions .lang-dropdown-menu { z-index: 11000 !important; }
+
+  /* اجعل سند القبض أول زر ظاهر على الهاتف؛ يمكن تمرير الشريط لبقية الأدوات */
+  .top-actions > button[onclick="openDepositModal()"] { order: -20 !important; }
+  .top-actions > button[onclick="showReports()"] { order: -19 !important; }
+  .top-actions > button[onclick="window.open('/kitchen', '_blank')"] { order: -18 !important; }
+  .top-actions > button[onclick="showCustomersDb()"] { order: -17 !important; }
+
+  /* لا تسمح للـ dropdown أن يخرج خارج الشاشة */
+  .top-actions .lang-dropdown-menu {
+    position: absolute !important;
+    inset-inline-end: 0 !important;
+    left: auto !important;
+    max-width: min(280px, 90vw) !important;
+    max-height: 70vh !important;
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 400px) {
+  .topbar .logo { max-width: 30vw !important; }
+  .top-actions > .btn, .top-actions > .lang-dropdown { min-width: 42px !important; }
+  .top-actions > .btn { padding: 6px 8px !important; font-size: 11px !important; }
+}
