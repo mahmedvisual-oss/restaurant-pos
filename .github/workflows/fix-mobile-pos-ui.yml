@@ -1,0 +1,136 @@
+name: Fix mobile POS UI
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[mobile-pos-ui-fixed]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch mobile panel navigation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          marker = '/* MOBILE_POS_PANEL_NAV_V2 */'
+          if marker not in s:
+              patch = r'''
+
+          /* MOBILE_POS_PANEL_NAV_V2 */
+          function switchPanel(panel) {
+            const isSmall = window.innerWidth <= 768;
+            const panels = document.querySelectorAll('.main > .col[data-panel]');
+            if (!isSmall) {
+              panels.forEach(el => {
+                el.style.removeProperty('display');
+                el.classList.remove('mobile-panel-active');
+              });
+              document.querySelectorAll('#mobile-nav .mobile-nav-btn').forEach(b => b.classList.remove('active'));
+              return;
+            }
+
+            const valid = ['menu', 'cart', 'tables'];
+            if (!valid.includes(panel)) panel = 'menu';
+
+            panels.forEach(el => {
+              const active = el.dataset.panel === panel;
+              el.style.display = active ? 'flex' : 'none';
+              el.classList.toggle('mobile-panel-active', active);
+              if (active) {
+                el.style.flexDirection = 'column';
+                el.style.minHeight = 'calc(100dvh - 116px)';
+                el.style.height = 'calc(100dvh - 116px)';
+                el.style.maxHeight = 'calc(100dvh - 116px)';
+              }
+            });
+
+            document.querySelectorAll('#mobile-nav .mobile-nav-btn[data-panel-btn]').forEach(b => {
+              b.classList.toggle('active', b.dataset.panelBtn === panel);
+            });
+
+            const main = document.querySelector('.main');
+            if (main) {
+              main.style.display = 'block';
+              main.style.height = 'calc(100dvh - 60px)';
+              main.style.minHeight = '0';
+              main.style.overflow = 'hidden';
+            }
+          }
+
+          function updateMobileCartBadge() {
+            const badge = document.getElementById('mobile-cart-badge');
+            if (!badge) return;
+            const count = cart.reduce((n, item) => n + (parseInt(item.qty) || 0), 0);
+            badge.textContent = count > 99 ? '99+' : String(count);
+            badge.style.display = count > 0 ? 'inline-flex' : 'none';
+          }
+
+          const _originalRenderCartMobilePatch = renderCart;
+          renderCart = function() {
+            _originalRenderCartMobilePatch();
+            updateMobileCartBadge();
+          };
+
+          window.addEventListener('resize', function() {
+            if (window.innerWidth <= 768) {
+              const active = document.querySelector('.main > .col.mobile-panel-active');
+              switchPanel(active ? active.dataset.panel : 'menu');
+            } else {
+              switchPanel('menu');
+            }
+          });
+          '''
+              s += patch
+              p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Patch mobile CSS overrides
+        shell: bash
+        run: |
+          cat >> public/style2.css <<'CSS'
+
+          /* MOBILE_POS_PANEL_NAV_V2 */
+          @media (max-width: 768px) {
+            html, body { height: 100%; overflow: hidden; }
+            body { padding-bottom: 0; }
+            .main { display: block !important; height: calc(100dvh - 60px) !important; min-height: 0 !important; overflow: hidden !important; }
+            .main > .col[data-panel] { width: 100% !important; min-width: 0 !important; max-width: none !important; margin: 0 !important; border-radius: 0 !important; }
+            .main > .col[data-panel].mobile-panel-active { display: flex !important; flex-direction: column !important; }
+            .main > .col[data-panel]:not(.mobile-panel-active) { display: none !important; }
+            .mobile-nav { z-index: 1000 !important; padding-bottom: env(safe-area-inset-bottom, 0px) !important; }
+            .mobile-nav-btn { position: relative; min-width: 62px; flex: 1 1 0; }
+            .mobile-nav-btn.active { background: var(--accent, #6366f1) !important; color: #fff !important; transform: translateY(-2px); }
+            .mob-badge { position: absolute; top: 3px; right: 12px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: #ef4444; color: #fff; font-size: 10px; font-weight: 800; }
+            .mobile-panel-active .scroll-list { min-height: 0; flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch; }
+            .mobile-panel-active .cart-list { min-height: 0; flex: 1 1 auto; }
+            .mobile-panel-active .summary { flex: 0 0 auto; }
+            .mobile-panel-active .actions { flex: 0 0 auto; max-height: 42vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+            .mobile-panel-active[data-panel="tables"] #tables-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+            .mobile-panel-active[data-panel="menu"] #menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+          }
+          CSS
+
+      - name: Validate JavaScript syntax
+        run: node --check public/app.js
+
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/fix-mobile-pos-ui.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/app.js public/style2.css .github/workflows/fix-mobile-pos-ui.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix mobile POS panel navigation [mobile-pos-ui-fixed]"
+          git push origin HEAD:main
