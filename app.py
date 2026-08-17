@@ -457,6 +457,8 @@ def _ensure_schema(conn, c, log=True):
         _cp_cols = [r[1] for r in c.execute("PRAGMA table_info(credit_payments)").fetchall()]
         if "receipt_no" not in _cp_cols:
             c.execute("ALTER TABLE credit_payments ADD COLUMN receipt_no TEXT")
+        if "deposit_voucher_id" not in _cp_cols:
+            c.execute("ALTER TABLE credit_payments ADD COLUMN deposit_voucher_id INTEGER")
     except Exception as e:
         if log:
             print("ENSURE CREDIT PAYMENTS COL ERR:", repr(e))
@@ -4700,9 +4702,11 @@ def api_refunds():
 
 @app.route("/api/deposit-voucher", methods=["POST"])
 def api_deposit_voucher_create():
+    """إنشاء سند قبض وربطه تلقائياً بذمم العميل المفتوحة من الأقدم إلى الأحدث."""
     u = require_user()
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
+
     data = request.json or {}
     customer_name = str(data.get("customer_name") or "").strip()
     phone = str(data.get("phone") or "").strip()
@@ -4712,35 +4716,151 @@ def api_deposit_voucher_create():
     method = str(data.get("method") or "نقدي")
     transfer_ref = str(data.get("transfer_ref") or "").strip() or None
     transfer_name = str(data.get("transfer_name") or "").strip() or None
+
     if amount <= 0:
         return jsonify({"error": "أدخل مبلغاً صحيحاً"}), 400
+    if not customer_name and not phone:
+        return jsonify({"error": "اسم العميل أو رقم الهاتف مطلوب لربط سند القبض"}), 400
+    if method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
+        return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
+
     conn = get_db()
     c = conn.cursor()
     _ensure_schema(conn, c)
+
     try:
-        c.execute("INSERT INTO deposit_vouchers (customer_name, phone, party_date, description, amount, method, transfer_ref, transfer_name, employee, date) "
-                  "VALUES (?,?,?,?,?,?,?,?,?, datetime('now','localtime'))",
-                  (customer_name or None, phone or None, party_date or None, description or None,
-                   amount, method, transfer_ref, transfer_name, u["name"]))
+        # 1) العثور على العميل بالهاتف أولاً، ثم الاسم؛ وإن لم يوجد ننشئ سجلاً له.
+        customer = None
+        if phone:
+            customer = c.execute(
+                "SELECT id, name, phone FROM customers WHERE phone=? LIMIT 1", (phone,)
+            ).fetchone()
+        if not customer and customer_name:
+            customer = c.execute(
+                "SELECT id, name, phone FROM customers WHERE lower(trim(name))=lower(trim(?)) LIMIT 1",
+                (customer_name,),
+            ).fetchone()
+        if not customer:
+            c.execute(
+                "INSERT INTO customers (name, phone) VALUES (?,?)",
+                (customer_name or "عميل", phone or None),
+            )
+            customer = c.execute(
+                "SELECT id, name, phone FROM customers WHERE id=?", (c.lastrowid,)
+            ).fetchone()
+
+        customer_id = int(customer["id"])
+        resolved_name = (customer["name"] or customer_name or "عميل").strip()
+        resolved_phone = (customer["phone"] or phone or "").strip()
+
+        # 2) البحث عن الذمم المفتوحة لهذا العميل. نستخدم customer_id للبيانات الجديدة
+        #    ونعيد مطابقة الهاتف/الاسم للذمم القديمة التي لم يكن لها customer_id.
+        ledgers = c.execute(
+            """
+            SELECT * FROM credit_ledger
+            WHERE status='open'
+              AND ROUND(COALESCE(total,0)-COALESCE(paid,0),2) > 0
+              AND (
+                    customer_id=?
+                 OR (phone IS NOT NULL AND phone!='' AND ?!='' AND trim(phone)=trim(?))
+                 OR lower(trim(customer_name))=lower(trim(?))
+              )
+            ORDER BY datetime(COALESCE(created_at,'1970-01-01')) ASC, id ASC
+            """,
+            (customer_id, resolved_phone, resolved_phone, resolved_name),
+        ).fetchall()
+
+        outstanding = round(sum(
+            max(float(r["total"] or 0) - float(r["paid"] or 0), 0)
+            for r in ledgers
+        ), 2)
+
+        # إذا كان للعميل دين مفتوح، لا نسمح بسند قبض مستقل عن الذمم.
+        # ويجب أن يغطي المبلغ كامل السند؛ لا نضع فائضاً غير معروف محاسبياً في voucher فقط.
+        if ledgers and amount > outstanding + 0.001:
+            conn.rollback()
+            conn.close()
+            return jsonify({
+                "error": f"مبلغ سند القبض ({amount:.2f}) أكبر من إجمالي الذمم المفتوحة ({outstanding:.2f}) للعميل. "
+                         "قسّم السند أو سجّل الفائض كسلفة/رصيد مستقل بعد تعريف حسابه."
+            }), 400
+
+        # 3) إنشاء سند القبض نفسه حتى يبقى محفوظاً في تقرير سندات القبض.
+        c.execute(
+            "INSERT INTO deposit_vouchers "
+            "(customer_name, phone, party_date, description, amount, method, transfer_ref, transfer_name, employee, date) "
+            "VALUES (?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+            (
+                resolved_name, resolved_phone or None, party_date or None,
+                description or None, amount, method, transfer_ref, transfer_name, u["name"],
+            ),
+        )
         vid = c.lastrowid
         receipt_no = "QC-%d-%05d" % (_now().year, vid)
         c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, vid))
+
+        # 4) توزيع سند القبض على أقدم الذمم أولاً، وإنشاء credit_payments لكل جزء.
+        remaining = round(amount, 2)
+        allocations = []
+        for ledger in ledgers:
+            if remaining <= 0:
+                break
+            due = round(max(float(ledger["total"] or 0) - float(ledger["paid"] or 0), 0), 2)
+            if due <= 0:
+                continue
+            applied = round(min(remaining, due), 2)
+            new_paid = round(float(ledger["paid"] or 0) + applied, 2)
+            new_status = "settled" if new_paid >= float(ledger["total"] or 0) - 0.001 else "open"
+
+            c.execute(
+                "UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime'), customer_id=? WHERE id=?",
+                (new_paid, new_status, customer_id, ledger["id"]),
+            )
+            c.execute(
+                "INSERT INTO credit_payments "
+                "(ledger_id, amount, method, employee, date, receipt_no, deposit_voucher_id) "
+                "VALUES (?,?,?,?,datetime('now','localtime'),?,?)",
+                (ledger["id"], applied, method, u["name"], receipt_no, vid),
+            )
+            allocations.append({
+                "ledger_id": ledger["id"],
+                "order_id": ledger["order_id"],
+                "amount": applied,
+                "remaining_invoice": round(max(float(ledger["total"] or 0) - new_paid, 0), 2),
+                "status": new_status,
+            })
+            remaining = round(remaining - applied, 2)
+
+        conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         conn.close()
-        if CLOUD_DB:
-            print("DEPOSIT VOUCHER ERR:", repr(e))
-        return jsonify({"error": "تعذّر إنشاء السند"}), 500
-    conn.commit()
+        print("DEPOSIT VOUCHER ERR:", repr(e))
+        return jsonify({"error": "تعذّر إنشاء سند القبض أو ربطه بالذمم"}), 500
+
     conn.close()
+
+    applied_total = round(amount - remaining, 2)
     voucher = {
         "id": vid, "receipt_no": receipt_no,
-        "customer_name": customer_name or "", "phone": phone or "",
+        "customer_name": resolved_name, "phone": resolved_phone,
         "party_date": party_date or "", "description": description or "",
         "amount": amount, "method": method,
         "transfer_ref": transfer_ref, "transfer_name": transfer_name,
         "employee": u["name"], "date": _now_sql(),
+        "customer_id": customer_id,
+        "applied_to_credit": applied_total,
+        "unallocated": remaining,
+        "allocations": allocations,
     }
-    audit("deposit_voucher", f"سند قبض {receipt_no} بمبلغ {amount:.2f} ({method}) من {u['name']}")
+    audit(
+        "deposit_voucher",
+        f"سند قبض {receipt_no} بمبلغ {amount:.2f} ({method}) - العميل {resolved_name} - "
+        f"مسدد من الآجل {applied_total:.2f}",
+    )
     return jsonify({"ok": True, "voucher": voucher})
 
 
