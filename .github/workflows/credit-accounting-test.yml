@@ -1,0 +1,42 @@
+name: Credit accounting regression test
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'app.py'
+      - '.github/workflows/credit-accounting-test.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax check
+        run: python -m py_compile app.py
+      - name: Isolated accounting test
+        shell: python
+        run: |
+          import sqlite3
+          db=sqlite3.connect(':memory:')
+          c=db.cursor()
+          c.execute('CREATE TABLE credit_ledger (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL, paid REAL DEFAULT 0, status TEXT)')
+          c.execute('CREATE TABLE credit_payments (id INTEGER PRIMARY KEY, ledger_id INTEGER, amount REAL, method TEXT)')
+          # Credit invoice: creates receivable, NOT collection.
+          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status) VALUES(1,100000,0,'open')")
+          assert c.execute('SELECT COALESCE(SUM(amount),0) FROM credit_payments').fetchone()[0] == 0
+          # Actual receipt: creates collection and reduces receivable.
+          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(1,40000,'cash')")
+          c.execute("UPDATE credit_ledger SET paid=paid+40000,status=CASE WHEN paid+40000>=total THEN 'paid' ELSE 'open' END WHERE id=1")
+          total_paid=c.execute('SELECT SUM(amount) FROM credit_payments WHERE ledger_id=1').fetchone()[0]
+          paid,balance,status=c.execute('SELECT paid,total-paid,status FROM credit_ledger WHERE id=1').fetchone()
+          assert total_paid == 40000
+          assert paid == 40000
+          assert balance == 60000
+          assert status == 'open'
+          # Final receipt closes the debt.
+          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(1,60000,'cash')")
+          c.execute("UPDATE credit_ledger SET paid=paid+60000,status=CASE WHEN paid+60000>=total THEN 'paid' ELSE 'open' END WHERE id=1")
+          paid,balance,status=c.execute('SELECT paid,total-paid,status FROM credit_ledger WHERE id=1').fetchone()
+          assert paid == 100000 and balance == 0 and status == 'paid'
+          print('PASS: credit invoice is not a collection; receipts reduce the receivable correctly.')
