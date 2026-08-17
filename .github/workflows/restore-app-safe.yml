@@ -1,0 +1,28 @@
+name: Restore app.py safe baseline
+on:
+  push:
+    paths: [.github/workflows/restore-app-safe.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore app.py from verified baseline
+        shell: bash
+        run: |
+          set -e
+          git fetch origin 7b220dfc33f1ea135fae66a2c7c83f0c487ab4bd --depth=1
+          git show 7b220dfc33f1ea135fae66a2c7c83f0c487ab4bd:app.py > app.py
+          python -m py_compile app.py
+          rm -f .github/workflows/restore-app-safe.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py .github/workflows/restore-app-safe.yml
+          git commit -m 'Restore app.py from verified credit fix baseline'
+          git push origin HEAD:main
