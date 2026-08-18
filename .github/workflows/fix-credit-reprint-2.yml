@@ -1,0 +1,69 @@
+name: Cloud fix credit receipt reprint
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch exact function
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          start = s.find('function printCreditReceipt(r)')
+          if start < 0:
+              raise SystemExit('printCreditReceipt not found')
+          end = s.find('function printCustReceipt', start)
+          if end < 0:
+              raise SystemExit('printCustReceipt marker not found')
+          block = s[start:end]
+
+          # Replace only the final synchronous print/close sequence in this function.
+          new_block, n = re.subn(
+              r'\s*w\.document\.close\(\);\s*w\.focus\(\);\s*w\.print\(\);\s*w\.close\(\);\s*\n\}',
+              '''\n  w.document.close();\n\n  setTimeout(() => {\n    try {\n      w.focus();\n      w.print();\n    } catch (e) {\n      console.error("CREDIT RECEIPT PRINT ERROR:", e);\n      toast("⚠️ " + t("toast.allowPopups"));\n    }\n  }, 150);\n}\n''',
+              block,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              raise SystemExit('Expected old credit receipt print sequence was not found')
+
+          p.write_text(s[:start] + new_block + s[end:], encoding='utf-8')
+          print('PATCHED')
+
+      - name: Verify and show result
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path('public/app.js').read_text(encoding='utf-8')
+          start = s.find('function printCreditReceipt(r)')
+          end = s.find('function printCustReceipt', start)
+          block = s[start:end]
+          assert 'w.print();' in block
+          assert 'w.close();' not in block
+          assert 'setTimeout(() => {' in block
+          print('VERIFIED: printCreditReceipt uses delayed print and does not close the window.')
+
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git rm .github/workflows/fix-credit-reprint-2.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: repair credit receipt reprint'
+          git push
