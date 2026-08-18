@@ -2037,10 +2037,18 @@ function printCreditReceipt(r) {
     <div class="muted">${new Date().toLocaleString()}</div>
   </body></html>`);
   w.document.close();
-  w.focus();
-  w.print();
-  w.close();
+
+  setTimeout(() => {
+    try {
+      w.focus();
+      w.print();
+    } catch (e) {
+      console.error("CREDIT RECEIPT PRINT ERROR:", e);
+      toast("⚠️ " + t("toast.allowPopups"));
+    }
+  }, 150);
 }
+
 
 function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
   const r = {
