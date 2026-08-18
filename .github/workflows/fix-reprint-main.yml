@@ -1,0 +1,75 @@
+name: Fix reprint from report data
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch reprint function
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          pattern = r'async function reprintInvoice\(oid\) \{.*?\n\}'
+          new = '''async function reprintInvoice(oid) {
+  // Open immediately during the user's click so popup blockers cannot reject it.
+  const w = window.open("", "_blank", "width=320,height=600");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+
+  try {
+    // Reports already contain the order data; avoid a second API request for reprint.
+    const found = Array.isArray(reportOrders)
+      ? reportOrders.find(x => Number(x.id) === Number(oid))
+      : null;
+
+    if (found) {
+      const o = {
+        ...found,
+        order_id: found.id,
+        subtotal: found.subtotal != null ? found.subtotal : found.total,
+        tax: found.tax || 0,
+        discount: found.discount || 0,
+        paid: found.paid != null ? found.paid : found.total,
+        change: found.change != null ? found.change : 0,
+        guests: found.guests || 1,
+        employee: found.employee || "-",
+        table_num: found.table_num || "-",
+        payment_method: found.payment_method || "نقدي",
+        items: Array.isArray(found.items) ? found.items : []
+      };
+      printReceipt(o, w);
+      return;
+    }
+
+    // Fallback for callers outside the report page.
+    const o = await api("/api/orders/" + oid);
+    printReceipt(o, w);
+  } catch (e) {
+    try { w.close(); } catch (_) {}
+    toast(e.message);
+  }
+}'''
+          m = re.search(pattern, s, re.S)
+          if not m:
+              raise SystemExit('TARGET_NOT_FOUND')
+          s = s[:m.start()] + new + s[m.end():]
+          p.write_text(s, encoding='utf-8')
+          print('PATCH_OK')
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git commit -m 'fix: reprint directly from loaded report data'
+          git push
+          git rm .github/workflows/fix-reprint-main.yml
+          git commit -m 'chore: remove temporary reprint workflow'
+          git push
