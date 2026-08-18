@@ -1,70 +1,77 @@
 name: Cloud Fix Reprint Invoice
-
 on:
   push:
-    branches:
-      - main
-
+    branches: [main]
 permissions:
   contents: write
-
 jobs:
   fix-reprint:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Patch printReceipt
+      - uses: actions/checkout@v4
+      - name: Patch reprint popup flow
         shell: python
         run: |
           from pathlib import Path
-
-          p = Path("public/app.js")
-          s = p.read_text(encoding="utf-8")
-
-          old = '''  w.document.close();
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('function printReceipt(o) {', 'function printReceipt(o, existingWindow = null) {', 1)
+          old_open = '  const w = window.open("", "_blank", "width=320,height=600");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }'
+          new_open = '  const w = existingWindow || window.open("", "_blank", "width=320,height=600");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }'
+          if old_open not in s:
+              raise SystemExit('printReceipt open block not found')
+          s = s.replace(old_open, new_open, 1)
+          old_end = '''  w.document.close();
   w.focus();
   w.print();
   w.close();
 }
 
-async function reprintInvoice(oid) {'''
-
-          new = '''  w.document.close();
-
+async function reprintInvoice(oid) {
+  try {
+    const o = await api("/api/orders/" + oid);
+    printReceipt(o);
+  } catch (e) { toast(e.message); }
+}'''
+          new_end = '''  w.document.close();
   setTimeout(() => {
     try {
       w.focus();
       w.print();
     } catch (e) {
-      console.error("REPRINT ERROR:", e);
+      console.error("PRINT ERROR:", e);
       toast("⚠️ " + t("toast.allowPopups"));
     }
   }, 100);
 }
 
-async function reprintInvoice(oid) {'''
-
-          if old not in s:
-              raise SystemExit("Target printReceipt block was not found; nothing changed.")
-
-          p.write_text(s.replace(old, new, 1), encoding="utf-8")
-          print("Reprint patch applied.")
-
-      - name: Commit cloud fix
+async function reprintInvoice(oid) {
+  const w = window.open("", "_blank", "width=320,height=600");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  try {
+    const o = await api("/api/orders/" + oid);
+    printReceipt(o, w);
+  } catch (e) {
+    try { w.close(); } catch (_) {}
+    toast(e.message);
+  }
+}'''
+          if old_end not in s:
+              raise SystemExit('printReceipt/reprintInvoice block not found')
+          p.write_text(s.replace(old_end, new_end, 1), encoding='utf-8')
+          print('PATCH_OK')
+      - name: Commit patch
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add public/app.js
-          git commit -m "fix: make invoice reprint print reliably"
+          git commit -m 'fix: reprint invoice without popup blocking'
           git push
-
       - name: Remove temporary workflow
         shell: bash
         run: |
           git rm .github/workflows/cloud-fix-reprint.yml
-          git commit -m "chore: remove temporary cloud fix workflow"
+          git commit -m 'chore: remove temporary reprint workflow'
           git push
