@@ -1339,6 +1339,9 @@ def api_modifiers_add():
 # ===== نقل الطلب =====
 @app.route("/api/order/transfer", methods=["POST"])
 def api_order_transfer():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
     from_table = data.get("from_table")
     to_table = data.get("to_table")
