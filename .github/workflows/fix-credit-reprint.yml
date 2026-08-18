@@ -14,26 +14,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Patch credit receipt printing
+      - name: Patch only printCreditReceipt
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           p = Path("public/app.js")
           s = p.read_text(encoding="utf-8")
 
-          old = '''  w.document.close();
-  w.focus();
-  w.print();
-  w.close();
-}
+          pattern = r'(function printCreditReceipt\(r\)\s*\{.*?\n)(\s*w\.document\.close\(\);\s*\n\s*w\.focus\(\);\s*\n\s*w\.print\(\);\s*\n\s*w\.close\(\);\s*\n\})'
 
-function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {'''
+          replacement = r'''\1  w.document.close();
 
-          new = '''  w.document.close();
-
-  // Do not close the popup before the browser opens the print dialog.
-  // This is important for re-printing credit receipts from the reports screen.
+  // Keep the receipt window alive while the browser opens the print dialog.
   setTimeout(() => {
     try {
       w.focus();
@@ -43,23 +37,35 @@ function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, 
       toast("⚠️ " + t("toast.allowPopups"));
     }
   }, 150);
-}
+}'''
 
-function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {'''
+          s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit("ERROR: printCreditReceipt target not found; no change made.")
 
-          if old not in s:
-              raise SystemExit("Target printCreditReceipt block not found; no change made.")
+          p.write_text(s2, encoding="utf-8")
+          print("OK: printCreditReceipt patched.")
 
-          s = s.replace(old, new, 1)
-          p.write_text(s, encoding="utf-8")
-          print("Credit receipt reprint fixed.")
+      - name: Verify target
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path("public/app.js").read_text(encoding="utf-8")
+          start = s.index("function printCreditReceipt(r)")
+          end = s.index("function printCustReceipt", start)
+          block = s[start:end]
+          if "w.print();" not in block:
+              raise SystemExit("ERROR: print call missing after patch")
+          if "w.close();" in block:
+              raise SystemExit("ERROR: credit receipt still closes popup")
+          print("VERIFIED: credit receipt has print() and no w.close().")
 
-      - name: Commit fix and remove one-time workflow
+      - name: Commit and remove workflow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/app.js
           git rm .github/workflows/fix-credit-reprint.yml
-          git commit -m "fix: make credit receipt reprint reliable"
+          git commit -m "fix: repair credit receipt reprint"
           git push
