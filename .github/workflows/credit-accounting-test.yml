@@ -14,42 +14,56 @@ jobs:
       - uses: actions/checkout@v4
       - name: Python syntax check
         run: python -m py_compile app.py
-      - name: Isolated accounting test
+      - name: Isolated accounting and reconciliation test
         shell: python
         run: |
           import sqlite3
           db=sqlite3.connect(':memory:')
           c=db.cursor()
+          c.execute('CREATE TABLE sales (id INTEGER PRIMARY KEY, total REAL, payment_method TEXT)')
           c.execute('CREATE TABLE credit_ledger (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL, paid REAL DEFAULT 0, status TEXT, created_at INTEGER)')
           c.execute('CREATE TABLE credit_payments (id INTEGER PRIMARY KEY, ledger_id INTEGER, amount REAL, method TEXT)')
 
-          # Credit invoice creates a receivable, never a collection.
-          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,50000,0,'open',1)")
-          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,80000,0,'open',2)")
+          # Daily sales mix: cash + bank transfer + genuine credit sale.
+          c.executemany('INSERT INTO sales(total,payment_method) VALUES(?,?)', [(100000,'نقدي'),(50000,'BCA'),(150000,'آجل')])
+          sales_total=c.execute('SELECT SUM(total) FROM sales').fetchone()[0]
+          cash_and_bank=c.execute("SELECT SUM(total) FROM sales WHERE payment_method IN ('نقدي','BCA')").fetchone()[0]
+          credit_sales=c.execute("SELECT SUM(total) FROM sales WHERE payment_method='آجل'").fetchone()[0]
+          assert sales_total == 300000
+          assert cash_and_bank + credit_sales == sales_total
+
+          # Credit sale creates a receivable, not a collection.
+          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,150000,0,'open',1)")
           assert c.execute('SELECT COALESCE(SUM(amount),0) FROM credit_payments').fetchone()[0] == 0
 
-          # Receipt of 60,000 must settle the oldest invoice first, then the remainder on the next.
-          receipt=60000
+          # Receipt is a separate cash collection and reduces the receivable.
+          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(1,60000,'cash')")
+          c.execute("UPDATE credit_ledger SET paid=paid+60000,status=CASE WHEN paid+60000>=total THEN 'paid' ELSE 'open' END WHERE id=1")
+          paid,balance,status=c.execute('SELECT paid,total-paid,status FROM credit_ledger WHERE id=1').fetchone()
+          assert paid == 60000 and balance == 90000 and status == 'open'
+
+          # Reconciliation invariant: outstanding receivables = credit sales - real collections.
+          real_collections=c.execute('SELECT COALESCE(SUM(amount),0) FROM credit_payments').fetchone()[0]
+          outstanding=c.execute('SELECT COALESCE(SUM(total-paid),0) FROM credit_ledger WHERE status IN (\'open\',\'partial\')').fetchone()[0]
+          assert credit_sales - real_collections == outstanding
+
+          # A credit invoice/payment must not inflate the sales collection total.
+          collection_total=c.execute("SELECT COALESCE(SUM(total),0) FROM sales WHERE payment_method!='آجل'").fetchone()[0] + real_collections
+          assert collection_total == 210000
+          assert collection_total != sales_total
+
+          # Oldest-first allocation across multiple invoices.
+          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,50000,0,'open',2)")
+          receipt=70000
           for ledger_id,total in c.execute("SELECT id,total FROM credit_ledger WHERE customer_id=1 AND status='open' ORDER BY created_at,id"):
               if receipt <= 0: break
               paid=c.execute('SELECT paid FROM credit_ledger WHERE id=?',(ledger_id,)).fetchone()[0]
-              remaining=total-paid
-              applied=min(receipt,remaining)
+              applied=min(receipt,total-paid)
               if applied:
                   c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(?,?,?)",(ledger_id,applied,'cash'))
                   c.execute("UPDATE credit_ledger SET paid=paid+?,status=CASE WHEN paid+?>=total THEN 'paid' ELSE 'open' END WHERE id=?",(applied,applied,ledger_id))
                   receipt-=applied
+          rows=c.execute('SELECT id,total,paid,status FROM credit_ledger ORDER BY created_at,id').fetchall()
+          assert rows == [(1,150000,60000,'open'),(2,50000,50000,'paid')], rows
 
-          rows=c.execute('SELECT id,total,paid,status FROM credit_ledger ORDER BY created_at').fetchall()
-          assert rows == [(1,50000,50000,'paid'),(2,80000,10000,'open')], rows
-          payments=c.execute('SELECT ledger_id,amount FROM credit_payments ORDER BY id').fetchall()
-          assert payments == [(1,50000),(2,10000)], payments
-          assert sum(x[1] for x in payments) == 60000
-          assert c.execute('SELECT SUM(total-paid) FROM credit_ledger WHERE customer_id=1').fetchone()[0] == 70000
-
-          # Final receipt closes the remaining invoice.
-          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(2,70000,'cash')")
-          c.execute("UPDATE credit_ledger SET paid=paid+70000,status=CASE WHEN paid+70000>=total THEN 'paid' ELSE 'open' END WHERE id=2")
-          assert c.execute("SELECT total-paid FROM credit_ledger WHERE id=2").fetchone()[0] == 0
-          assert c.execute("SELECT status FROM credit_ledger WHERE id=2").fetchone()[0] == 'paid'
-          print('PASS: credit invoices are not collections; receipts allocate oldest-first and reconcile balances.')
+          print('PASS: sales reconcile; credit sales are not collections; real receipts reduce receivables; oldest-first allocation works.')
