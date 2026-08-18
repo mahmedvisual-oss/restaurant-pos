@@ -20,23 +20,36 @@ jobs:
           import sqlite3
           db=sqlite3.connect(':memory:')
           c=db.cursor()
-          c.execute('CREATE TABLE credit_ledger (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL, paid REAL DEFAULT 0, status TEXT)')
+          c.execute('CREATE TABLE credit_ledger (id INTEGER PRIMARY KEY, customer_id INTEGER, total REAL, paid REAL DEFAULT 0, status TEXT, created_at INTEGER)')
           c.execute('CREATE TABLE credit_payments (id INTEGER PRIMARY KEY, ledger_id INTEGER, amount REAL, method TEXT)')
-          # Credit invoice: creates receivable, NOT collection.
-          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status) VALUES(1,100000,0,'open')")
+
+          # Credit invoice creates a receivable, never a collection.
+          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,50000,0,'open',1)")
+          c.execute("INSERT INTO credit_ledger(customer_id,total,paid,status,created_at) VALUES(1,80000,0,'open',2)")
           assert c.execute('SELECT COALESCE(SUM(amount),0) FROM credit_payments').fetchone()[0] == 0
-          # Actual receipt: creates collection and reduces receivable.
-          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(1,40000,'cash')")
-          c.execute("UPDATE credit_ledger SET paid=paid+40000,status=CASE WHEN paid+40000>=total THEN 'paid' ELSE 'open' END WHERE id=1")
-          total_paid=c.execute('SELECT SUM(amount) FROM credit_payments WHERE ledger_id=1').fetchone()[0]
-          paid,balance,status=c.execute('SELECT paid,total-paid,status FROM credit_ledger WHERE id=1').fetchone()
-          assert total_paid == 40000
-          assert paid == 40000
-          assert balance == 60000
-          assert status == 'open'
-          # Final receipt closes the debt.
-          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(1,60000,'cash')")
-          c.execute("UPDATE credit_ledger SET paid=paid+60000,status=CASE WHEN paid+60000>=total THEN 'paid' ELSE 'open' END WHERE id=1")
-          paid,balance,status=c.execute('SELECT paid,total-paid,status FROM credit_ledger WHERE id=1').fetchone()
-          assert paid == 100000 and balance == 0 and status == 'paid'
-          print('PASS: credit invoice is not a collection; receipts reduce the receivable correctly.')
+
+          # Receipt of 60,000 must settle the oldest invoice first, then the remainder on the next.
+          receipt=60000
+          for ledger_id,total in c.execute("SELECT id,total FROM credit_ledger WHERE customer_id=1 AND status='open' ORDER BY created_at,id"):
+              if receipt <= 0: break
+              paid=c.execute('SELECT paid FROM credit_ledger WHERE id=?',(ledger_id,)).fetchone()[0]
+              remaining=total-paid
+              applied=min(receipt,remaining)
+              if applied:
+                  c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(?,?,?)",(ledger_id,applied,'cash'))
+                  c.execute("UPDATE credit_ledger SET paid=paid+?,status=CASE WHEN paid+?>=total THEN 'paid' ELSE 'open' END WHERE id=?",(applied,applied,ledger_id))
+                  receipt-=applied
+
+          rows=c.execute('SELECT id,total,paid,status FROM credit_ledger ORDER BY created_at').fetchall()
+          assert rows == [(1,50000,50000,'paid'),(2,80000,10000,'open')], rows
+          payments=c.execute('SELECT ledger_id,amount FROM credit_payments ORDER BY id').fetchall()
+          assert payments == [(1,50000),(2,10000)], payments
+          assert sum(x[1] for x in payments) == 60000
+          assert c.execute('SELECT SUM(total-paid) FROM credit_ledger WHERE customer_id=1').fetchone()[0] == 70000
+
+          # Final receipt closes the remaining invoice.
+          c.execute("INSERT INTO credit_payments(ledger_id,amount,method) VALUES(2,70000,'cash')")
+          c.execute("UPDATE credit_ledger SET paid=paid+70000,status=CASE WHEN paid+70000>=total THEN 'paid' ELSE 'open' END WHERE id=2")
+          assert c.execute("SELECT total-paid FROM credit_ledger WHERE id=2").fetchone()[0] == 0
+          assert c.execute("SELECT status FROM credit_ledger WHERE id=2").fetchone()[0] == 'paid'
+          print('PASS: credit invoices are not collections; receipts allocate oldest-first and reconcile balances.')
