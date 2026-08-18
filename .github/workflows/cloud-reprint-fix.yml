@@ -1,0 +1,42 @@
+name: Cloud reprint fix
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch reprint flow
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          pattern = r'function printReceipt\(o\) \{.*?\n\}\n\nasync function reprintInvoice\(oid\) \{.*?\n\}'
+          m = re.search(pattern, s, re.S)
+          if not m:
+              raise SystemExit('TARGET_NOT_FOUND')
+          block = m.group(0)
+          block = block.replace('function printReceipt(o) {', 'function printReceipt(o, existingWindow = null) {', 1)
+          block = block.replace('const w = window.open("", "_blank", "width=320,height=600");', 'const w = existingWindow || window.open("", "_blank", "width=320,height=600");', 1)
+          block = block.replace('''  w.document.close();\n  w.focus();\n  w.print();\n  w.close();''', '''  w.document.close();\n  setTimeout(() => {\n    try {\n      w.focus();\n      w.print();\n    } catch (e) {\n      console.error("PRINT ERROR:", e);\n      toast("⚠️ " + t("toast.allowPopups"));\n    }\n  }, 100);''', 1)
+          old = '''async function reprintInvoice(oid) {\n  try {\n    const o = await api("/api/orders/" + oid);\n    printReceipt(o);\n  } catch (e) { toast(e.message); }\n}'''
+          new = '''async function reprintInvoice(oid) {\n  const w = window.open("", "_blank", "width=320,height=600");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  try {\n    const o = await api("/api/orders/" + oid);\n    printReceipt(o, w);\n  } catch (e) {\n    try { w.close(); } catch (_) {}\n    toast(e.message);\n  }\n}'''
+          if old not in block:
+              raise SystemExit('REPRINT_TARGET_NOT_FOUND')
+          block = block.replace(old, new, 1)
+          p.write_text(s[:m.start()] + block + s[m.end():], encoding='utf-8')
+          print('PATCH_OK')
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git commit -m 'fix: open reprint window before async request'
+          git push
