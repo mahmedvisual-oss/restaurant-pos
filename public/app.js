@@ -181,8 +181,21 @@ function toast(msg) {
 function openModal(id) { document.getElementById(id).classList.add("show"); }
 function closeModal(id) { document.getElementById(id).classList.remove("show"); }
 
-async function api(url, opts) {
-  const r = await fetch(url, { credentials: 'same-origin', ...opts });
+async function api(url, opts = {}) {
+  const headers = {
+    ...(opts.headers || {})
+  };
+
+  if (opts.body && typeof opts.body === "string" && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const r = await fetch(url, {
+    credentials: "same-origin",
+    ...opts,
+    headers
+  });
+
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(terr(d.error || t("err.generic")));
   return d;
@@ -1365,7 +1378,17 @@ function showTransferModal() {
 
 async function transferOrder(toTable) {
   try {
-    const res = await api("/api/order/transfer", { method: "POST", body: JSON.stringify({ from_table: selectedTable, to_table: toTable }) });
+    const res = await api("/api/order/transfer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        from_table: Number(selectedTable),
+        to_table: Number(toTable)
+      })
+    });
+
     if (res.ok) {
       const lb = tableData[toTable] ? tableData[toTable].num : toTable;
       toast("✅ تم النقل إلى الطاولة " + lb);
