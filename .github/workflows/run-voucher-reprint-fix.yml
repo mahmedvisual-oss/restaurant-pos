@@ -1,0 +1,110 @@
+name: Run voucher reprint fix
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch voucher reprint
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("public/app.js")
+          s = p.read_text(encoding="utf-8")
+
+          # Make both voucher printers able to reuse a popup opened synchronously
+          # from the button click.
+          s = s.replace(
+              "function printDepositVoucher(r) {",
+              "function printDepositVoucher(r, existingWindow = null) {",
+              1,
+          )
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              1,
+          )
+
+          s = s.replace(
+              "function printCreditReceipt(r) {",
+              "function printCreditReceipt(r, existingWindow = null) {",
+              1,
+          )
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              1,
+          )
+
+          old = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+  if (kind === "deposit") { printDepositVoucher(r); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r); return; }
+  toast("⚠️ " + t("rptNoPrintData"));
+}'''
+
+          new = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  // IMPORTANT: this must happen synchronously in the user's click handler.
+  // Otherwise Chromium/Edge may block the popup/print request.
+  const w = window.open("", "_blank", "width=340,height=650");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+
+  if (kind === "deposit") { printDepositVoucher(r, w); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r, w); return; }
+
+  try { w.close(); } catch (_) {}
+  toast("⚠️ " + t("rptNoPrintData"));
+}'''
+
+          if old not in s:
+              raise SystemExit("TARGET_NOT_FOUND: printCustReceipt")
+
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+
+          check = p.read_text(encoding="utf-8")
+          assert "function printCustReceipt(kind, receiptNo" in check
+          assert 'const w = window.open("", "_blank", "width=340,height=650");' in check
+          assert "printDepositVoucher(r, w)" in check
+          assert "printCreditReceipt(r, w)" in check
+          print("PATCH_OK")
+
+      - name: Commit patched app.js and remove this workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git rm .github/workflows/run-voucher-reprint-fix.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: make voucher reprint user initiated'
+          git push
