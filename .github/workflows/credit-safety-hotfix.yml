@@ -1,0 +1,88 @@
+name: Credit safety hotfix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/credit-safety-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply credit payment safety fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          app = Path('app.py')
+          s = app.read_text(encoding='utf-8')
+          old = '''    if paid < total and payment_method != "آجل":
+        return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+    items_str = _serialize_items(items)'''
+          new = '''    if payment_method == "آجل" and paid > total:
+        return jsonify({"error": f"مبلغ الدفعة الأولى للآجل لا يمكن أن يتجاوز الإجمالي ({total:.2f})"}), 400
+    if paid < total and payment_method != "آجل":
+        return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+    items_str = _serialize_items(items)'''
+          if old not in s:
+              raise SystemExit('app.py guard target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''        ledger_paid = min(paid, total)
+        overpaid = paid > total
+        S.append(
+            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
+        )'''
+          new = '''        ledger_paid = paid
+        ledger_status = "settled" if ledger_paid >= total else "open"
+        S.append(
+            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},{_sql_lit(ledger_status)},{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
+        )'''
+          if old not in s:
+              raise SystemExit('app.py ledger target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''        if overpaid:
+            overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
+            S.append(
+                f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
+            )'''
+          if old in s:
+              s = s.replace(old, '', 1)
+          app.write_text(s, encoding='utf-8')
+
+          js = Path('public/app.js')
+          s = js.read_text(encoding='utf-8')
+          old = '''  const paid = parseFloat(document.getElementById("paid").value) || 0;
+  if (paid < total && payMethod !== "آجل") { toast("⚠️ " + t("toast.insufficient")); return; }'''
+          new = '''  let paid = parseFloat(document.getElementById("paid").value) || 0;
+  if (payMethod === "آجل" && paid > total) {
+    paid = Math.round(total * 100) / 100;
+    document.getElementById("paid").value = paid;
+    calcChange();
+  }
+  if (paid < total && payMethod !== "آجل") { toast("⚠️ " + t("toast.insufficient")); return; }'''
+          if old not in s:
+              raise SystemExit('app.js payment target not found')
+          s = s.replace(old, new, 1)
+          js.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py public/app.js
+          git commit -m "Fix credit payment overpayment and ledger status"
+          git push
+      - name: Remove one-time workflow
+        if: success()
+        run: |
+          git rm .github/workflows/credit-safety-hotfix.yml
+          git commit -m "Remove one-time credit safety hotfix workflow"
+          git push
