@@ -1,4 +1,4 @@
-name: Fix reprint from report data
+name: Fix credit receipt reprint from button
 on:
   push:
     branches: [main]
@@ -10,66 +10,68 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch reprint function
+      - name: Patch credit receipt popup flow
         shell: python
         run: |
           from pathlib import Path
           import re
           p = Path('public/app.js')
           s = p.read_text(encoding='utf-8')
-          pattern = r'async function reprintInvoice\(oid\) \{.*?\n\}'
-          new = '''async function reprintInvoice(oid) {
-  // Open immediately during the user's click so popup blockers cannot reject it.
-  const w = window.open("", "_blank", "width=320,height=600");
+
+          # Both voucher printers can reuse the window opened synchronously by the click.
+          s = s.replace('function printDepositVoucher(r) {', 'function printDepositVoucher(r, existingWindow = null) {', 1)
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }',
+              1,
+          )
+          s = s.replace('function printCreditReceipt(r) {', 'function printCreditReceipt(r, existingWindow = null) {', 1)
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }',
+              1,
+          )
+
+          # The actual customer receipt button calls printCustReceipt directly.
+          # Open the popup before any async operation, while the click is active.
+          pattern = r'function printCustReceipt\(kind, receiptNo, customerName, phone, amount, method, date, ledgerId\)\s*\{.*?\n\}'
+          replacement = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  const w = window.open("", "_blank", "width=340,height=650");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
 
-  try {
-    // Reports already contain the order data; avoid a second API request for reprint.
-    const found = Array.isArray(reportOrders)
-      ? reportOrders.find(x => Number(x.id) === Number(oid))
-      : null;
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
 
-    if (found) {
-      const o = {
-        ...found,
-        order_id: found.id,
-        subtotal: found.subtotal != null ? found.subtotal : found.total,
-        tax: found.tax || 0,
-        discount: found.discount || 0,
-        paid: found.paid != null ? found.paid : found.total,
-        change: found.change != null ? found.change : 0,
-        guests: found.guests || 1,
-        employee: found.employee || "-",
-        table_num: found.table_num || "-",
-        payment_method: found.payment_method || "نقدي",
-        items: Array.isArray(found.items) ? found.items : []
-      };
-      printReceipt(o, w);
-      return;
-    }
+  if (kind === "deposit") { printDepositVoucher(r, w); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r, w); return; }
 
-    // Fallback for callers outside the report page.
-    const o = await api("/api/orders/" + oid);
-    printReceipt(o, w);
-  } catch (e) {
-    try { w.close(); } catch (_) {}
-    toast(e.message);
-  }
+  try { w.close(); } catch (_) {}
+  toast("⚠️ " + t("rptNoPrintData"));
 }'''
-          m = re.search(pattern, s, re.S)
-          if not m:
-              raise SystemExit('TARGET_NOT_FOUND')
-          s = s[:m.start()] + new + s[m.end():]
-          p.write_text(s, encoding='utf-8')
+          s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('TARGET_NOT_FOUND: printCustReceipt')
+          p.write_text(s2, encoding='utf-8')
+          check = p.read_text(encoding='utf-8')
+          assert 'function printCustReceipt(kind, receiptNo' in check
+          assert 'printCreditReceipt(r, w)' in check
+          assert 'printDepositVoucher(r, w)' in check
           print('PATCH_OK')
-      - name: Commit and remove workflow
+      - name: Commit patch and remove workflow
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add public/app.js
-          git commit -m 'fix: reprint directly from loaded report data'
+          git commit -m 'fix: make credit receipt reprint user initiated'
           git push
           git rm .github/workflows/fix-reprint-main.yml
-          git commit -m 'chore: remove temporary reprint workflow'
+          git commit -m 'chore: remove temporary credit receipt workflow'
           git push
