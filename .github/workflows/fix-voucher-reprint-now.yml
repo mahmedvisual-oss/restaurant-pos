@@ -1,0 +1,94 @@
+name: Fix voucher reprint now
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch voucher reprint flow
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+
+          # The voucher functions must be able to reuse a popup that was
+          # opened synchronously from the user's click.
+          s = s.replace(
+              'function printDepositVoucher(r) {',
+              'function printDepositVoucher(r, existingWindow = null) {',
+              1,
+          )
+          s = s.replace(
+              'function printCreditReceipt(r) {',
+              'function printCreditReceipt(r, existingWindow = null) {',
+              1,
+          )
+
+          # Replace only the first window.open inside each voucher function.
+          for fn in ('printDepositVoucher', 'printCreditReceipt'):
+              start = s.find('function ' + fn + '(')
+              if start < 0:
+                  raise SystemExit(f'{fn} not found')
+              end = s.find('\nfunction ', start + 10)
+              if end < 0:
+                  end = len(s)
+              block = s[start:end]
+              old = 'const w = window.open("", "_blank", "width=340,height=650");'
+              new = 'const w = existingWindow || window.open("", "_blank", "width=340,height=650");'
+              if old not in block:
+                  raise SystemExit(f'{fn} window.open block not found')
+              block = block.replace(old, new, 1)
+              s = s[:start] + block + s[end:]
+
+          # printCustReceipt is called by the reprint button's onclick.
+          # Open the window immediately, before any async work, so Chromium/Edge
+          # treats it as a user-initiated popup and does not block printing.
+          pattern = r'function printCustReceipt\(kind, receiptNo, customerName, phone, amount, method, date, ledgerId\)\s*\{.*?\n\}'
+          replacement = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  const w = window.open("", "_blank", "width=340,height=650");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+
+  if (kind === "deposit") { printDepositVoucher(r, w); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r, w); return; }
+
+  try { w.close(); } catch (_) {}
+  toast("⚠️ " + t("rptNoPrintData"));
+}'''
+          if not re.search(pattern, s, flags=re.S):
+              raise SystemExit('printCustReceipt function not found')
+          s = re.sub(pattern, replacement, s, count=1, flags=re.S)
+
+          p.write_text(s, encoding='utf-8')
+          print('PATCH_OK')
+
+      - name: Commit and remove this workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git rm .github/workflows/fix-voucher-reprint-now.yml
+          git commit -m 'fix: make voucher reprint user initiated'
+          git push
