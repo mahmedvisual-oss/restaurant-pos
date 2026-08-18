@@ -1,0 +1,98 @@
+name: Fix voucher reprint popup
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-print:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Patch voucher reprint flow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace(
+              'function printDepositVoucher(r) {',
+              'function printDepositVoucher(r, existingWindow = null) {',
+              1,
+          )
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              1,
+          )
+          s = s.replace(
+              'function printCreditReceipt(r) {',
+              'function printCreditReceipt(r, existingWindow = null) {',
+              1,
+          )
+          s = s.replace(
+              'const w = window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              'const w = existingWindow || window.open("", "_blank", "width=340,height=650");\n  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }\n  const methodN = METHOD_NAMES[r.method]',
+              1,
+          )
+
+          old = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+  if (kind === "deposit") { printDepositVoucher(r); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r); return; }
+  toast("⚠️ " + t("rptNoPrintData"));
+}'''
+
+          new = '''function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
+  // Open synchronously from the user's click so Chromium/Edge does not block it.
+  const w = window.open("", "_blank", "width=340,height=650");
+  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+
+  const r = {
+    receipt_no: decodeURIComponent(receiptNo || ""),
+    customer_name: decodeURIComponent(customerName || ""),
+    phone: decodeURIComponent(phone || ""),
+    amount: Number(amount) || 0,
+    method: method || "نقدي",
+    date: decodeURIComponent(date || ""),
+    ledger_id: Number(ledgerId) || 0
+  };
+
+  if (kind === "deposit") { printDepositVoucher(r, w); return; }
+  if (kind === "credit_payment") { printCreditReceipt(r, w); return; }
+
+  try { w.close(); } catch (_) {}
+  toast("⚠️ " + t("rptNoPrintData"));
+}'''
+
+          if old not in s:
+              raise SystemExit('printCustReceipt block not found; aborting')
+
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-voucher-reprint.yml
+          git add public/app.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix voucher reprint popup blocking"
+          git push
