@@ -13,23 +13,70 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply credit payment safety fixes
+      - name: Patch credit accounting
         run: |
           python - <<'PY'
           from pathlib import Path
 
           app = Path('app.py')
           s = app.read_text(encoding='utf-8')
+
+          # 1) Never mutate existing credit balances during schema/startup.
+          blocks = [
+          '''    try:
+              # تنظيف الدفع الزائد: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)
+              c.execute("UPDATE credit_ledger SET paid=total WHERE paid > total AND total IS NOT NULL AND total >= 0")
+          except Exception as e:
+              if log:
+                  print("ENSURE OVERPAID CLEANUP ERR:", repr(e))
+          ''',
+          '''    # backfill: سجّل الطلبات الآجلة القديمة المدفوعة/الجزئية في credit_ledger إذا لم تُسجل بعد
+              c.execute("SELECT id, table_num, table_section, total, paid, credit_name, date FROM orders "
+                        "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
+              for ro in c.fetchall():
+                  cname = (ro["credit_name"] or "").strip() or "عميل آجل"
+                  closed_paid = min(ro["paid"] or 0, ro["total"] or 0)  # لا دين سالب أبداً
+                  due = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
+                  c.execute("INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (cname, ro["id"], None, ro["table_num"], ro["table_section"] if "table_section" in ro.keys() else None, ro["total"], closed_paid, "open", ro["date"] or _now_sql(), due))
+                  lid = c.lastrowid
+                  # IMPORTANT: creating an invoice on credit is NOT a collection.
+                  # Do not create credit_payments here; payments are created only by an
+                  # actual collection/receipt endpoint. Legacy fake rows are cleaned below.
+              # Remove legacy rows that were incorrectly created with the invoice method "آجل".
+              # They are not real collections and must never inflate customer payments.
+              c.execute("DELETE FROM credit_payments WHERE method='آجل'")
+              # تنظيف الدفع الزائد القديم: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)
+              c.execute("UPDATE credit_ledger SET paid=total WHERE paid > total")
+              c.execute("UPDATE credit_payments SET amount=(SELECT total FROM credit_ledger WHERE credit_ledger.id=credit_payments.ledger_id) "
+                        "WHERE ledger_id IN (SELECT id FROM credit_ledger WHERE paid >= total AND amount > (SELECT total FROM credit_ledger WHERE credit_ledger.id=credit_payments.ledger_id))")
+          ''']
+
+          for block in blocks:
+              if block in s:
+                  s = s.replace(block, '')
+
+          # 2) Credit invoices never write an upfront payment or credit_payment.
+          old = '''    paid = _amount(data, "paid")
+    discount = _amount(data, "discount")'''
+          new = '''    paid = _amount(data, "paid")
+    discount = _amount(data, "discount")'''
+          if old not in s:
+              raise SystemExit('payment parse target not found')
+
           old = '''    if paid < total and payment_method != "آجل":
         return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
     items_str = _serialize_items(items)'''
-          new = '''    if payment_method == "آجل" and paid > total:
-        return jsonify({"error": f"مبلغ الدفعة الأولى للآجل لا يمكن أن يتجاوز الإجمالي ({total:.2f})"}), 400
+          new = '''    if payment_method == "آجل" and paid != 0:
+        return jsonify({"error": "فاتورة الآجل لا تسجل دفعة عند الإنشاء. سجّل التحصيل لاحقاً من شاشة تحصيل الآجل."}), 400
     if paid < total and payment_method != "آجل":
         return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+    if payment_method == "آجل":
+        paid = 0
     items_str = _serialize_items(items)'''
           if old not in s:
-              raise SystemExit('app.py guard target not found')
+              raise SystemExit('payment validation target not found')
           s = s.replace(old, new, 1)
 
           old = '''        ledger_paid = min(paid, total)
@@ -37,52 +84,74 @@ jobs:
         S.append(
             f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
             f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
-        )'''
-          new = '''        ledger_paid = paid
-        ledger_status = "settled" if ledger_paid >= total else "open"
+        )
+        if ledger_paid > 0:
+            S.append(
+                f"INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
+                f"VALUES (last_insert_rowid(),{ledger_paid},'آجل',{emp_name},{_sql_lit(now_str)});"
+            )'''
+          new = '''        ledger_paid = 0
         S.append(
             f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
-            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},{_sql_lit(ledger_status)},{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},0,'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
         )'''
           if old not in s:
-              raise SystemExit('app.py ledger target not found')
+              raise SystemExit('credit ledger target not found')
           s = s.replace(old, new, 1)
 
           old = '''        if overpaid:
             overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
             S.append(
                 f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
-            )'''
+            )
+'''
           if old in s:
               s = s.replace(old, '', 1)
+
           app.write_text(s, encoding='utf-8')
 
+          # UI: a credit invoice must not silently accept a non-zero upfront payment.
           js = Path('public/app.js')
-          s = js.read_text(encoding='utf-8')
+          j = js.read_text(encoding='utf-8')
           old = '''  const paid = parseFloat(document.getElementById("paid").value) || 0;
   if (paid < total && payMethod !== "آجل") { toast("⚠️ " + t("toast.insufficient")); return; }'''
-          new = '''  let paid = parseFloat(document.getElementById("paid").value) || 0;
-  if (payMethod === "آجل" && paid > total) {
-    paid = Math.round(total * 100) / 100;
-    document.getElementById("paid").value = paid;
-    calcChange();
+          new = '''  const paid = parseFloat(document.getElementById("paid").value) || 0;
+  if (payMethod === "آجل" && paid !== 0) {
+    toast("⚠️ فاتورة الآجل لا تسجل دفعة عند الإنشاء. سجّل التحصيل لاحقاً من شاشة الآجل.");
+    return;
   }
   if (paid < total && payMethod !== "آجل") { toast("⚠️ " + t("toast.insufficient")); return; }'''
-          if old not in s:
-              raise SystemExit('app.js payment target not found')
-          s = s.replace(old, new, 1)
-          js.write_text(s, encoding='utf-8')
+          if old not in j:
+              raise SystemExit('app payment validation target not found')
+          j = j.replace(old, new, 1)
+          js.write_text(j, encoding='utf-8')
           PY
-      - name: Commit hotfix
+
+      - name: Verify patched source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          a = Path('app.py').read_text(encoding='utf-8')
+          j = Path('public/app.js').read_text(encoding='utf-8')
+          checks = [
+            ('server credit paid guard', 'if payment_method == "آجل" and paid != 0:' in a),
+            ('server credit ledger zero', 'VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},0,' in a),
+            ('no credit invoice payment insert', "VALUES (last_insert_rowid(),{ledger_paid},'آجل'" not in a),
+            ('ui credit paid guard', 'if (payMethod === "آجل" && paid !== 0)' in j),
+            ('no startup fake payment delete', "DELETE FROM credit_payments WHERE method='آجل'" not in a),
+          ]
+          bad = [name for name, ok in checks if not ok]
+          if bad:
+              raise SystemExit('verification failed: ' + ', '.join(bad))
+          PY
+
+      - name: Commit and remove workflow
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app.py public/app.js
-          git commit -m "Fix credit payment overpayment and ledger status"
+          git commit -m "Fix credit invoice accounting and startup data mutations"
           git push
-      - name: Remove one-time workflow
-        if: success()
-        run: |
           git rm .github/workflows/credit-safety-hotfix.yml
-          git commit -m "Remove one-time credit safety hotfix workflow"
+          git commit -m "Remove one-time credit safety workflow"
           git push
