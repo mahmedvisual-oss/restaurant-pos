@@ -1974,9 +1974,17 @@ function printDepositVoucher(r) {
     <div class="muted">${new Date().toLocaleString()}</div>
   </body></html>`);
   w.document.close();
-  w.focus();
-  w.print();
-  w.close();
+
+  // Keep the popup alive until the browser has started the print dialog.
+  setTimeout(() => {
+    try {
+      w.focus();
+      w.print();
+    } catch (e) {
+      console.error("DEPOSIT PRINT ERROR:", e);
+      toast("⚠️ " + t("toast.allowPopups"));
+    }
+  }, 150);
 }
 
 // ===== سند قبض (تحصيل آجل من العميل) =====
