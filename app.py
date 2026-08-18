@@ -300,17 +300,17 @@ if CLOUD_DB:
                 pass
             _CONN_SEM.release()
 
-    def _raw_conn():
-        if CLOUD_DB:
-            _CONN_SEM.acquire()
-            try:
-                c = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
-            except Exception:
-                _CONN_SEM.release()
-                raise
-            c.row_factory = lambda cur, row: row
-            return _TConn(c)
-        return sqlite3.connect(DB_PATH)
+def _raw_conn():
+    if CLOUD_DB:
+        _CONN_SEM.acquire()
+        try:
+            c = _ts.connect(TURSO_URL, auth_token=TURSO_AUTH_TOKEN)
+        except Exception:
+            _CONN_SEM.release()
+            raise
+        c.row_factory = lambda cur, row: row
+        return _TConn(c)
+    return sqlite3.connect(DB_PATH)
 
 
 def get_db():
