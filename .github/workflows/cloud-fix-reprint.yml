@@ -1,0 +1,70 @@
+name: Cloud Fix Reprint Invoice
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix-reprint:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch printReceipt
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("public/app.js")
+          s = p.read_text(encoding="utf-8")
+
+          old = '''  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
+
+async function reprintInvoice(oid) {'''
+
+          new = '''  w.document.close();
+
+  setTimeout(() => {
+    try {
+      w.focus();
+      w.print();
+    } catch (e) {
+      console.error("REPRINT ERROR:", e);
+      toast("⚠️ " + t("toast.allowPopups"));
+    }
+  }, 100);
+}
+
+async function reprintInvoice(oid) {'''
+
+          if old not in s:
+              raise SystemExit("Target printReceipt block was not found; nothing changed.")
+
+          p.write_text(s.replace(old, new, 1), encoding="utf-8")
+          print("Reprint patch applied.")
+
+      - name: Commit cloud fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/app.js
+          git commit -m "fix: make invoice reprint print reliably"
+          git push
+
+      - name: Remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/cloud-fix-reprint.yml
+          git commit -m "chore: remove temporary cloud fix workflow"
+          git push
