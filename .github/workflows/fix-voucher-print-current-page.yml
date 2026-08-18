@@ -1,0 +1,117 @@
+name: Fix voucher reprint without popup
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix: voucher reprint without popup') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch voucher printing
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+
+          helper = r'''
+function createSamePagePrintTarget() {
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(frame);
+  const doc = frame.contentDocument || frame.contentWindow.document;
+  let html = "";
+  return {
+    document: {
+      write(value) { html += String(value); },
+      close() {
+        doc.open();
+        doc.write(html);
+        doc.close();
+      }
+    },
+    focus() { frame.contentWindow.focus(); },
+    print() {
+      frame.contentWindow.print();
+      setTimeout(() => frame.remove(), 1000);
+    }
+  };
+}
+'''
+
+          if 'function createSamePagePrintTarget()' not in s:
+              marker = '// ===== سند قبض مستقل'
+              if marker not in s:
+                  marker = '// ===== سند قبض'
+              if marker not in s:
+                  raise SystemExit('voucher marker not found')
+              s = s.replace(marker, helper + '\n' + marker, 1)
+
+          for fn in ('printDepositVoucher', 'printCreditReceipt'):
+              start = s.find('function ' + fn + '(')
+              if start < 0:
+                  raise SystemExit(fn + ' not found')
+              next_start = s.find('\nfunction ', start + 10)
+              if next_start < 0:
+                  raise SystemExit('next function marker not found after ' + fn)
+              block = s[start:next_start]
+
+              block, n = re.subn(
+                  r'const w = window\\.open\\("", "_blank", "[^"]+"\\);\\s*if \(!w\) \{ toast\("⚠️ " \+ t\("toast\\.allowPopups"\)\); return; \}',
+                  'const w = createSamePagePrintTarget();',
+                  block,
+                  count=1,
+              )
+              if n != 1:
+                  raise SystemExit('popup constructor not found in ' + fn)
+
+              block, n = re.subn(
+                  r'\\n\\s*setTimeout\(\(\) => \{\\s*try \{\\s*w\\.focus\(\);\\s*w\\.print\(\);\\s*\} catch \(e\) \{.*?\\n\\s*\}, 150\);',
+                  '\n  try {\n    w.focus();\n    w.print();\n  } catch (e) {\n    console.error("VOUCHER PRINT ERROR:", e);\n    toast("⚠️ " + t("toast.printError"));\n  }',
+                  block,
+                  count=1,
+                  flags=re.S,
+              )
+              if n != 1:
+                  raise SystemExit('delayed print block not found in ' + fn)
+
+              s = s[:start] + block + s[next_start:]
+
+          p.write_text(s, encoding='utf-8')
+          print('PATCHED')
+
+      - name: Verify patch
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path('public/app.js').read_text(encoding='utf-8')
+          assert 'function createSamePagePrintTarget()' in s
+          for fn in ('printDepositVoucher', 'printCreditReceipt'):
+              start = s.find('function ' + fn + '(')
+              end = s.find('\nfunction ', start + 10)
+              block = s[start:end]
+              assert 'createSamePagePrintTarget()' in block, fn + ' still uses popup'
+              assert 'window.open' not in block, fn + ' still contains window.open'
+              assert 'w.print();' in block, fn + ' has no print call'
+          print('VERIFIED: deposit and credit voucher reprint no longer use window.open.')
+
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js
+          git rm .github/workflows/fix-voucher-print-current-page.yml
+          git commit -m 'fix: voucher reprint without popup' \
+            && git push
