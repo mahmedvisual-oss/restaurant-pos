@@ -1,0 +1,65 @@
+name: Fix credit receipt reprint
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch credit receipt printing
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path("public/app.js")
+          s = p.read_text(encoding="utf-8")
+
+          old = '''  w.document.close();
+  w.focus();
+  w.print();
+  w.close();
+}
+
+function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {'''
+
+          new = '''  w.document.close();
+
+  // Do not close the popup before the browser opens the print dialog.
+  // This is important for re-printing credit receipts from the reports screen.
+  setTimeout(() => {
+    try {
+      w.focus();
+      w.print();
+    } catch (e) {
+      console.error("CREDIT RECEIPT PRINT ERROR:", e);
+      toast("⚠️ " + t("toast.allowPopups"));
+    }
+  }, 150);
+}
+
+function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {'''
+
+          if old not in s:
+              raise SystemExit("Target printCreditReceipt block not found; no change made.")
+
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding="utf-8")
+          print("Credit receipt reprint fixed.")
+
+      - name: Commit fix and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/app.js
+          git rm .github/workflows/fix-credit-reprint.yml
+          git commit -m "fix: make credit receipt reprint reliable"
+          git push
