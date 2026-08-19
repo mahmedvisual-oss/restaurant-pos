@@ -284,7 +284,51 @@
     }
   }
 
+  async function resolveReceiptLink(r) {
+    if (r.order_id) return r;
+
+    try {
+      const d = await api("/api/credit/receipts?from=&to=");
+      const items = Array.isArray(d.items) ? d.items : [];
+
+      const receiptNo = String(r.receipt_no || "").trim();
+      const ledgerId = Number(r.ledger_id) || 0;
+      const amount = Number(r.amount) || 0;
+
+      let hit = items.find(function (x) {
+        return receiptNo && String(x.receipt_no || "").trim() === receiptNo;
+      });
+
+      if (!hit && ledgerId) {
+        hit = items.find(function (x) {
+          return Number(x.ledger_id) === ledgerId &&
+                 Math.abs((Number(x.amount) || 0) - amount) < 0.01;
+        });
+      }
+
+      if (hit) {
+        r.order_id = hit.order_id ? String(hit.order_id) : "";
+        r.employee = hit.employee || r.employee || "";
+        r.phone = hit.phone || r.phone || "";
+        r.customer_name = hit.customer_name || r.customer_name || "";
+        r.ledger_id = Number(hit.ledger_id || r.ledger_id || 0);
+      }
+
+      console.log("CLOUD VOUCHER LINK:", {
+        receipt_no: r.receipt_no,
+        ledger_id: r.ledger_id,
+        order_id: r.order_id
+      });
+
+      return r;
+    } catch (e) {
+      console.error("CLOUD VOUCHER LINK ERROR:", e);
+      return r;
+    }
+  }
+
   async function showDetails(r) {
+    r = await resolveReceiptLink(r);
     closeModal();
 
     const modal = document.createElement("div");
