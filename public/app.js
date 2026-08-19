@@ -1753,7 +1753,7 @@ async function confirmPayment() {
   }
 }
 
-function printReceipt(o) {
+function printReceipt(o, existingWindow = null) {
   const name = RESTAURANT_NAME;
   const rows = o.items.map(i => {
     const mods = (i.modifiers && i.modifiers.length) 
@@ -1761,7 +1761,7 @@ function printReceipt(o) {
       : "";
     return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
   }).join("");
-  const w = window.open("", "_blank", "width=320,height=600");
+  const w = existingWindow || window.open("", "_blank", "width=320,height=600");
   if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
   const dir = document.documentElement.dir;
   w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("receipt")} #${o.order_id}</title><style>
@@ -1804,16 +1804,31 @@ function printReceipt(o) {
     <div class="muted">${new Date().toLocaleString()}</div>
   </body></html>`);
   w.document.close();
-  w.focus();
-  w.print();
-  w.close();
+  setTimeout(() => {
+    try {
+      w.focus();
+      w.print();
+    } catch (e) {
+      console.error("PRINT ERROR:", e);
+      toast("\u26A0\uFE0F " + t("toast.allowPopups"));
+    }
+  }, 100);
 }
 
 async function reprintInvoice(oid) {
+  const w = window.open("", "_blank", "width=320,height=600");
+  if (!w) {
+    toast("\u26A0\uFE0F " + t("toast.allowPopups"));
+    return;
+  }
+
   try {
     const o = await api("/api/orders/" + oid);
-    printReceipt(o);
-  } catch (e) { toast(e.message); }
+    printReceipt(o, w);
+  } catch (e) {
+    try { w.close(); } catch (_) {}
+    toast(e.message);
+  }
 }
 
 // ===== سند مردودات (استرداد) =====
