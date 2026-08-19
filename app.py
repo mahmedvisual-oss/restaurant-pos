@@ -2232,24 +2232,50 @@ def api_credit_settle():
     if amount <= 0:
         conn.close()
         return jsonify({"error": "مبلغ غير صالح"}), 400
-    new_paid = round(row["paid"] + amount, 2)
-    if new_paid > row["total"]:
-        new_paid = row["total"]
-    remaining = round(row["total"] - new_paid, 2)
-    status = "settled" if remaining <= 0 else "open"
-    c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
-              (new_paid, status, lid))
-    c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-              "VALUES (?,?,?,?, datetime('now','localtime'))",
-              (lid, amount, method, u["name"]))
-    pid = c.lastrowid
-    receipt_no = "CP-%d-%05d" % (_now().year, pid)
-    c.execute("UPDATE credit_payments SET receipt_no=? WHERE id=?", (receipt_no, pid))
-    conn.commit()
+    remaining_before = round((row["total"] or 0) - (row["paid"] or 0), 2)
+    if amount > remaining_before + 0.001:
+        conn.close()
+        return jsonify({"error": f"المبلغ أكبر من المتبقي ({remaining_before:.2f})"}), 400
+    new_paid = round((row["paid"] or 0) + amount, 2)
+    remaining = round((row["total"] or 0) - new_paid, 2)
+    status = "settled" if remaining <= 0.001 else "open"
+    now_sql = _now_sql()
+    try:
+        # A customer collection is a real receipt: create the deposit voucher
+        # and the credit payment together so neither record can exist alone.
+        c.execute(
+            "INSERT INTO deposit_vouchers "
+            "(receipt_no, customer_name, phone, party_date, description, amount, method, transfer_ref, transfer_name, employee, date) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (None, row["customer_name"] or "", row["phone"] or "", now_sql[:10],
+             f"تحصيل آجل #{lid}", amount, method,
+             str(data.get("transfer_ref") or "").strip() or None,
+             str(data.get("transfer_name") or "").strip() or None,
+             u["name"], now_sql))
+        voucher_id = c.lastrowid
+        receipt_no = "QC-%d-%05d" % (_now().year, voucher_id)
+        c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, voucher_id))
+
+        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
+                  (new_paid, status, lid))
+        c.execute(
+            "INSERT INTO credit_payments (ledger_id, amount, method, employee, date, transfer_ref, transfer_name, receipt_no, deposit_voucher_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (lid, amount, method, u["name"], now_sql,
+             str(data.get("transfer_ref") or "").strip() or None,
+             str(data.get("transfer_name") or "").strip() or None,
+             receipt_no, voucher_id))
+        pid = c.lastrowid
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
     conn.close()
-    receipt = {"receipt_no": receipt_no, "ledger_id": lid, "customer_name": row["customer_name"],
+    receipt = {"receipt_no": receipt_no, "voucher_id": voucher_id, "payment_id": pid,
+               "ledger_id": lid, "customer_name": row["customer_name"],
                "phone": row["phone"] or "", "amount": amount, "method": method,
-               "employee": u["name"], "date": _now_sql()}
+               "employee": u["name"], "date": now_sql}
     audit("credit_pay", f"تحصيل آجل #{lid} بمبلغ {amount:.2f} ({method}) - {receipt_no}")
     return jsonify({"ok": True, "remaining": remaining, "status": status, "receipt": receipt})
 
