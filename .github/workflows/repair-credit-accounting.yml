@@ -1,4 +1,4 @@
-name: Repair credit accounting
+name: Repair credit collection linkage
 on:
   workflow_dispatch:
   push:
@@ -10,20 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Repair legacy fake credit payments
+      - name: Fix credit collection and receipt linkage
         shell: python
         run: |
           from pathlib import Path
-          p=Path('app.py'); s=p.read_text(encoding='utf-8')
-          old='''        if closed_paid > 0:\n            c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "\n                      "VALUES (?,?,?,?,?)", (lid, closed_paid, "آجل", "مدير", ro["date"] or _now_sql()))\n'''
-          new='''        # IMPORTANT: creating an invoice on credit is NOT a collection.\n        # Do not create credit_payments here; payments are created only by an\n        # actual collection/receipt endpoint. Legacy fake rows are cleaned below.\n'''
-          if old not in s: raise SystemExit('legacy fake-payment block not found')
-          s=s.replace(old,new,1)
-          marker='''    # تنظيف الدفع الزائد القديم: لا رصيد برصيد سالب ولا paid أكبر من total (يُحسب الفرق كباقي رُدّ)\n'''
-          cleanup='''    # Remove legacy rows that were incorrectly created with the invoice method "آجل".\n    # They are not real collections and must never inflate customer payments.\n    c.execute("DELETE FROM credit_payments WHERE method='آجل'")\n'''
-          if marker not in s: raise SystemExit('cleanup marker not found')
-          s=s.replace(marker,cleanup+marker,1)
-          p.write_text(s,encoding='utf-8')
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''    new_paid = round(row["paid"] + amount, 2)\n    if new_paid > row["total"]:\n        new_paid = row["total"]\n    remaining = round(row["total"] - new_paid, 2)\n    status = "settled" if remaining <= 0 else "open"\n    c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",\n              (new_paid, status, lid))\n    c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "\n              "VALUES (?,?,?,?, datetime('now','localtime'))",\n              (lid, amount, method, u["name"]))\n    pid = c.lastrowid\n    receipt_no = "CP-%d-%05d" % (_now().year, pid)\n    c.execute("UPDATE credit_payments SET receipt_no=? WHERE id=?", (receipt_no, pid))\n    conn.commit()\n    conn.close()\n    receipt = {"receipt_no": receipt_no, "ledger_id": lid, "customer_name": row["customer_name"],\n               "phone": row["phone"] or "", "amount": amount, "method": method,\n               "employee": u["name"], "date": _now_sql()}\n'''
+          new = '''    remaining_before = round((row["total"] or 0) - (row["paid"] or 0), 2)\n    if amount > remaining_before + 0.001:\n        conn.close()\n        return jsonify({"error": f"المبلغ أكبر من المتبقي ({remaining_before:.2f})"}), 400\n    new_paid = round((row["paid"] or 0) + amount, 2)\n    remaining = round((row["total"] or 0) - new_paid, 2)\n    status = "settled" if remaining <= 0.001 else "open"\n    now_sql = _now_sql()\n    try:\n        # A customer collection is a real receipt: create the deposit voucher\n        # and the credit payment together so neither record can exist alone.\n        c.execute(\n            "INSERT INTO deposit_vouchers "\n            "(receipt_no, customer_name, phone, party_date, description, amount, method, transfer_ref, transfer_name, employee, date) "\n            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",\n            (None, row["customer_name"] or "", row["phone"] or "", now_sql[:10],\n             f"تحصيل آجل #{lid}", amount, method,\n             str(data.get("transfer_ref") or "").strip() or None,\n             str(data.get("transfer_name") or "").strip() or None,\n             u["name"], now_sql))\n        voucher_id = c.lastrowid\n        receipt_no = "QC-%d-%05d" % (_now().year, voucher_id)\n        c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, voucher_id))\n\n        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",\n                  (new_paid, status, lid))\n        c.execute(\n            "INSERT INTO credit_payments (ledger_id, amount, method, employee, date, transfer_ref, transfer_name, receipt_no, deposit_voucher_id) "\n            "VALUES (?,?,?,?,?,?,?,?,?)",\n            (lid, amount, method, u["name"], now_sql,\n             str(data.get("transfer_ref") or "").strip() or None,\n             str(data.get("transfer_name") or "").strip() or None,\n             receipt_no, voucher_id))\n        pid = c.lastrowid\n        conn.commit()\n    except Exception:\n        conn.rollback()\n        conn.close()\n        raise\n    conn.close()\n    receipt = {"receipt_no": receipt_no, "voucher_id": voucher_id, "payment_id": pid,\n               "ledger_id": lid, "customer_name": row["customer_name"],\n               "phone": row["phone"] or "", "amount": amount, "method": method,\n               "employee": u["name"], "date": now_sql}\n'''
+          if old not in s:
+              raise SystemExit('credit settle block not found; aborting without changes')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
       - name: Syntax check
         run: python -m py_compile app.py
       - name: Commit repair
@@ -33,5 +31,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/workflows/repair-credit-accounting.yml
           git add app.py
-          git commit -m 'Fix credit invoices being counted as collections' || exit 0
+          git commit -m 'Fix credit collections to create linked receipt vouchers' || exit 0
           git push origin HEAD:main
