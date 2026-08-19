@@ -1923,132 +1923,312 @@ function printRefundReceipt(r) {
 // ===== سند قبض (دفعة مقدمة للحفلات الخاصة) =====
 function printDepositVoucher(r) {
   const name = RESTAURANT_NAME;
-  const dir = document.documentElement.dir;
-  const w = window.open("", "_blank", "width=340,height=650");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
-  const methodN = METHOD_NAMES[r.method] ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar) : (r.method || "نقدي");
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("depositVoucher")} ${r.receipt_no}</title><style>
-    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
-    h3{margin:4px 0}.muted{font-size:11px;color:#555}
-    .dash{border-top:1px dashed #000;margin:6px 0}
-    table{width:100%;border-collapse:collapse}td{padding:3px 0}
-    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
-    .logo{font-size:24px;margin:4px 0}
-    .badge{background:#059669;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
-    .summary-box{background:#f0fdf4;border:1px solid #86efac;border-radius:4px;padding:8px;margin:6px 0}
-    .amount-big{font-size:20px;font-weight:bold;color:#059669}
-    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
-    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
-  </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
-    <h3>${name}</h3>
-    <div class="muted">${t("appSubtitle")}</div>
-    <div class="badge">🧾 ${t("depositVoucher")}</div>
-    <div class="muted">${t("dvReceiptNo")}: <b>${r.receipt_no}</b></div>
-    <div class="dash"></div>
-    <table>
-      <tr><td class="right">${t("dvPCustomer")}</td><td class="left">${escapeHtml(r.customer_name || "—")}</td></tr>
-      ${r.phone ? `<tr><td class="right">${t("dvPPhone")}</td><td class="left">${escapeHtml(r.phone)}</td></tr>` : ""}
-      ${r.party_date ? `<tr><td class="right">${t("dvPPartyDate")}</td><td class="left">${escapeHtml(r.party_date)}</td></tr>` : ""}
-      ${r.description ? `<tr><td class="right">${t("dvPOccasion")}</td><td class="left">${escapeHtml(r.description)}</td></tr>` : ""}
-      <tr><td class="right">${t("dvPDate")}</td><td class="left">${r.date}</td></tr>
-      <tr><td class="right">${t("dvPCashier")}</td><td class="left">${escapeHtml(r.employee || "")}</td></tr>
-    </table>
-    <div class="dash"></div>
-    <div class="summary-box">
-      <table>
-        <tr><td class="right">${t("paidAmount")}</td><td class="left amount-big">${fmtCur(r.amount)}</td></tr>
-        <tr><td class="right">${t("dvPMethod")}</td><td class="left">${methodN}</td></tr>
+  const dir = document.documentElement.dir || "rtl";
+
+  const methodN = METHOD_NAMES[r.method]
+    ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar)
+    : (r.method || "نقدي");
+
+  let modal = document.getElementById("deposit-receipt-print-modal");
+
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "deposit-receipt-print-modal";
+    modal.style.cssText =
+      "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;" +
+      "display:flex;align-items:center;justify-content:center;padding:20px;";
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div id="deposit-receipt-print-content"
+         dir="${dir}"
+         style="background:#fff;color:#000;width:340px;max-width:95vw;
+         padding:18px;border-radius:8px;
+         box-shadow:0 10px 40px rgba(0,0,0,.3);
+         font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
+
+      <img src="/logo.png" alt="logo"
+           style="width:30px;height:30px;margin:4px 0">
+
+      <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
+
+      <div class="muted">${t("appSubtitle")}</div>
+
+      <div class="badge"
+           style="background:#059669;color:#fff;display:inline-block;
+           padding:3px 12px;border-radius:4px;font-size:14px;
+           font-weight:bold;margin:4px 0">
+        🧾 ${t("depositVoucher")}
+      </div>
+
+      <div class="muted">
+        ${t("dvReceiptNo")}: <b>${escapeHtml(r.receipt_no || "")}</b>
+      </div>
+
+      <div class="dash"
+           style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td class="right">${t("dvPCustomer")}</td>
+          <td class="left">${escapeHtml(r.customer_name || "—")}</td>
+        </tr>
+
+        ${r.phone ? `
+        <tr>
+          <td class="right">${t("dvPPhone")}</td>
+          <td class="left">${escapeHtml(r.phone)}</td>
+        </tr>` : ""}
+
+        ${r.party_date ? `
+        <tr>
+          <td class="right">${t("dvPPartyDate")}</td>
+          <td class="left">${escapeHtml(r.party_date)}</td>
+        </tr>` : ""}
+
+        ${r.description ? `
+        <tr>
+          <td class="right">${t("dvPOccasion")}</td>
+          <td class="left">${escapeHtml(r.description)}</td>
+        </tr>` : ""}
+
+        <tr>
+          <td class="right">${t("dvPDate")}</td>
+          <td class="left">${escapeHtml(r.date || "")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("dvPCashier")}</td>
+          <td class="left">${escapeHtml(r.employee || "")}</td>
+        </tr>
       </table>
-    </div>
-    ${r.transfer_ref ? `<table>
-      <tr><td class="right" style="color:#2563eb;font-weight:bold">${t("dvPTransferRef")}</td><td class="left" style="font-weight:bold">${escapeHtml(r.transfer_ref)}${r.transfer_name ? " (" + escapeHtml(r.transfer_name) + ")" : ""}</td></tr>
-    </table>` : ""}
-    <div class="dash"></div>
-    <div class="sig">
-      <div>${t("dvPSignReceiver")}<div class="line">${t("dvPSignCustomer")}</div></div>
-      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
-      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
-    </div>
-    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
-    <div class="muted">${new Date().toLocaleString()}</div>
-  </body></html>`);
-  w.document.close();
 
-  // Keep the popup alive until the browser has started the print dialog.
-  setTimeout(() => {
-    try {
-      w.focus();
-      w.print();
-    } catch (e) {
-      console.error("DEPOSIT PRINT ERROR:", e);
-      toast("⚠️ " + t("toast.allowPopups"));
-    }
-  }, 150);
+      <div class="dash"
+           style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div class="summary-box"
+           style="background:#f0fdf4;border:1px solid #86efac;
+           border-radius:4px;padding:8px;margin:6px 0">
+
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td class="right">${t("paidAmount")}</td>
+            <td class="left"
+                style="font-size:20px;font-weight:bold;color:#059669">
+              ${fmtCur(r.amount)}
+            </td>
+          </tr>
+
+          <tr>
+            <td class="right">${t("dvPMethod")}</td>
+            <td class="left">${escapeHtml(methodN)}</td>
+          </tr>
+        </table>
+      </div>
+
+      ${r.transfer_ref ? `
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td class="right"
+              style="color:#2563eb;font-weight:bold">
+            ${t("dvPTransferRef")}
+          </td>
+          <td class="left" style="font-weight:bold">
+            ${escapeHtml(r.transfer_ref)}
+            ${r.transfer_name
+              ? " (" + escapeHtml(r.transfer_name) + ")"
+              : ""}
+          </td>
+        </tr>
+      </table>` : ""}
+
+      <div class="dash"
+           style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div class="sig"
+           style="display:flex;justify-content:space-between;
+           margin-top:28px;font-size:12px">
+
+        <div>
+          ${t("dvPSignReceiver")}
+          <div class="line">${t("dvPSignCustomer")}</div>
+        </div>
+
+        <div>
+          ${t("dvPSignCashier")}
+          <div class="line">${t("dvPSignCashier")}</div>
+        </div>
+
+        <div>
+          ${t("dvPSignManager")}
+          <div class="line">${t("dvPManager")}</div>
+        </div>
+
+      </div>
+
+      <div class="muted" style="margin-top:10px">
+        ${t("thanks")}
+      </div>
+
+      <div class="muted">
+        ${new Date().toLocaleString()}
+      </div>
+
+      <div style="margin-top:18px;display:flex;gap:8px;justify-content:center">
+
+        <button id="deposit-receipt-print-button" type="button">
+          🖨️ ${t("print")}
+        </button>
+
+        <button id="deposit-receipt-close-button" type="button">
+          ✕ ${t("close")}
+        </button>
+
+      </div>
+
+    </div>
+  `;
+
+  document.getElementById("deposit-receipt-close-button").onclick = function () {
+    modal.remove();
+  };
+
+  document.getElementById("deposit-receipt-print-button").onclick = function () {
+    const content = document.getElementById("deposit-receipt-print-content");
+    if (!content) return;
+
+    const oldBody = document.body.innerHTML;
+
+    document.body.innerHTML = content.outerHTML;
+
+    window.print();
+
+    document.body.innerHTML = oldBody;
+
+    window.location.reload();
+  };
 }
-
 // ===== سند قبض (تحصيل آجل من العميل) =====
 function printCreditReceipt(r) {
   const name = RESTAURANT_NAME;
-  const dir = document.documentElement.dir;
-  const w = window.open("", "_blank", "width=340,height=650");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
-  const methodN = METHOD_NAMES[r.method] ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar) : (r.method || "نقدي");
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("creditVoucher")} ${r.receipt_no}</title><style>
-    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
-    h3{margin:4px 0}.muted{font-size:11px;color:#555}
-    .dash{border-top:1px dashed #000;margin:6px 0}
-    table{width:100%;border-collapse:collapse}td{padding:3px 0}
-    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
-    .logo{font-size:24px;margin:4px 0}
-    .badge{background:#2563eb;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
-    .summary-box{background:#eff6ff;border:1px solid #93c5fd;border-radius:4px;padding:8px;margin:6px 0}
-    .amount-big{font-size:20px;font-weight:bold;color:#2563eb}
-    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
-    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
-  </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
-    <h3>${name}</h3>
-    <div class="muted">${t("appSubtitle")}</div>
-    <div class="badge">💵 ${t("creditVoucher")}</div>
-    <div class="muted">${t("dvReceiptNo")}: <b>${r.receipt_no}</b></div>
-    <div class="dash"></div>
-    <table>
-      <tr><td class="right">${t("dvPCustomer")}</td><td class="left">${escapeHtml(r.customer_name || "—")}</td></tr>
-      ${r.phone ? `<tr><td class="right">${t("dvPPhone")}</td><td class="left">${escapeHtml(r.phone)}</td></tr>` : ""}
-      ${r.ledger_id ? `<tr><td class="right">${t("custInvoice")}</td><td class="left">#${r.ledger_id}</td></tr>` : ""}
-      <tr><td class="right">${t("dvPDate")}</td><td class="left">${r.date}</td></tr>
-      <tr><td class="right">${t("dvPCashier")}</td><td class="left">${escapeHtml(r.employee || "")}</td></tr>
-    </table>
-    <div class="dash"></div>
-    <div class="summary-box">
-      <table>
-        <tr><td class="right">${t("paidAmount")}</td><td class="left amount-big">${fmtCur(r.amount)}</td></tr>
-        <tr><td class="right">${t("dvPMethod")}</td><td class="left">${methodN}</td></tr>
+  const dir = document.documentElement.dir || "rtl";
+  const methodN = METHOD_NAMES[r.method]
+    ? (METHOD_NAMES[r.method][currentLang] || METHOD_NAMES[r.method].ar)
+    : (r.method || "نقدي");
+
+  let modal = document.getElementById("credit-receipt-print-modal");
+
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "credit-receipt-print-modal";
+    modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;";
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div id="credit-receipt-print-content"
+         dir="${dir}"
+         style="background:#fff;color:#000;width:340px;max-width:95vw;padding:18px;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
+
+      <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
+      <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
+      <div class="muted">${t("appSubtitle")}</div>
+      <div class="badge" style="background:#2563eb;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0">
+        💵 ${t("creditVoucher")}
+      </div>
+
+      <div class="muted">${t("dvReceiptNo")}: <b>${escapeHtml(r.receipt_no || "")}</b></div>
+      <div class="dash" style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td class="right">${t("dvPCustomer")}</td>
+          <td class="left">${escapeHtml(r.customer_name || "—")}</td>
+        </tr>
+
+        ${r.phone ? `
+        <tr>
+          <td class="right">${t("dvPPhone")}</td>
+          <td class="left">${escapeHtml(r.phone)}</td>
+        </tr>` : ""}
+
+        ${r.ledger_id ? `
+        <tr>
+          <td class="right">${t("custInvoice")}</td>
+          <td class="left">#${escapeHtml(r.ledger_id)}</td>
+        </tr>` : ""}
+
+        <tr>
+          <td class="right">${t("dvPDate")}</td>
+          <td class="left">${escapeHtml(r.date || "")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("dvPCashier")}</td>
+          <td class="left">${escapeHtml(r.employee || "")}</td>
+        </tr>
       </table>
-    </div>
-    <div class="dash"></div>
-    <div class="sig">
-      <div>${t("dvPSignReceiver")}<div class="line">${t("dvPSignCustomer")}</div></div>
-      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
-      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
-    </div>
-    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
-    <div class="muted">${new Date().toLocaleString()}</div>
-  </body></html>`);
-  w.document.close();
 
-  setTimeout(() => {
-    try {
-      w.focus();
-      w.print();
-    } catch (e) {
-      console.error("CREDIT RECEIPT PRINT ERROR:", e);
-      toast("⚠️ " + t("toast.allowPopups"));
-    }
-  }, 150);
+      <div class="dash" style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div class="summary-box" style="background:#eff6ff;border:1px solid #93c5fd;border-radius:4px;padding:8px;margin:6px 0">
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td class="right">${t("paidAmount")}</td>
+            <td class="left amount-big" style="font-size:20px;font-weight:bold;color:#2563eb">
+              ${fmtCur(r.amount)}
+            </td>
+          </tr>
+          <tr>
+            <td class="right">${t("dvPMethod")}</td>
+            <td class="left">${escapeHtml(methodN)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="dash" style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div class="sig" style="display:flex;justify-content:space-between;margin-top:28px;font-size:12px">
+        <div>${t("dvPSignReceiver")}<div class="line">${t("dvPSignCustomer")}</div></div>
+        <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
+        <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
+      </div>
+
+      <div class="muted" style="margin-top:10px">${t("thanks")}</div>
+      <div class="muted">${new Date().toLocaleString()}</div>
+
+      <div style="margin-top:18px;display:flex;gap:8px;justify-content:center">
+        <button id="credit-receipt-print-button" type="button">
+          🖨️ ${t("print")}
+        </button>
+
+        <button id="credit-receipt-close-button" type="button">
+          ✕ ${t("close")}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("credit-receipt-close-button").onclick = function () {
+    modal.remove();
+  };
+
+  document.getElementById("credit-receipt-print-button").onclick = function () {
+    const content = document.getElementById("credit-receipt-print-content");
+    if (!content) return;
+
+    const oldBody = document.body.innerHTML;
+
+    document.body.innerHTML = content.outerHTML;
+
+    window.print();
+
+    document.body.innerHTML = oldBody;
+
+    window.location.reload();
+  };
 }
-
 
 function printCustReceipt(kind, receiptNo, customerName, phone, amount, method, date, ledgerId) {
   const r = {
@@ -2990,7 +3170,6 @@ function renderReportDetail() {
             <td>${o.credit_name ? `<button class="btn btn-sm" style="padding:2px 6px" onclick="event.stopPropagation();followCustomer(decodeURIComponent('${encodeURIComponent(o.credit_name)}'))" title="${t("rptFollowCustomer")}">👁 ${escapeHtml(o.credit_name)}</button>` : '<span style="color:var(--muted)">—</span>'}</td>
             <td>${(o.items || []).map(i => `${i.qty || 1}× ${escapeHtml(i.name)}`).join(", ")}</td>
             <td>${fmtCur(o.total)}</td>
-            <td><button class="btn btn-sm" onclick="event.stopPropagation();reprintInvoice(${o.id})" title="${t("rptReprint")}">🖨️ ${t("rptReprint")}</button></td>
           </tr>
           <tr id="order-detail-${o.id}" class="report-order-detail">
             <td colspan="9">
