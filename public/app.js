@@ -1793,7 +1793,7 @@ function printReceipt(o, existingWindow = null) {
     return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
   }).join("");
   const w = existingWindow || window.open("", "_blank", "width=320,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  if (!w) { console.error("POPUP_BLOCKED_A"); toast("⚠️ POPUP_BLOCKED_A"); return; }
   const dir = document.documentElement.dir;
   w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("receipt")} #${o.order_id}</title><style>
     body{font-family:'Segoe UI',Tahoma,sans-serif;width:290px;margin:0 auto;text-align:center;font-size:13px;color:#000}
@@ -1841,14 +1841,14 @@ function printReceipt(o, existingWindow = null) {
       w.print();
     } catch (e) {
       console.error("PRINT ERROR:", e);
-      toast("⚠️ " + t("toast.allowPopups"));
+      console.error("POPUP_BLOCKED_B"); toast("⚠️ POPUP_BLOCKED_B");
     }
   }, 100);
 }
 
 async function reprintInvoice(oid) {
   const w = window.open("", "_blank", "width=320,height=600");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
+  if (!w) { console.error("POPUP_BLOCKED_A"); toast("⚠️ POPUP_BLOCKED_A"); return; }
   try {
     const o = await api("/api/orders/" + oid);
     printReceipt(o, w);
