@@ -1,141 +1,541 @@
-/* CLOUD VOUCHER FIX v2
- * Loaded after app.js. Handles credit-payment voucher rows without window.open().
+/* CLOUD VOUCHER FIX v3
+ * Credit voucher report:
+ * - opens invoice details from the current page
+ * - loads the linked order from /api/orders/<id>
+ * - shows linked credit payments
+ * - prints without window.open()
  */
-(function(){
-  'use strict';
+(function () {
+  "use strict";
 
-  function esc(v){
-    if (typeof escapeHtml === 'function') return escapeHtml(v == null ? '' : String(v));
-    return String(v == null ? '' : v).replace(/[&<>"']/g, function(m){
-      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m];
+  const ROOT_ID = "cloud-voucher-detail-modal";
+  const PRINT_ID = "cloud-voucher-print-layer";
+  const PRINT_STYLE_ID = "cloud-voucher-print-style";
+
+  function esc(v) {
+    if (typeof escapeHtml === "function") {
+      return escapeHtml(v == null ? "" : String(v));
+    }
+    return String(v == null ? "" : v).replace(/[&<>"']/g, function (m) {
+      return ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[m];
     });
   }
 
-  function printHtmlSamePage(html){
-    // Never use window.open(). Render the receipt in a temporary print layer
-    // inside the current page, then invoke the browser's print dialog.
-    var old = document.getElementById('cloud-voucher-print-layer');
-    if (old) old.remove();
-    var layer = document.createElement('div');
-    layer.id = 'cloud-voucher-print-layer';
-    layer.style.cssText = 'position:fixed;inset:0;background:#fff;z-index:2147483647;overflow:auto;';
+  function money(v) {
+    return typeof fmtCur === "function"
+      ? fmtCur(Number(v) || 0)
+      : String(Number(v) || 0);
+  }
+
+  function method(v) {
+    return typeof methodName === "function"
+      ? methodName(v)
+      : (v || "????");
+  }
+
+  function closeModal() {
+    const el = document.getElementById(ROOT_ID);
+    if (el) el.remove();
+  }
+
+  function cleanupPrint() {
+    const layer = document.getElementById(PRINT_ID);
+    const style = document.getElementById(PRINT_STYLE_ID);
+    if (layer) layer.remove();
+    if (style) style.remove();
+  }
+
+  function printCurrentPage(html) {
+    cleanupPrint();
+
+    const layer = document.createElement("div");
+    layer.id = PRINT_ID;
     layer.innerHTML = html;
+    layer.style.cssText =
+      "position:fixed;inset:0;background:#fff;color:#000;" +
+      "z-index:2147483647;overflow:auto;padding:20px;box-sizing:border-box;";
+
     document.body.appendChild(layer);
 
-    var style = document.createElement('style');
-    style.id = 'cloud-voucher-print-style';
-    style.textContent = '@media print { body > *:not(#cloud-voucher-print-layer){display:none!important} #cloud-voucher-print-layer{position:static!important;display:block!important;overflow:visible!important} } @media screen { #cloud-voucher-print-layer{padding:20px;box-sizing:border-box} }';
+    const style = document.createElement("style");
+    style.id = PRINT_STYLE_ID;
+    style.textContent =
+      "@media print {" +
+      "body > *:not(#" + PRINT_ID + "){display:none!important;}" +
+      "#" + PRINT_ID + "{position:static!important;display:block!important;" +
+      "width:100%!important;min-height:0!important;padding:0!important;" +
+      "overflow:visible!important;background:#fff!important;color:#000!important;}" +
+      "}" +
+      "@media screen {" +
+      "#" + PRINT_ID + "{max-width:420px;margin:0 auto;}" +
+      "}";
     document.head.appendChild(style);
 
-    setTimeout(function(){
-      try {
-        window.focus();
-        window.print();
-      } catch(e) {
-        console.error('VOUCHER PRINT ERROR', e);
-        if (typeof toast === 'function') toast('⚠️ تعذر فتح الطباعة');
+    /*
+     * print() is intentionally called from this function after the
+     * print layer already exists. No popup and no window.open().
+     */
+    try {
+      window.focus();
+      window.print();
+    } catch (e) {
+      console.error("VOUCHER PRINT ERROR", e);
+      if (typeof toast === "function") {
+        toast("?? ???? ??? ???????");
       }
-      setTimeout(function(){
-        var l=document.getElementById('cloud-voucher-print-layer'); if(l) l.remove();
-        var st=document.getElementById('cloud-voucher-print-style'); if(st) st.remove();
-      },500);
-    },100);
+    }
+
+    setTimeout(cleanupPrint, 1000);
   }
 
-  function printCreditDirect(r){
-    var dir=document.documentElement.dir || 'ltr';
-    var name=(typeof RESTAURANT_NAME !== 'undefined' ? RESTAURANT_NAME : 'POS');
-    var method=(typeof methodName === 'function' ? methodName(r.method) : (r.method || 'نقدي'));
-    var cur=(typeof fmtCur === 'function' ? fmtCur(Number(r.amount)||0) : String(r.amount||0));
-    var html='<div style="font-family:Segoe UI,Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000;direction:'+dir+'">'
-      +'<img src="/logo.png" style="width:30px;height:30px">'
-      +'<h3>'+esc(name)+'</h3>'
-      +'<div style="font-size:11px;color:#555">'+esc(typeof t==='function'?t('appSubtitle'):'نظام نقاط البيع')+'</div>'
-      +'<div style="margin:10px 0;font-weight:bold">🧾 سند قبض</div>'
-      +'<div style="font-size:11px;color:#555">رقم السند: <b>'+esc(r.receipt_no||'—')+'</b></div>'
-      +'<hr style="border:0;border-top:1px dashed #000;margin:8px 0">'
-      +'<table style="width:100%;border-collapse:collapse"><tr><td style="text-align:right">العميل</td><td style="text-align:left">'+esc(r.customer_name||'—')+'</td></tr>'
-      +'<tr><td style="text-align:right">الهاتف</td><td style="text-align:left">'+esc(r.phone||'—')+'</td></tr>'
-      +'<tr><td style="text-align:right">الفاتورة</td><td style="text-align:left">'+(r.order_id?'#'+esc(r.order_id):(r.ledger_id?'#'+esc(r.ledger_id):'—'))+'</td></tr>'
-      +'<tr><td style="text-align:right">التاريخ</td><td style="text-align:left">'+esc(r.date||'—')+'</td></tr>'
-      +'<tr><td style="text-align:right">الكاشير</td><td style="text-align:left">'+esc(r.employee||'—')+'</td></tr></table>'
-      +'<hr style="border:0;border-top:1px dashed #000;margin:8px 0">'
-      +'<div style="display:flex;justify-content:space-between"><b>المبلغ المحصل</b><b style="font-size:20px">'+cur+'</b></div>'
-      +'<div style="display:flex;justify-content:space-between;margin-top:8px"><b>طريقة الدفع</b><span>'+esc(method)+'</span></div>'
-      +'<hr style="border:0;border-top:1px dashed #000;margin:8px 0">'
-      +'<div style="font-size:11px;color:#555">شكراً لتعاملكم معنا</div></div>';
-    printHtmlSamePage(html);
+  function buildReceiptHtml(r, order) {
+    const dir = document.documentElement.dir || "rtl";
+    const restaurant =
+      typeof RESTAURANT_NAME !== "undefined"
+        ? RESTAURANT_NAME
+        : "POS";
+
+    const items = order && Array.isArray(order.items)
+      ? order.items
+      : [];
+
+    const rows = items.map(function (item) {
+      const subtotal =
+        item.subtotal != null
+          ? item.subtotal
+          : (Number(item.price) || 0) * (Number(item.qty) || 1);
+
+      return (
+        "<tr>" +
+          "<td style='text-align:right;padding:4px 0'>" +
+            esc(item.name || "") +
+            " ?" + esc(item.qty || 1) +
+          "</td>" +
+          "<td style='text-align:left;padding:4px 0'>" +
+            money(subtotal) +
+          "</td>" +
+        "</tr>"
+      );
+    }).join("");
+
+    const invoiceNo = r.order_id
+      ? "#" + esc(r.order_id)
+      : "?";
+
+    const total = order && order.total != null
+      ? order.total
+      : r.amount;
+
+    return (
+      "<div style='" +
+        "direction:" + esc(dir) + ";" +
+        "font-family:Segoe UI,Tahoma,sans-serif;" +
+        "width:300px;margin:0 auto;" +
+        "font-size:13px;color:#000;" +
+      "'>" +
+
+        "<div style='text-align:center'>" +
+          "<img src='/logo.png' style='width:35px;height:35px'>" +
+          "<h3 style='margin:4px 0'>" + esc(restaurant) + "</h3>" +
+          "<div style='font-size:11px;color:#555'>??? ???</div>" +
+        "</div>" +
+
+        "<hr style='border:0;border-top:1px dashed #000;margin:8px 0'>" +
+
+        "<table style='width:100%;border-collapse:collapse'>" +
+          "<tr><td>??? ?????</td><td style='text-align:left'><b>" +
+            esc(r.receipt_no || "?") +
+          "</b></td></tr>" +
+
+          "<tr><td>????????</td><td style='text-align:left'><b>" +
+            invoiceNo +
+          "</b></td></tr>" +
+
+          "<tr><td>???????</td><td style='text-align:left'>" +
+            esc(r.date || "?") +
+          "</td></tr>" +
+
+          "<tr><td>??????</td><td style='text-align:left'>" +
+            esc(r.customer_name || "?") +
+          "</td></tr>" +
+
+          "<tr><td>??????</td><td style='text-align:left'>" +
+            esc(r.phone || "?") +
+          "</td></tr>" +
+
+          "<tr><td>???????</td><td style='text-align:left'>" +
+            esc(r.employee || "?") +
+          "</td></tr>" +
+
+          "<tr><td>????? ?????</td><td style='text-align:left'>" +
+            esc(method(r.method)) +
+          "</td></tr>" +
+        "</table>" +
+
+        (
+          rows
+            ? "<hr style='border:0;border-top:1px dashed #000;margin:8px 0'>" +
+              "<div style='font-weight:bold;margin-bottom:4px'>?????? ????????</div>" +
+              "<table style='width:100%;border-collapse:collapse'>" +
+                rows +
+              "</table>"
+            : ""
+        ) +
+
+        "<hr style='border:0;border-top:1px dashed #000;margin:8px 0'>" +
+
+        "<table style='width:100%;border-collapse:collapse'>" +
+          "<tr><td>?????? ????????</td>" +
+            "<td style='text-align:left;font-weight:bold'>" +
+              money(total) +
+            "</td>" +
+          "</tr>" +
+
+          "<tr><td>?????? ??????</td>" +
+            "<td style='text-align:left;font-weight:bold;font-size:18px'>" +
+              money(r.amount) +
+            "</td>" +
+          "</tr>" +
+        "</table>" +
+
+        "<hr style='border:0;border-top:1px dashed #000;margin:8px 0'>" +
+
+        "<div style='text-align:center;font-size:11px;color:#555'>" +
+          "????? ???????? ????" +
+        "</div>" +
+
+      "</div>"
+    );
   }
 
-  function showVoucherDetails(r){
-    var old=document.getElementById('cloud-voucher-detail-modal'); if(old) old.remove();
-    var dir=document.documentElement.dir || 'ltr';
-    var modal=document.createElement('div');
-    modal.id='cloud-voucher-detail-modal';
-    modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:2147483646;padding:16px;direction:'+dir+';';
-    modal.innerHTML='<div style="background:var(--card,#fff);color:var(--text,#111);border:1px solid var(--border,#ddd);border-radius:14px;padding:20px;width:520px;max-width:96vw;max-height:90vh;overflow:auto">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><b style="font-size:18px">🧾 تفاصيل سند القبض</b><button type="button" class="btn btn-sm" data-voucher-close>✕</button></div>'
-      +'<table style="width:100%;border-collapse:collapse"><tr><td>رقم السند</td><td><b>'+esc(r.receipt_no||'—')+'</b></td></tr>'
-      +'<tr><td>التاريخ</td><td>'+esc(r.date||'—')+'</td></tr><tr><td>العميل</td><td>'+esc(r.customer_name||'—')+'</td></tr>'
-      +'<tr><td>الهاتف</td><td>'+esc(r.phone||'—')+'</td></tr><tr><td>الفاتورة</td><td>'+(r.order_id?'#'+esc(r.order_id):(r.ledger_id?'#'+esc(r.ledger_id):'—'))+'</td></tr>'
-      +'<tr><td>طريقة الدفع</td><td>'+esc(typeof methodName==='function'?methodName(r.method):(r.method||'نقدي'))+'</td></tr>'
-      +'<tr><td>الكاشير</td><td>'+esc(r.employee||'—')+'</td></tr><tr><td>المبلغ المحصل</td><td style="font-weight:bold;color:var(--success,#059669)">'+(typeof fmtCur==='function'?fmtCur(Number(r.amount)||0):esc(r.amount))+'</td></tr></table>'
-      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px"><button type="button" class="btn btn-success" data-voucher-print>🖨️ إعادة الطباعة</button><button type="button" class="btn" data-voucher-close>إغلاق</button></div></div>';
-    document.body.appendChild(modal);
-    modal.addEventListener('click',function(e){
-      if(e.target===modal || e.target.closest('[data-voucher-close]')) modal.remove();
-      if(e.target.closest('[data-voucher-print]')) printCreditDirect(r);
-    });
-  }
+  function getRowData(btn, row) {
+    const onclick = btn.getAttribute("onclick") || "";
 
-  function getVoucherFromRow(row){
-    var c=row.querySelectorAll('td');
-    if(c.length<7) return null;
-    var text=function(i){return c[i]?c[i].textContent.trim():'';};
-    var amountText=text(6).replace(/[^0-9.-]/g,'');
+    /*
+     * Read the actual arguments generated by app.js instead of guessing
+     * column positions.
+     */
+    const m = onclick.match(
+      /printCustReceipt\(\s*['"]credit_payment['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*([0-9.-]+)\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*([0-9.-]+)\s*\)/
+    );
+
+    if (m) {
+      return {
+        receipt_no: decodeURIComponent(m[1] || ""),
+        customer_name: decodeURIComponent(m[2] || ""),
+        phone: decodeURIComponent(m[3] || ""),
+        amount: Number(m[4]) || 0,
+        method: m[5] || "????",
+        date: decodeURIComponent(m[6] || ""),
+        ledger_id: Number(m[7]) || 0,
+        order_id: ""
+      };
+    }
+
+    const cells = row ? row.querySelectorAll("td") : [];
+    if (!cells || cells.length < 7) return null;
+
+    const text = function (i) {
+      return cells[i] ? cells[i].textContent.trim() : "";
+    };
+
+    const orderMatch = text(3).match(/#(\d+)/);
+
     return {
-      receipt_no:text(0), date:text(1), customer_name:text(2),
-      order_id:(text(3).match(/#(\d+)/)||[])[1]||'', method:text(4), employee:text(5),
-      amount:Number(amountText)||0
+      receipt_no: text(0),
+      date: text(1),
+      customer_name: text(2),
+      order_id: orderMatch ? orderMatch[1] : "",
+      method: text(4),
+      employee: text(5),
+      amount: Number(text(6).replace(/[^0-9.-]/g, "")) || 0,
+      ledger_id: 0
     };
   }
 
-  function enhanceRows(){
-    // Do not rely on a fragile CSS attribute selector. Find the actual buttons
-    // and inspect their onclick text instead.
-    document.querySelectorAll('button').forEach(function(btn){
-      var onclick=btn.getAttribute('onclick')||'';
-      if(onclick.indexOf('printCustReceipt')===-1 || onclick.indexOf('credit_payment')===-1) return;
-      if(btn.dataset.cloudVoucherFixed==='1') return;
-      var row=btn.closest('tr'); if(!row) return;
-      btn.dataset.cloudVoucherFixed='1';
+  async function loadOrder(orderId) {
+    if (!orderId) return null;
 
-      // Remove the old popup-based handler completely.
-      btn.removeAttribute('onclick');
-      btn.onclick=function(e){
-        e.preventDefault(); e.stopPropagation();
-        var r=getVoucherFromRow(row);
-        if(r) printCreditDirect(r);
-      };
+    try {
+      return await api("/api/orders/" + encodeURIComponent(orderId));
+    } catch (e) {
+      console.warn("Could not load linked order:", e);
+      return null;
+    }
+  }
 
-      row.dataset.voucherEnhanced='1';
-      row.style.cursor='pointer';
-      row.title='عرض تفاصيل سند القبض';
-      row.addEventListener('click',function(e){
-        if(e.target.closest('button')) return;
-        var r=getVoucherFromRow(row);
-        if(r) showVoucherDetails(r);
+  async function loadPayments(ledgerId) {
+    if (!ledgerId) return [];
+
+    try {
+      const rows = await api(
+        "/api/credit/" + encodeURIComponent(ledgerId) + "/payments"
+      );
+      return Array.isArray(rows) ? rows : [];
+    } catch (e) {
+      console.warn("Could not load credit payments:", e);
+      return [];
+    }
+  }
+
+  async function showDetails(r) {
+    closeModal();
+
+    const modal = document.createElement("div");
+    modal.id = ROOT_ID;
+    modal.style.cssText =
+      "position:fixed;inset:0;background:rgba(0,0,0,.6);" +
+      "z-index:2147483646;display:flex;align-items:center;" +
+      "justify-content:center;padding:15px;box-sizing:border-box;";
+
+    modal.innerHTML =
+      "<div style='" +
+        "background:var(--card,#fff);color:var(--text,#111);" +
+        "width:600px;max-width:96vw;max-height:90vh;" +
+        "overflow:auto;border-radius:14px;padding:20px;" +
+        "box-sizing:border-box;" +
+      "'>" +
+
+        "<div style='display:flex;justify-content:space-between;" +
+          "align-items:center;margin-bottom:15px'>" +
+
+          "<b style='font-size:18px'>?? ?????? ??? ?????</b>" +
+
+          "<button type='button' class='btn btn-sm' data-close>?</button>" +
+        "</div>" +
+
+        "<div data-loading style='text-align:center;padding:25px'>" +
+          "???? ????? ?????? ????????..." +
+        "</div>" +
+
+      "</div>";
+
+    document.body.appendChild(modal);
+
+    modal.addEventListener("click", function (e) {
+      if (
+        e.target === modal ||
+        e.target.closest("[data-close]")
+      ) {
+        closeModal();
+      }
+
+      if (e.target.closest("[data-print]")) {
+        const order = modal.__order || null;
+        printCurrentPage(buildReceiptHtml(r, order));
+      }
+    });
+
+    const order = await loadOrder(r.order_id);
+    const payments = await loadPayments(r.ledger_id);
+
+    modal.__order = order;
+
+    const items = order && Array.isArray(order.items)
+      ? order.items
+      : [];
+
+    const itemsHtml = items.length
+      ? (
+        "<div style='margin-top:15px;font-weight:bold'>?????? ???????</div>" +
+        "<table style='width:100%;border-collapse:collapse;margin-top:6px'>" +
+          "<tr>" +
+            "<th style='text-align:right'>?????</th>" +
+            "<th>??????</th>" +
+            "<th style='text-align:left'>??????</th>" +
+          "</tr>" +
+
+          items.map(function (item) {
+            const subtotal =
+              item.subtotal != null
+                ? item.subtotal
+                : (Number(item.price) || 0) *
+                  (Number(item.qty) || 1);
+
+            return (
+              "<tr>" +
+                "<td style='padding:5px'>" +
+                  esc(item.name || "") +
+                "</td>" +
+                "<td style='text-align:center;padding:5px'>" +
+                  esc(item.qty || 1) +
+                "</td>" +
+                "<td style='text-align:left;padding:5px'>" +
+                  money(subtotal) +
+                "</td>" +
+              "</tr>"
+            );
+          }).join("") +
+
+        "</table>"
+      )
+      : (
+        "<div style='margin-top:15px;color:var(--muted,#777)'>" +
+          (
+            r.order_id
+              ? "???? ????? ?????? ???????? #" + esc(r.order_id)
+              : "?? ???? ?????? ?????? ?????? ???? ?????"
+          ) +
+        "</div>"
+      );
+
+    const paymentsHtml = payments.length
+      ? (
+        "<div style='margin-top:15px;font-weight:bold'>????? ???????</div>" +
+        "<div style='margin-top:6px'>" +
+          payments.map(function (p) {
+            return (
+              "<div style='display:flex;justify-content:space-between;" +
+                "gap:10px;border-bottom:1px solid var(--border,#ddd);" +
+                "padding:6px 0'>" +
+                "<span>" + esc(p.date || "") + "</span>" +
+                "<span>" + esc(method(p.method)) + "</span>" +
+                "<b>" + money(p.amount) + "</b>" +
+              "</div>"
+            );
+          }).join("") +
+        "</div>"
+      )
+      : "";
+
+    const details = modal.querySelector("[data-loading]");
+
+    details.innerHTML =
+      "<table style='width:100%;border-collapse:collapse'>" +
+
+        "<tr><td>??? ?????</td><td><b>" +
+          esc(r.receipt_no || "?") +
+        "</b></td></tr>" +
+
+        "<tr><td>???????</td><td>" +
+          esc(r.date || "?") +
+        "</td></tr>" +
+
+        "<tr><td>??????</td><td>" +
+          esc(r.customer_name || "?") +
+        "</td></tr>" +
+
+        "<tr><td>??????</td><td>" +
+          esc(r.phone || "?") +
+        "</td></tr>" +
+
+        "<tr><td>????????</td><td><b>" +
+          (r.order_id ? "#" + esc(r.order_id) : "?") +
+        "</b></td></tr>" +
+
+        "<tr><td>????? ?????</td><td>" +
+          esc(method(r.method)) +
+        "</td></tr>" +
+
+        "<tr><td>???????</td><td>" +
+          esc(r.employee || "?") +
+        "</td></tr>" +
+
+        "<tr><td>?????? ??????</td>" +
+          "<td style='font-size:18px;font-weight:bold;" +
+            "color:var(--success,#059669)'>" +
+            money(r.amount) +
+          "</td>" +
+        "</tr>" +
+
+      "</table>" +
+
+      itemsHtml +
+      paymentsHtml +
+
+      "<div style='display:flex;gap:8px;justify-content:flex-end;" +
+        "margin-top:18px'>" +
+
+        "<button type='button' class='btn btn-success' data-print>" +
+          "??? ????? ???????" +
+        "</button>" +
+
+        "<button type='button' class='btn' data-close>" +
+          "?????" +
+        "</button>" +
+
+      "</div>";
+  }
+
+  function enhance() {
+    document.querySelectorAll(
+      "button[onclick*=\"printCustReceipt\"]"
+    ).forEach(function (btn) {
+
+      if (btn.dataset.cloudVoucherFixed === "3") return;
+
+      const row = btn.closest("tr");
+      if (!row) return;
+
+      const r = getRowData(btn, row);
+      if (!r) return;
+
+      btn.dataset.cloudVoucherFixed = "3";
+
+      /*
+       * Remove the old inline popup implementation.
+       */
+      btn.removeAttribute("onclick");
+
+      btn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        showDetails(r);
+      });
+
+      row.style.cursor = "pointer";
+      row.title = "??? ?????? ??? ?????";
+
+      row.addEventListener("click", function (e) {
+        if (e.target.closest("button")) return;
+        showDetails(r);
       });
     });
   }
 
-  // Also override the legacy global so any existing inline call cannot invoke
-  // the old window.open() implementation.
-  window.printCustReceipt=function(kind,receiptNo,customerName,phone,amount,method,date,ledgerId){
-    if(kind!=='credit_payment') return;
-    printCreditDirect({receipt_no:decodeURIComponent(receiptNo||''),customer_name:decodeURIComponent(customerName||''),phone:decodeURIComponent(phone||''),amount:Number(amount)||0,method:method||'نقدي',date:decodeURIComponent(date||''),ledger_id:Number(ledgerId)||0});
+  /*
+   * Keep the legacy global safe for any old code that still calls it.
+   */
+  window.printCustReceipt = function (
+    kind,
+    receiptNo,
+    customerName,
+    phone,
+    amount,
+    methodNameValue,
+    date,
+    ledgerId
+  ) {
+    if (kind !== "credit_payment") return;
+
+    showDetails({
+      receipt_no: decodeURIComponent(receiptNo || ""),
+      customer_name: decodeURIComponent(customerName || ""),
+      phone: decodeURIComponent(phone || ""),
+      amount: Number(amount) || 0,
+      method: methodNameValue || "????",
+      date: decodeURIComponent(date || ""),
+      ledger_id: Number(ledgerId) || 0,
+      order_id: ""
+    });
   };
 
-  enhanceRows();
-  new MutationObserver(enhanceRows).observe(document.body,{childList:true,subtree:true});
+  enhance();
+
+  new MutationObserver(function () {
+    enhance();
+  }).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+
+  setTimeout(enhance, 300);
+  setTimeout(enhance, 1000);
+  setTimeout(enhance, 2000);
 })();
