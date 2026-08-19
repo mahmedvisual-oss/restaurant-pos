@@ -1853,73 +1853,231 @@ async function reprintInvoice(oid) {
 // ===== سند مردودات (استرداد) =====
 function printRefundReceipt(r) {
   const name = RESTAURANT_NAME;
+  const dir = document.documentElement.dir || "rtl";
+
   const rows = (r.items || []).map(i => {
     const mods = (i.modifiers && i.modifiers.length)
-      ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>`
+      ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m =>
+          `+ ${escapeHtml(m.name)}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`
+        ).join("<br>")}</div>`
       : "";
-    return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}</td><td class="left">${fmtCur((i.price||0) * (i.qty||1))}</td></tr>`;
-  }).join("");
-  const dir = document.documentElement.dir;
-  const w = window.open("", "_blank", "width=340,height=700");
-  if (!w) { toast("⚠️ " + t("toast.allowPopups")); return; }
-  const methodName = METHOD_NAMES[r.refund_method] ? (METHOD_NAMES[r.refund_method][currentLang] || METHOD_NAMES[r.refund_method].ar) : (r.refund_method || "نقدي");
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("rptRefundTitle")} ${r.receipt_no}</title><style>
-    body{font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px;color:#000}
-    h3{margin:4px 0}.muted{font-size:11px;color:#555}
-    .dash{border-top:1px dashed #000;margin:6px 0}
-    table{width:100%;border-collapse:collapse}td{padding:2px 0}
-    .right{text-align:${dir === "rtl" ? "right" : "left"}}.left{text-align:${dir === "rtl" ? "left" : "right"}}.tot{font-weight:bold;font-size:14px}
-    .logo{font-size:24px;margin:4px 0}
-    .badge{background:#ef4444;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0}
-    .summary-box{background:#fef2f2;border:1px solid #fca5a5;border-radius:4px;padding:8px;margin:6px 0}
-    .sig{display:flex;justify-content:space-between;margin-top:28px;font-size:12px}
-    .sig div{text-align:center}.sig .line{border-top:1px dashed #000;padding-top:4px;margin-top:40px;font-size:11px;color:#333}
-  </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
-    <h3>${name}</h3>
-    <div class="muted">${t("appSubtitle")}</div>
-    <div class="badge">${t("rptRefundBadge")}</div>
-    <div class="muted">${t("rptReceiptNo")}: <b>${r.receipt_no}</b></div>
-    <div class="dash"></div>
-    <table>
-      <tr><td class="right">${t("rptOriginalInvoice")}</td><td class="left">#${r.order_id}</td></tr>
-      <tr><td class="right">${t("rptTable")}</td><td class="left">${r.table_num || "—"}</td></tr>
-      <tr><td class="right">${t("rptDate")}</td><td class="left">${r.date}</td></tr>
-      <tr><td class="right">${t("rptReturnedItems")}:</td></tr>
-    </table>
-    <div class="dash"></div>
-    <table>${rows}</table>
-    <div class="dash"></div>
-    <div class="summary-box">
-      <table>
-        <tr><td class="right">${t("rptSubtotal")}</td><td class="left">${fmtCur(r.subtotal)}</td></tr>
-        <tr><td class="right">${t("tax")}</td><td class="left">${fmtCur(r.tax)}</td></tr>
-        ${r.discount > 0 ? `<tr><td class="right" style="color:#d97706">${t("discount")}</td><td class="left" style="color:#d97706">-${fmtCur(r.discount)}</td></tr>` : ""}
-        <tr class="tot"><td class="right">${t("rptTotalRefund")}</td><td class="left" style="color:#dc2626">${fmtCur(r.total)}</td></tr>
-      </table>
-    </div>
-    <table>
-      <tr><td class="right">${t("rptRefundMethod")}</td><td class="left">${methodName}</td></tr>
-      ${r.refund_ref ? `<tr><td class="right">${t("rptRefundRefLabel")}</td><td class="left">${escapeHtml(r.refund_ref)}</td></tr>` : ""}
-      ${r.reason ? `<tr><td class="right">${t("rptRefundReason")}</td><td class="left">${escapeHtml(r.reason)}</td></tr>` : ""}
-      <tr><td class="right">${t("rptCashier")}</td><td class="left">${escapeHtml(r.requested_by || "")}</td></tr>
-      <tr><td class="right">${t("rptApprovedBy")}</td><td class="left">${escapeHtml(r.approved_by || "")}</td></tr>
-    </table>
-    <div class="dash"></div>
-    <div class="sig">
-      <div>${t("rptSignature")}<div class="line">${t("dvPSignCustomer")}</div></div>
-      <div>${t("dvPSignCashier")}<div class="line">${t("dvPSignCashier")}</div></div>
-      <div>${t("dvPSignManager")}<div class="line">${t("dvPManager")}</div></div>
-    </div>
-    <div class="muted" style="margin-top:10px">${t("thanks")}</div>
-    <div class="muted">${new Date().toLocaleString()}</div>
-  </body></html>`);
-  w.document.close();
-  w.focus();
-  w.print();
-  w.close();
-}
 
+    return `<tr>
+      <td class="right">
+        ${i.emoji || ""} ${escapeHtml(i.name || "")} ×${i.qty}${mods}
+      </td>
+      <td class="left">${fmtCur((i.price || 0) * (i.qty || 1))}</td>
+    </tr>`;
+  }).join("");
+
+  const methodN = METHOD_NAMES[r.refund_method]
+    ? (METHOD_NAMES[r.refund_method][currentLang] || METHOD_NAMES[r.refund_method].ar)
+    : (r.refund_method || "نقدي");
+
+  let modal = document.getElementById("refund-receipt-print-modal");
+
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "refund-receipt-print-modal";
+    modal.style.cssText =
+      "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;" +
+      "display:flex;align-items:center;justify-content:center;padding:20px;";
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `
+    <div id="refund-receipt-print-content"
+         dir="${dir}"
+         style="background:#fff;color:#000;width:340px;max-width:95vw;
+         padding:18px;border-radius:8px;
+         box-shadow:0 10px 40px rgba(0,0,0,.3);
+         font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
+
+      <img src="/logo.png" alt="logo"
+           style="width:30px;height:30px;margin:4px 0">
+
+      <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
+
+      <div style="font-size:11px;color:#555">${t("appSubtitle")}</div>
+
+      <div style="background:#ef4444;color:#fff;display:inline-block;
+                  padding:3px 12px;border-radius:4px;font-size:14px;
+                  font-weight:bold;margin:4px 0">
+        ${t("rptRefundBadge")}
+      </div>
+
+      <div style="font-size:11px;color:#555">
+        ${t("rptReceiptNo")}: <b>${escapeHtml(r.receipt_no || "")}</b>
+      </div>
+
+      <div style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td class="right">${t("rptOriginalInvoice")}</td>
+          <td class="left">#${escapeHtml(r.order_id || "")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("rptTable")}</td>
+          <td class="left">${escapeHtml(r.table_num || "—")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("rptDate")}</td>
+          <td class="left">${escapeHtml(r.date || "")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("rptReturnedItems")}</td>
+          <td class="left"></td>
+        </tr>
+      </table>
+
+      <div style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <table style="width:100%;border-collapse:collapse">
+        ${rows}
+      </table>
+
+      <div style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div style="background:#fef2f2;border:1px solid #fca5a5;
+                  border-radius:4px;padding:8px;margin:6px 0">
+
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td class="right">${t("rptSubtotal")}</td>
+            <td class="left">${fmtCur(r.subtotal)}</td>
+          </tr>
+
+          <tr>
+            <td class="right">${t("tax")}</td>
+            <td class="left">${fmtCur(r.tax)}</td>
+          </tr>
+
+          ${r.discount > 0 ? `
+          <tr>
+            <td class="right" style="color:#d97706">${t("discount")}</td>
+            <td class="left" style="color:#d97706">-${fmtCur(r.discount)}</td>
+          </tr>` : ""}
+
+          <tr>
+            <td class="right" style="font-weight:bold">
+              ${t("rptTotalRefund")}
+            </td>
+            <td class="left"
+                style="font-weight:bold;font-size:18px;color:#dc2626">
+              ${fmtCur(r.total)}
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <table style="width:100%;border-collapse:collapse">
+
+        <tr>
+          <td class="right">${t("rptRefundMethod")}</td>
+          <td class="left">${escapeHtml(methodN)}</td>
+        </tr>
+
+        ${r.refund_ref ? `
+        <tr>
+          <td class="right">${t("rptRefundRefLabel")}</td>
+          <td class="left">${escapeHtml(r.refund_ref)}</td>
+        </tr>` : ""}
+
+        ${r.reason ? `
+        <tr>
+          <td class="right">${t("rptRefundReason")}</td>
+          <td class="left">${escapeHtml(r.reason)}</td>
+        </tr>` : ""}
+
+        <tr>
+          <td class="right">${t("rptCashier")}</td>
+          <td class="left">${escapeHtml(r.requested_by || "")}</td>
+        </tr>
+
+        <tr>
+          <td class="right">${t("rptApprovedBy")}</td>
+          <td class="left">${escapeHtml(r.approved_by || "")}</td>
+        </tr>
+
+      </table>
+
+      <div style="border-top:1px dashed #000;margin:6px 0"></div>
+
+      <div style="display:flex;justify-content:space-between;
+                  margin-top:28px;font-size:12px">
+
+        <div>
+          ${t("rptSignature")}
+          <div style="border-top:1px dashed #000;padding-top:4px;
+                      margin-top:40px;font-size:11px;color:#333">
+            ${t("dvPSignCustomer")}
+          </div>
+        </div>
+
+        <div>
+          ${t("dvPSignCashier")}
+          <div style="border-top:1px dashed #000;padding-top:4px;
+                      margin-top:40px;font-size:11px;color:#333">
+            ${t("dvPSignCashier")}
+          </div>
+        </div>
+
+        <div>
+          ${t("dvPSignManager")}
+          <div style="border-top:1px dashed #000;padding-top:4px;
+                      margin-top:40px;font-size:11px;color:#333">
+            ${t("dvPManager")}
+          </div>
+        </div>
+
+      </div>
+
+      <div style="font-size:11px;color:#555;margin-top:10px">
+        ${t("thanks")}
+      </div>
+
+      <div style="font-size:11px;color:#555">
+        ${new Date().toLocaleString()}
+      </div>
+
+      <div style="margin-top:18px;display:flex;gap:8px;justify-content:center">
+
+        <button id="refund-receipt-print-button" type="button">
+          🖨️ ${t("print")}
+        </button>
+
+        <button id="refund-receipt-close-button" type="button">
+          ✕ ${t("close")}
+        </button>
+
+      </div>
+
+    </div>
+  `;
+
+  document.getElementById("refund-receipt-close-button").onclick = function () {
+    modal.remove();
+  };
+
+  document.getElementById("refund-receipt-print-button").onclick = function () {
+    const content = document.getElementById("refund-receipt-print-content");
+    if (!content) return;
+
+    const oldBody = document.body.innerHTML;
+
+    document.body.innerHTML = content.outerHTML;
+
+    window.print();
+
+    document.body.innerHTML = oldBody;
+
+    window.location.reload();
+  };
+}
 // ===== سند قبض (دفعة مقدمة للحفلات الخاصة) =====
 function printDepositVoucher(r) {
   const name = RESTAURANT_NAME;
