@@ -1,3 +1,11 @@
+/* PRINT_POPUP_TRACE */
+(function () {
+  const originalOpen = window.open;
+  window.open = function () {
+    console.error("PRINT_POPUP_TRACE: window.open CALLED", new Error().stack);
+    return originalOpen.apply(this, arguments);
+  };
+})();
 let MENU = [];
 let CATEGORY_ORDER = {};
 let cart = [];
@@ -5179,19 +5187,33 @@ function hiddenPrint(html) {
   const frame = document.createElement("iframe");
   frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
   document.body.appendChild(frame);
+
   const doc = frame.contentDocument || frame.contentWindow.document;
-  doc.open();
-  doc.write(html);
-  doc.close();
-  setTimeout(() => {
-    try {
-      frame.contentWindow.focus();
-      frame.contentWindow.print();
-    } catch (e) {
-      toast("⚠️ " + t("toast.allowPopups"));
-    }
-    setTimeout(() => { frame.remove(); }, 5000);
-  }, 500);
+
+  try {
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+      } catch (e) {
+        console.error("HIDDEN PRINT ERROR:", e);
+        toast("⚠️ PRINT ERROR: " + (e && e.message ? e.message : String(e)));
+      }
+
+      setTimeout(() => {
+        frame.remove();
+      }, 5000);
+    }, 500);
+
+  } catch (e) {
+    console.error("HIDDEN PRINT SETUP ERROR:", e);
+    toast("⚠️ PRINT SETUP ERROR: " + (e && e.message ? e.message : String(e)));
+    frame.remove();
+  }
 }
 
 document.getElementById("paid").addEventListener("input", calcChange);
