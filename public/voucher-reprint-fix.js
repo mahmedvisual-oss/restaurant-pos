@@ -87,7 +87,7 @@
       const toLabel = `طاولة ${to.num ?? toTable}${sectionName(to) ? " — " + sectionName(to) : ""}`;
       if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel}؟\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلن يتم الدمج إذا كان هناك دفع مسجل أو فاتورة آجل.`)) return;
       try {
-        const res = await api("/api/order/merge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_table: Number(selectedTable), to_table: Number(toTable) }) });
+        const res = await api("/api/order/transfer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_table: Number(selectedTable), to_table: Number(toTable), merge: true }) });
         if (!res.ok) throw new Error(res.error || "تعذر دمج الطلبين");
         closeModal("transfer-modal");
         if (typeof loadTables === "function") await loadTables();
