@@ -1370,10 +1370,13 @@ function updateStats() {
 function showTransferModal() {
   if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
   const cur = tableData[selectedTable];
-  const curLabel = cur ? cur.num : selectedTable;
+  const curSection = cur ? (cur.section_name || names[cur.section] || cur.section || "") : "";
+  const curLabel = cur ? `${cur.num} — ${curSection}` : selectedTable;
   let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${curLabel}</b> إلى:</div>`;
   for (const [tid, tb] of Object.entries(tableData)) {
     if (parseInt(tid) === selectedTable) continue;
+    const sectionName = tb.section_name || names[tb.section] || tb.section || "";
+    const tableLabel = `${tb.num} — ${sectionName}`;
     const status = tb.active ? "🔴" : "🟢";
     const disabled = tb.active ? "disabled" : "";
     html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>
