@@ -274,13 +274,91 @@
   }
 }
 
-/* ===== Mobile cart: 2 items per row ===== */
+/* ===== Mobile invoice layout fix ===== */
 @media (max-width: 700px) {
+  .mobile-panel-active[data-panel="cart"] {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .invoice-header {
+    order: 1 !important;
+    flex: 0 0 auto !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] #reservation-bar,
+  .mobile-panel-active[data-panel="cart"] #invoice-tabs {
+    order: 2 !important;
+    flex: 0 0 auto !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .guests-row {
+    order: 3 !important;
+    flex: 0 0 auto !important;
+  }
+
+  /* The promo field moves below the item list without changing its IDs or JS. */
+  .mobile-panel-active[data-panel="cart"] .promo-row {
+    order: 5 !important;
+    flex: 0 0 auto !important;
+    margin: 4px 7px 5px !important;
+    padding: 4px 6px !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 7px !important;
+    background: var(--input) !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .cart-list {
+    order: 4 !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 4px 6px 6px !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .summary {
+    order: 6 !important;
+    flex: 0 0 auto !important;
+    margin: 0 7px 4px !important;
+    padding: 5px 8px !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .summary-header {
+    margin-bottom: 2px !important;
+    padding-bottom: 3px !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .summary-row {
+    padding: 1px 0 !important;
+    line-height: 1.2 !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .summary-row.total {
+    font-size: 16px !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .actions {
+    order: 7 !important;
+    flex: 0 0 auto !important;
+    max-height: 30vh !important;
+    overflow-y: auto !important;
+    padding: 4px 7px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* Two items per row, while keeping cards compact and readable. */
   #cart-list {
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 5px !important;
-    padding: 4px !important;
   }
 
   #cart-list .cart-item {
@@ -309,28 +387,33 @@
   #cart-list .cart-item .bottom {
     gap: 3px !important;
     flex-wrap: wrap !important;
+    margin-top: 4px !important;
+    min-height: 28px !important;
   }
 
   #cart-list .cart-item .qty-btn {
-    width: 28px !important;
-    height: 28px !important;
-    min-width: 28px !important;
+    width: 27px !important;
+    height: 27px !important;
+    min-width: 27px !important;
     padding: 0 !important;
     font-size: 13px !important;
   }
 
   #cart-list .cart-item .qty-num {
-    min-width: 22px !important;
+    min-width: 20px !important;
     font-size: 12px !important;
     text-align: center !important;
   }
 
-  #cart-list .cart-item .unit {
-    font-size: 10px !important;
-  }
-
+  #cart-list .cart-item .unit,
   #cart-list .cart-item .cart-mods,
   #cart-list .cart-item .cart-item-note {
     font-size: 10px !important;
   }
+}
+
+@media (max-width: 380px) {
+  #cart-list .cart-item .name { font-size: 11px !important; }
+  #cart-list .cart-item .amount { font-size: 10px !important; }
+  .mobile-panel-active[data-panel="cart"] .actions { max-height: 28vh !important; }
 }
