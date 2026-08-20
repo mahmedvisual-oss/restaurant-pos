@@ -71,8 +71,6 @@ def api_order_merge():
              merged_tax, merged_discount, merged_total, merged_guests, target["id"])
         )
 
-        # لا نسجل الطلب المصدر كـ cancelled حتى لا يظهر في تقارير الإلغاءات.
-        # حالة merged تبقي الأثر التاريخي للطلب وتمنعه من الظهور كطلب نشط.
         c.execute("UPDATE orders SET status='merged' WHERE id=?", (source["id"],))
         conn.commit()
         num, section = _table_ref(c, to_table)
