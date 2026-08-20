@@ -1,0 +1,43 @@
+name: Fix transfer section labels v2
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[transfer-labels-v2]') == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch transfer section label resolver
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+
+          old_map = '''const TABLE_SECTION_NAMES = {\n  families: "العائلات",\n  vip: "VIP",\n  hall: "الصالة",\n  takeaway: "تيك أواي",\n};'''
+          new_map = '''const TABLE_SECTION_NAMES = {\n  family: "العائلات",\n  families: "العائلات",\n  "family-room": "العائلات",\n  "family_room": "العائلات",\n  عائلات: "العائلات",\n  العائلات: "العائلات",\n  vip: "VIP",\n  hall: "الصالة",\n  main: "الصالة",\n  dining: "الصالة",\n  restaurant: "الصالة",\n  الصالة: "الصالة",\n  takeaway: "تيك أواي",\n  "take-away": "تيك أواي",\n  "take_away": "تيك أواي",\n  تيك_أواي: "تيك أواي",\n};\n\nfunction tableSectionLabel(tb) {\n  if (!tb) return "";\n  const raw = tb.section_name ?? tb.sectionName ?? tb.section ?? tb.area_name ?? tb.area ?? tb.group ?? tb.room ?? "";\n  if (!raw) return "";\n  const key = String(raw).trim().toLowerCase();\n  return TABLE_SECTION_NAMES[key] || TABLE_SECTION_NAMES[String(raw).trim()] || String(raw).trim();\n}'''
+          if old_map in s:
+              s = s.replace(old_map, new_map, 1)
+
+          s = s.replace('cur ? (cur.section_name || TABLE_SECTION_NAMES[cur.section] || cur.section || "") : ""', 'cur ? tableSectionLabel(cur) : ""')
+          s = s.replace('tb.section_name || TABLE_SECTION_NAMES[tb.section] || tb.section || ""', 'tableSectionLabel(tb)')
+
+          # Make the label visibly distinct and always render the section when available.
+          s = s.replace('const tableLabel = `${tb.num} — ${sectionName}`;', 'const tableLabel = sectionName ? `${tb.num} — ${sectionName}` : `${tb.num}`;')
+          s = s.replace('const curLabel = cur ? `${cur.num} — ${curSection}` : selectedTable;', 'const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;')
+
+          p.write_text(s, encoding='utf-8')
+      - name: Validate JavaScript
+        run: node --check public/app.js
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/app.js
+          git rm .github/workflows/fix-transfer-section-labels-v2.yml
+          git commit -m "Fix transfer section labels [transfer-labels-v2]"
+          git push
