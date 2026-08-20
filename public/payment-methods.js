@@ -112,4 +112,15 @@
   document.addEventListener("DOMContentLoaded", function () {
     enhancePaymentMethods();
   });
+
+  // The payment bundle is already loaded by index.html. Reuse that stable hook
+  // to load the professional reports layer without changing the main template.
+  document.addEventListener("DOMContentLoaded", function () {
+    if (document.querySelector('script[data-professional-reports="1"]')) return;
+    const s = document.createElement("script");
+    s.src = "/professional-reports.js?v=1";
+    s.dataset.professionalReports = "1";
+    s.async = false;
+    document.head.appendChild(s);
+  });
 })();
