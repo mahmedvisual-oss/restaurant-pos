@@ -40,7 +40,6 @@
         const name = typeof RESTAURANT_NAME !== "undefined" ? RESTAURANT_NAME : "POS";
         const dir = document.documentElement.dir || "rtl";
 
-        // Render inside the current POS page. No window.open(), no popup blocker.
         let box = document.getElementById("credit-settlement-receipt-modal");
         if (!box) {
           box = document.createElement("div");
@@ -78,6 +77,56 @@
         toast("❌ " + (e.message || e));
       }
     };
+
+    // ===== إصلاح نافذة نقل الطلب =====
+    // app.js كان يحسب اسم القسم ثم لا يعرضه داخل أزرار النقل،
+    // مما جعل الأرقام المتكررة من أقسام مختلفة تبدو كأنها طاولات مكررة.
+    window.showTransferModal = function () {
+      if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
+      const cur = tableData[selectedTable];
+      const curSection = cur && typeof tableSectionLabel === "function" ? tableSectionLabel(cur) : "";
+      const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;
+      let html = `<div style="margin-bottom:14px">نقل طلب الطاولة <b>${esc(curLabel)}</b> إلى:</div>`;
+
+      const groups = new Map();
+      const order = ["families", "vip", "hall", "takeaway"];
+      for (const [tid, tb] of Object.entries(tableData || {})) {
+        if (parseInt(tid) === Number(selectedTable)) continue;
+        const section = typeof tableSectionLabel === "function" ? tableSectionLabel(tb) : (tb.section || "أخرى");
+        const key = String(section || "أخرى");
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push([tid, tb]);
+      }
+
+      const rank = (name) => {
+        const n = String(name || "").toLowerCase();
+        const i = order.indexOf(n);
+        return i >= 0 ? i : 99;
+      };
+      const sortedGroups = Array.from(groups.entries()).sort((a, b) => {
+        const ar = rank(a[0]), br = rank(b[0]);
+        if (ar !== br) return ar - br;
+        return a[0].localeCompare(b[0], "ar");
+      });
+
+      for (const [sectionName, entries] of sortedGroups) {
+        entries.sort((a, b) => (Number(a[1].num) || 0) - (Number(b[1].num) || 0));
+        html += `<div style="margin:12px 0 6px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border,#444);padding-bottom:5px">📍 ${esc(sectionName)}</div>`;
+        for (const [tid, tb] of entries) {
+          const num = tb.num ?? tid;
+          const status = tb.active ? "🔴 مشغولة" : (tb.reserved ? "📅 محجوزة" : "🟢 متاحة");
+          const disabled = tb.active ? "disabled" : "";
+          const label = `طاولة ${num} — ${sectionName}`;
+          html += `<button class="transfer-table-btn" onclick="transferOrder(${Number(tid)})" ${disabled} title="${esc(label)} — ${esc(status)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;margin:4px 0;padding:10px 12px">` +
+            `<span><b>${esc(label)}</b></span><span style="font-size:12px;white-space:nowrap">${esc(status)}</span></button>`;
+        }
+      }
+
+      if (!sortedGroups.length) html += `<div style="padding:12px;color:var(--muted,#999)">لا توجد طاولات أخرى للنقل.</div>`;
+      document.getElementById("transfer-body").innerHTML = html;
+      openModal("transfer-modal");
+    };
+
     return true;
   }
 
