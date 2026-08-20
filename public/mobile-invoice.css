@@ -354,66 +354,83 @@
     -webkit-overflow-scrolling: touch !important;
   }
 
-  /* Two items per row, while keeping cards compact and readable. */
+  /* Keep invoice items one per row. The two-column layout belongs to action buttons, not items. */
   #cart-list {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 5px !important;
+    display: block !important;
+    width: 100% !important;
   }
 
   #cart-list .cart-item {
+    width: 100% !important;
     min-width: 0 !important;
-    padding: 6px !important;
-    margin: 0 !important;
-    border-radius: 6px !important;
+    box-sizing: border-box !important;
+    padding: 9px 9px 8px !important;
+    margin: 0 0 6px !important;
+    border-radius: 7px !important;
   }
 
   #cart-list .cart-item .top {
-    gap: 3px !important;
+    gap: 8px !important;
   }
 
   #cart-list .cart-item .name {
     min-width: 0 !important;
-    font-size: 12px !important;
-    line-height: 1.25 !important;
+    font-size: 15px !important;
+    line-height: 1.35 !important;
     overflow-wrap: anywhere !important;
   }
 
   #cart-list .cart-item .amount {
-    font-size: 11px !important;
+    font-size: 14px !important;
     white-space: nowrap !important;
   }
 
   #cart-list .cart-item .bottom {
-    gap: 3px !important;
+    gap: 7px !important;
     flex-wrap: wrap !important;
-    margin-top: 4px !important;
-    min-height: 28px !important;
+    margin-top: 7px !important;
+    min-height: 34px !important;
   }
 
   #cart-list .cart-item .qty-btn {
-    width: 27px !important;
-    height: 27px !important;
-    min-width: 27px !important;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
     padding: 0 !important;
-    font-size: 13px !important;
+    font-size: 18px !important;
   }
 
   #cart-list .cart-item .qty-num {
-    min-width: 20px !important;
-    font-size: 12px !important;
+    min-width: 28px !important;
+    font-size: 14px !important;
     text-align: center !important;
   }
 
   #cart-list .cart-item .unit,
   #cart-list .cart-item .cart-mods,
   #cart-list .cart-item .cart-item-note {
-    font-size: 10px !important;
+    font-size: 11px !important;
+  }
+
+  /* Keep the payment/action buttons in two columns on normal phones. */
+  .mobile-panel-active[data-panel="cart"] .actions-row {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+    width: 100% !important;
+  }
+
+  .mobile-panel-active[data-panel="cart"] .actions-row > .btn,
+  .mobile-panel-active[data-panel="cart"] .actions-row > button {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
   }
 }
 
 @media (max-width: 380px) {
-  #cart-list .cart-item .name { font-size: 11px !important; }
-  #cart-list .cart-item .amount { font-size: 10px !important; }
+  #cart-list .cart-item .name { font-size: 14px !important; }
+  #cart-list .cart-item .amount { font-size: 13px !important; }
   .mobile-panel-active[data-panel="cart"] .actions { max-height: 28vh !important; }
 }
