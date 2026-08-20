@@ -88,7 +88,7 @@ async function mergeOrder(toTable) {
   const sectionName = (tb) => typeof tableSectionLabel === 'function' ? tableSectionLabel(tb) : (tb.section || '');
   const fromLabel = `طاولة ${from.num ?? selectedTable}${sectionName(from) ? ' — ' + sectionName(from) : ''}`;
   const toLabel = `طاولة ${to.num ?? toTable}${sectionName(to) ? ' — ' + sectionName(to) : ''}`;
-  if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel}؟\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلا يمكن الدمج بعد تسجيل دفعة أو مع فاتورة آجل.`)) return;
+  if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel؟}\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلا يمكن الدمج بعد تسجيل دفعة أو مع فاتورة آجل.`)) return;
   try {
     const res = await api('/api/order/merge', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({from_table:Number(selectedTable),to_table:Number(toTable)})});
     if (!res.ok) throw new Error(res.error || 'تعذر دمج الطلبين');
@@ -111,3 +111,5 @@ async function mergeOrder(toTable) {
           if git diff --cached --quiet; then exit 0; fi
           git commit -m 'Finalize table merge implementation'
           git push
+
+# Trigger note: keep this workflow active while table merge is being finalized.
