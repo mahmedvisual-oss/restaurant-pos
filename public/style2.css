@@ -1892,3 +1892,21 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
 }
 
 
+
+/* ===== Mobile invoice payment methods ===== */
+@media (max-width: 700px) {
+  #pay-methods {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  #pay-methods .pay-method {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 38px !important;
+    padding: 6px 5px !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+  }
+}
