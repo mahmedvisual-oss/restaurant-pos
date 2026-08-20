@@ -38,11 +38,31 @@ const SIZE_LABELS = { sm: "100%", md: "115%", lg: "125%", xl: "140%" };
 let uiSize = "sm";
 let uiTheme = "dark";
 const TABLE_SECTION_NAMES = {
+  family: "العائلات",
   families: "العائلات",
+  "family-room": "العائلات",
+  "family_room": "العائلات",
+  عائلات: "العائلات",
+  العائلات: "العائلات",
   vip: "VIP",
   hall: "الصالة",
+  main: "الصالة",
+  dining: "الصالة",
+  restaurant: "الصالة",
+  الصالة: "الصالة",
   takeaway: "تيك أواي",
+  "take-away": "تيك أواي",
+  "take_away": "تيك أواي",
+  تيك_أواي: "تيك أواي",
 };
+
+function tableSectionLabel(tb) {
+  if (!tb) return "";
+  const raw = tb.section_name ?? tb.sectionName ?? tb.section ?? tb.area_name ?? tb.area ?? tb.group ?? tb.room ?? "";
+  if (!raw) return "";
+  const key = String(raw).trim().toLowerCase();
+  return TABLE_SECTION_NAMES[key] || TABLE_SECTION_NAMES[String(raw).trim()] || String(raw).trim();
+}
 
 function applyUiPrefs() {
   uiTheme = localStorage.getItem("pos_theme") || "dark";
@@ -1376,13 +1396,13 @@ function updateStats() {
 function showTransferModal() {
   if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
   const cur = tableData[selectedTable];
-  const curSection = cur ? (cur.section_name || TABLE_SECTION_NAMES[cur.section] || cur.section || "") : "";
-  const curLabel = cur ? `${cur.num} — ${curSection}` : selectedTable;
+  const curSection = cur ? tableSectionLabel(cur) : "";
+  const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;
   let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${curLabel}</b> إلى:</div>`;
   for (const [tid, tb] of Object.entries(tableData)) {
     if (parseInt(tid) === selectedTable) continue;
-    const sectionName = tb.section_name || TABLE_SECTION_NAMES[tb.section] || tb.section || "";
-    const tableLabel = `${tb.num} — ${sectionName}`;
+    const sectionName = tableSectionLabel(tb);
+    const tableLabel = sectionName ? `${tb.num} — ${sectionName}` : `${tb.num}`;
     const status = tb.active ? "🔴" : "🟢";
     const disabled = tb.active ? "disabled" : "";
     html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>
