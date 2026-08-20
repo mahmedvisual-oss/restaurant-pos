@@ -1,1 +1,2 @@
-Temporary trigger for the table transfer/merge patch workflow. This file can be removed after the workflow completes.
+Temporary trigger for the table transfer/merge patch workflow.
+Trigger refresh: 2026-08-20T06:20:00Z
