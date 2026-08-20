@@ -2,6 +2,37 @@
 (function () {
   "use strict";
 
+  /* Load the expanded payment-method module after app.js without changing the existing HTML. */
+  (function loadPaymentMethods() {
+    if (document.querySelector('script[data-payment-methods="1"]')) return;
+    const s = document.createElement("script");
+    s.src = "/payment-methods.js?v=20260820-1";
+    s.dataset.paymentMethods = "1";
+    document.head.appendChild(s);
+  })();
+
+  /* Keep every new method distinct in receipts and reports. */
+  const extraNames = {
+    "بطاقة ائتمان - BCA": { ar: "بطاقة ائتمان - BCA", en: "Credit Card - BCA", id: "Kartu Kredit - BCA" },
+    "بطاقة ائتمان - Mandiri": { ar: "بطاقة ائتمان - Mandiri", en: "Credit Card - Mandiri", id: "Kartu Kredit - Mandiri" },
+    "بطاقة خصم - BCA": { ar: "بطاقة خصم - BCA", en: "Debit Card - BCA", id: "Kartu Debit - BCA" },
+    "بطاقة خصم - Mandiri": { ar: "بطاقة خصم - Mandiri", en: "Debit Card - Mandiri", id: "Kartu Debit - Mandiri" },
+    "محفظة - GoPay": { ar: "محفظة - GoPay", en: "Wallet - GoPay", id: "E-Wallet - GoPay" },
+    "محفظة - OVO": { ar: "محفظة - OVO", en: "Wallet - OVO", id: "E-Wallet - OVO" },
+    "محفظة - DANA": { ar: "محفظة - DANA", en: "Wallet - DANA", id: "E-Wallet - DANA" },
+    "محفظة - ShopeePay": { ar: "محفظة - ShopeePay", en: "Wallet - ShopeePay", id: "E-Wallet - ShopeePay" },
+    "محفظة - LinkAja": { ar: "محفظة - LinkAja", en: "Wallet - LinkAja", id: "E-Wallet - LinkAja" },
+    "تحويل بنكي - BCA": { ar: "تحويل بنكي - BCA", en: "Bank Transfer - BCA", id: "Transfer Bank - BCA" },
+    "تحويل بنكي - Mandiri": { ar: "تحويل بنكي - Mandiri", en: "Bank Transfer - Mandiri", id: "Transfer Bank - Mandiri" },
+    "تحويل بنكي - بنك آخر": { ar: "تحويل بنكي - بنك آخر", en: "Bank Transfer - Other Bank", id: "Transfer Bank - Bank Lain" }
+  };
+
+  function installPaymentAccountingLabels() {
+    if (typeof METHOD_NAMES !== "undefined") Object.assign(METHOD_NAMES, extraNames);
+    if (typeof TRANSFER_METHODS !== "undefined") Object.keys(extraNames).forEach(function (m) { TRANSFER_METHODS.add(m); });
+  }
+  installPaymentAccountingLabels();
+
   function esc(v) {
     if (typeof escapeHtml === "function") return escapeHtml(v == null ? "" : String(v));
     return String(v == null ? "" : v).replace(/[&<>\"']/g, function (m) {
@@ -10,6 +41,7 @@
   }
 
   function install() {
+    installPaymentAccountingLabels();
     if (typeof api !== "function" || typeof fmtCur !== "function") return false;
     if (window.__creditSettlementReceiptFixed) return true;
     window.__creditSettlementReceiptFixed = true;
@@ -41,14 +73,13 @@
       } catch (e) { toast("❌ " + (e.message || e)); }
     };
 
-    window.showTransferModal = function () {
+    window.showTransferModal = async function () {
       if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
       const cur = tableData[selectedTable];
       const curSection = cur && typeof tableSectionLabel === "function" ? tableSectionLabel(cur) : "";
       const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;
       let html = `<div style="margin-bottom:14px">نقل / دمج طلب الطاولة <b>${esc(curLabel)}</b> إلى:</div>`;
       const groups = new Map();
-      const order = ["families", "vip", "hall", "takeaway"];
       for (const [tid, tb] of Object.entries(tableData || {})) {
         if (parseInt(tid) === Number(selectedTable)) continue;
         const section = typeof tableSectionLabel === "function" ? tableSectionLabel(tb) : (tb.section || "أخرى");
@@ -56,8 +87,7 @@
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push([tid, tb]);
       }
-      const rank = (name) => { const n = String(name || "").toLowerCase(); const i = order.indexOf(n); return i >= 0 ? i : 99; };
-      const sortedGroups = Array.from(groups.entries()).sort((a, b) => { const ar = rank(a[0]), br = rank(b[0]); if (ar !== br) return ar - br; return a[0].localeCompare(b[0], "ar"); });
+      const sortedGroups = Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0], "ar"));
       for (const [sectionName, entries] of sortedGroups) {
         entries.sort((a, b) => (Number(a[1].num) || 0) - (Number(b[1].num) || 0));
         html += `<div style="margin:12px 0 6px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border,#444);padding-bottom:5px">📍 ${esc(sectionName)}</div>`;
@@ -85,7 +115,7 @@
       const sectionName = (tb) => typeof tableSectionLabel === "function" ? tableSectionLabel(tb) : (tb.section || "");
       const fromLabel = `طاولة ${from.num ?? selectedTable}${sectionName(from) ? " — " + sectionName(from) : ""}`;
       const toLabel = `طاولة ${to.num ?? toTable}${sectionName(to) ? " — " + sectionName(to) : ""}`;
-      if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel}؟\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلن يتم الدمج إذا كان هناك دفع مسجل أو فاتورة آجل.`)) return;
+      if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel}?\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلن يتم الدمج إذا كان هناك دفع مسجل أو فاتورة آجل.`)) return;
       try {
         const res = await api("/api/order/transfer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_table: Number(selectedTable), to_table: Number(toTable), merge: true }) });
         if (!res.ok) throw new Error(res.error || "تعذر دمج الطلبين");
@@ -103,10 +133,6 @@
   const timer = setInterval(function () { tries += 1; if (install() || tries >= 60) clearInterval(timer); }, 100);
   install();
 
-  // Refresh table state after a successful full transfer. The original app.js
-  // selects the destination before refreshing tableData, so the old table can
-  // remain visually occupied until a manual reload. Wrap it once, without
-  // changing the transfer API itself.
   let wrapTries = 0;
   const wrapTimer = setInterval(function () {
     wrapTries += 1;
