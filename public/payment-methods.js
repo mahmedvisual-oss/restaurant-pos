@@ -113,13 +113,17 @@
     enhancePaymentMethods();
   });
 
-  // Load the professional report layer immediately, before DOMContentLoaded,
-  // so its own DOMContentLoaded initialization is registered in time.
-  if (!document.querySelector('script[data-professional-reports="1"]')) {
+  function loadOnce(src, attr, value) {
+    if (document.querySelector('script[' + attr + '="' + value + '"]')) return;
     const s = document.createElement("script");
-    s.src = "/professional-reports.js?v=2";
-    s.dataset.professionalReports = "1";
+    s.src = src;
+    s.setAttribute(attr, value);
     s.async = false;
     document.head.appendChild(s);
   }
+
+  // Load both report layers before DOMContentLoaded so the thermal layer can
+  // observe the professional report when it is rendered dynamically.
+  loadOnce("/professional-reports.js?v=2", "data-professional-reports", "1");
+  loadOnce("/professional-reports-thermal.js?v=1", "data-professional-reports-thermal", "1");
 })();
