@@ -37,6 +37,12 @@ const SIZE_LEVELS = ["sm", "md", "lg", "xl"];
 const SIZE_LABELS = { sm: "100%", md: "115%", lg: "125%", xl: "140%" };
 let uiSize = "sm";
 let uiTheme = "dark";
+const TABLE_SECTION_NAMES = {
+  families: "العائلات",
+  vip: "VIP",
+  hall: "الصالة",
+  takeaway: "تيك أواي",
+};
 
 function applyUiPrefs() {
   uiTheme = localStorage.getItem("pos_theme") || "dark";
@@ -1370,12 +1376,12 @@ function updateStats() {
 function showTransferModal() {
   if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
   const cur = tableData[selectedTable];
-  const curSection = cur ? (cur.section_name || names[cur.section] || cur.section || "") : "";
+  const curSection = cur ? (cur.section_name || TABLE_SECTION_NAMES[cur.section] || cur.section || "") : "";
   const curLabel = cur ? `${cur.num} — ${curSection}` : selectedTable;
   let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${curLabel}</b> إلى:</div>`;
   for (const [tid, tb] of Object.entries(tableData)) {
     if (parseInt(tid) === selectedTable) continue;
-    const sectionName = tb.section_name || names[tb.section] || tb.section || "";
+    const sectionName = tb.section_name || TABLE_SECTION_NAMES[tb.section] || tb.section || "";
     const tableLabel = `${tb.num} — ${sectionName}`;
     const status = tb.active ? "🔴" : "🟢";
     const disabled = tb.active ? "disabled" : "";
