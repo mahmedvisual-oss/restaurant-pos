@@ -10,159 +10,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply table move/merge patch
+      - name: Apply table move/merge and section labels patch
         shell: python
         run: |
           from pathlib import Path
-
-          # ---- app.py ----
-          p = Path('app.py')
-          s = p.read_text(encoding='utf-8')
-          marker = '''# ===== طلب إلغاء طلب (يحتاج موافقة المدير) ====='''
-          if '/api/order/merge' not in s:
-              insert = r'''
-
-# ===== دمج طلبين من طاولتين =====
-@app.route("/api/order/merge", methods=["POST"])
-def api_order_merge():
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
-    data = request.json or {}
-    from_table = data.get("from_table")
-    to_table = data.get("to_table")
-    if not from_table or not to_table or int(from_table) == int(to_table):
-        return jsonify({"error": "اختر طاولتين مختلفتين"}), 400
-
-    conn = get_db()
-    c = conn.cursor()
-    try:
-        source = c.execute(
-            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
-            (from_table,)
-        ).fetchone()
-        target = c.execute(
-            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
-            (to_table,)
-        ).fetchone()
-        if not source:
-            return jsonify({"error": "لا يوجد طلب نشط في الطاولة المصدر"}), 404
-        if not target:
-            return jsonify({"error": "الطاولة الوجهة لا تحتوي على طلب نشط"}), 404
-
-        source_items = json.loads(source["items"] or "[]")
-        target_items = json.loads(target["items"] or "[]")
-        if not isinstance(source_items, list) or not isinstance(target_items, list):
-            return jsonify({"error": "بيانات أصناف الطلب غير صالحة"}), 400
-
-        merged_items = target_items + source_items
-        merged_subtotal = round(
-            sum(float(i.get("price", 0)) * int(i.get("qty", 0)) for i in merged_items), 2
-        )
-        merged_discount = round(float(target["discount"] or 0) + float(source["discount"] or 0), 2)
-        merged_guests = int(target["guests"] or 0) + int(source["guests"] or 0)
-        merged_guests = max(1, merged_guests)
-        merged_tax = round(merged_subtotal * get_tax_rate(), 2)
-        merged_total = max(0, round(merged_subtotal + merged_tax - merged_discount, 2))
-
-        c.execute(
-            "UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, guests=? WHERE id=?",
-            (json.dumps(merged_items, ensure_ascii=False), merged_subtotal,
-             merged_tax, merged_discount, merged_total, merged_guests, target["id"])
-        )
-
-        # لا نسجل الطلب المصدر كـ cancelled حتى لا يظهر في تقارير الإلغاءات.
-        # حالة merged تبقي الأثر التاريخي للطلب وتمنعه من الظهور كطلب نشط.
-        c.execute("UPDATE orders SET status='merged' WHERE id=?", (source["id"],))
-        conn.commit()
-        num, section = _table_ref(c, to_table)
-        audit("order_merge", f"دمج طلب طاولة {from_table} داخل طاولة {to_table} — الطلب المصدر #{source['id']} داخل #{target['id']}")
-        return jsonify({
-            "ok": True,
-            "order_id": target["id"],
-            "from_table": int(from_table),
-            "to_table": int(to_table),
-            "items_count": len(merged_items),
-            "subtotal": merged_subtotal,
-            "discount": merged_discount,
-            "guests": merged_guests,
-            "table_num": num,
-            "table_section": section,
-        })
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        return jsonify({"error": "تعذر دمج الطلبين: " + str(e)}), 500
-    finally:
-        conn.close()
-'''
-              s = s.replace(marker, insert + '\n\n' + marker, 1)
-              p.write_text(s, encoding='utf-8')
-
-          # ---- public/app.js ----
           p = Path('public/app.js')
           s = p.read_text(encoding='utf-8')
-          old = '''    const status = tb.active ? "🔴" : "🟢";
-    const disabled = tb.active ? "disabled" : "";
-    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>`'''
-          if old in s and 'mergeOrder' not in s:
-              new = '''    const status = tb.active ? "🔴" : "🟢";
-    const disabled = tb.active ? "disabled" : "";
-    const mergeAction = tb.active
-      ? `<button class="btn btn-warning btn-sm" style="margin-top:4px;width:100%" onclick="mergeOrder(${tid})">🔗 دمج مع هذه الطاولة</button>`
-      : "";
-    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>`'''
-              s = s.replace(old, new, 1)
-              old2 = '''    html += `</button>`;'''
-              new2 = '''    html += `</button>${mergeAction}`;'''
-              s = s.replace(old2, new2, 1)
+          section_names = {"families":"العائلات", "vip":"VIP", "hall":"الصالة", "takeaway":"تيك أواي"}
+          marker = '  const curLabel = cur ? cur.num : selectedTable;'
+          if marker in s:
+              s = s.replace(marker, '  const curSection = cur ? (cur.section_name || section_names[cur.section] || cur.section || "") : "";\n  const curLabel = cur ? `${cur.num} — ${curSection}` : selectedTable;', 1)
+          marker2 = '    const status = tb.active ? "🔴" : "🟢";'
+          pos = s.find(marker2)
+          if pos >= 0:
+              s = s[:pos] + '    const sectionName = tb.section_name || section_names[tb.section] || tb.section || "";\n    const tableLabel = `${tb.num} — ${sectionName}`;\n' + s[pos:]
+          old = 'html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>`'
+          if old in s:
+              s = s.replace(old, 'html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}><span>${status} <b>${tableLabel}</b></span>`', 1)
+          old_confirm = 'const fromLabel = tableData[selectedTable] ? tableData[selectedTable].num : selectedTable;'
+          if old_confirm in s:
+              s = s.replace(old_confirm, 'const from = tableData[selectedTable] || {};\n  const fromLabel = `${from.num ?? selectedTable} — ${from.section_name || section_names[from.section] || from.section || ""}`.replace(/ — $/, "");', 1)
+          old_to = 'const toLabel = tableData[toTable] ? tableData[toTable].num : toTable;'
+          if old_to in s:
+              s = s.replace(old_to, 'const to = tableData[toTable] || {};\n  const toLabel = `${to.num ?? toTable} — ${to.section_name || section_names[to.section] || to.section || ""}`.replace(/ — $/, "");', 1)
+          p.write_text(s, encoding='utf-8')
 
-              marker2 = '''async function transferOrder(toTable) {'''
-              merge_fn = r'''
-
-async function mergeOrder(toTable) {
-  if (!selectedTable || Number(selectedTable) === Number(toTable)) return;
-  const fromLabel = tableData[selectedTable] ? tableData[selectedTable].num : selectedTable;
-  const toLabel = tableData[toTable] ? tableData[toTable].num : toTable;
-  if (!confirm(`⚠️ دمج طلب الطاولة ${fromLabel} مع طلب الطاولة ${toLabel}؟\n\nسيتم جمع جميع الأصناف في فاتورة واحدة، ولن يُحتسب الطلب المصدر كإلغاء.`)) return;
-  try {
-    const res = await api("/api/order/merge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ from_table: Number(selectedTable), to_table: Number(toTable) })
-    });
-    if (!res.ok) { toast("❌ " + (res.error || "تعذر الدمج")); return; }
-    closeModal("transfer-modal");
-    promoDiscount = 0;
-    promoCode = "";
-    const promoInput = document.getElementById("promo-code");
-    if (promoInput) promoInput.value = "";
-    const promoRemove = document.getElementById("promo-remove");
-    if (promoRemove) promoRemove.style.display = "none";
-    await loadTables();
-    await selectTable(toTable);
-    toast(`✅ تم دمج الطاولتين ${fromLabel} + ${toLabel} في فاتورة واحدة`);
-  } catch (e) {
-    toast("❌ " + e.message);
-  }
-}
-'''
-              s = s.replace(marker2, merge_fn + '\n' + marker2, 1)
-              p.write_text(s, encoding='utf-8')
-
-          # ---- templates/index.html ----
           p = Path('templates/index.html')
           s = p.read_text(encoding='utf-8')
           s = s.replace('<span>🔄 نقل الطلب</span>', '<span>🔄 نقل / دمج الطلب</span>', 1)
           p.write_text(s, encoding='utf-8')
-      - name: Commit patch and remove one-time workflow
+      - name: Commit patch and remove workflow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py public/app.js templates/index.html
+          git add public/app.js templates/index.html
           git rm .github/workflows/one-time-table-merge.yml
-          git commit -m "Add table transfer and merge support [table-merge]"
+          git commit -m "Show table sections in transfer dialog [table-merge]"
           git push
