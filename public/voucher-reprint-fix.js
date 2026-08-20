@@ -41,14 +41,12 @@
       } catch (e) { toast("❌ " + (e.message || e)); }
     };
 
-    // ===== نافذة نقل / دمج الطلب =====
     window.showTransferModal = function () {
       if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
       const cur = tableData[selectedTable];
       const curSection = cur && typeof tableSectionLabel === "function" ? tableSectionLabel(cur) : "";
       const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;
       let html = `<div style="margin-bottom:14px">نقل / دمج طلب الطاولة <b>${esc(curLabel)}</b> إلى:</div>`;
-
       const groups = new Map();
       const order = ["families", "vip", "hall", "takeaway"];
       for (const [tid, tb] of Object.entries(tableData || {})) {
@@ -60,7 +58,6 @@
       }
       const rank = (name) => { const n = String(name || "").toLowerCase(); const i = order.indexOf(n); return i >= 0 ? i : 99; };
       const sortedGroups = Array.from(groups.entries()).sort((a, b) => { const ar = rank(a[0]), br = rank(b[0]); if (ar !== br) return ar - br; return a[0].localeCompare(b[0], "ar"); });
-
       for (const [sectionName, entries] of sortedGroups) {
         entries.sort((a, b) => (Number(a[1].num) || 0) - (Number(b[1].num) || 0));
         html += `<div style="margin:12px 0 6px;font-weight:700;font-size:14px;border-bottom:1px solid var(--border,#444);padding-bottom:5px">📍 ${esc(sectionName)}</div>`;
@@ -105,4 +102,27 @@
   let tries = 0;
   const timer = setInterval(function () { tries += 1; if (install() || tries >= 60) clearInterval(timer); }, 100);
   install();
+
+  // Refresh table state after a successful full transfer. The original app.js
+  // selects the destination before refreshing tableData, so the old table can
+  // remain visually occupied until a manual reload. Wrap it once, without
+  // changing the transfer API itself.
+  let wrapTries = 0;
+  const wrapTimer = setInterval(function () {
+    wrapTries += 1;
+    if (typeof window.transferOrder !== "function") {
+      if (wrapTries >= 60) clearInterval(wrapTimer);
+      return;
+    }
+    if (window.__transferStatusRefreshFixed) { clearInterval(wrapTimer); return; }
+    const originalTransferOrder = window.transferOrder;
+    window.transferOrder = async function (toTable) {
+      const result = await originalTransferOrder(toTable);
+      if (typeof loadTables === "function") await loadTables();
+      if (typeof selectTable === "function") await selectTable(Number(toTable));
+      return result;
+    };
+    window.__transferStatusRefreshFixed = true;
+    clearInterval(wrapTimer);
+  }, 100);
 })();
