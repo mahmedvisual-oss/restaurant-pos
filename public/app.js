@@ -1406,7 +1406,7 @@ function showTransferModal() {
     const status = tb.active ? "🔴" : "🟢";
     const disabled = tb.active ? "disabled" : "";
     html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>
-      <span>طاولة ${tb.num}</span><span style="font-size:11px">${status}</span>
+      <span>طاولة ${tableLabel}</span><span style="font-size:11px">${status}</span>
     </button>`;
   }
   document.getElementById("transfer-body").innerHTML = html;
