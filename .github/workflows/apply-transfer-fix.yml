@@ -1,0 +1,160 @@
+name: Apply table transfer merge fix
+on:
+  push:
+    branches: [fix/transfer-dialog-occupied-tables]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[apply-transfer-fix]') == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch frontend and backend transfer logic
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8')
+          old = '''    const sectionName = tableSectionLabel(tb);\n    const tableLabel = sectionName ? `${tb.num} — ${sectionName}` : `${tb.num}`;\n    const status = tb.active ? "🔴" : "🟢";\n    const disabled = tb.active ? "disabled" : "";\n    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>\n      <span>طاولة ${tb.num}</span><span style="font-size:11px">${status}</span>\n    </button>`;'''
+          new = '''    const sectionName = tableSectionLabel(tb);\n    const tableLabel = sectionName ? `${tb.num} — ${sectionName}` : `${tb.num}`;\n    const status = tb.active ? "🔴 دمج" : "🟢 فارغة";\n    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})">\n      <span>طاولة ${tableLabel}</span><span style="font-size:11px">${status}</span>\n    </button>`;'''
+          if old not in s:
+              raise SystemExit('Frontend transfer block not found')
+          s = s.replace(old, new, 1)
+
+          old2 = '''      toast("✅ تم النقل إلى الطاولة " + lb);\n      closeModal("transfer-modal");\n      await selectTable(toTable);'''
+          new2 = '''      toast("✅ " + (res.merged ? "تم دمج الطلبين في " : "تم نقل الطلب إلى ") + lb);\n      closeModal("transfer-modal");\n      await loadTables();\n      selectedTable = Number(toTable);\n      await selectTable(Number(toTable));'''
+          if old2 not in s:
+              raise SystemExit('Frontend transfer success block not found')
+          s = s.replace(old2, new2, 1)
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          marker = '\n\n@app.route("/api/table_order/<int:tid>")'
+          if marker not in s:
+              raise SystemExit('Backend insertion marker not found')
+          route = r'''
+
+@app.route("/api/order/transfer", methods=["POST"])
+def api_order_transfer():
+    """نقل طلب من طاولة إلى أخرى، أو دمجه مع الطلب المفتوح في الطاولة الهدف."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    data = request.json or {}
+    try:
+        from_table = int(data.get("from_table"))
+        to_table = int(data.get("to_table"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "الطاولات غير صالحة"}), 400
+    if from_table == to_table:
+        return jsonify({"error": "لا يمكن نقل الطلب إلى نفس الطاولة"}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        src = c.execute("SELECT id, num, section FROM tables WHERE id=?", (from_table,)).fetchone()
+        dst = c.execute("SELECT id, num, section FROM tables WHERE id=?", (to_table,)).fetchone()
+        if not src or not dst:
+            return jsonify({"error": "الطاولة المصدر أو الهدف غير موجودة"}), 404
+
+        src_order = c.execute(
+            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
+            (from_table,)
+        ).fetchone()
+        if not src_order:
+            return jsonify({"error": "لا يوجد طلب مفتوح على الطاولة المصدر"}), 400
+
+        dst_order = c.execute(
+            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
+            (to_table,)
+        ).fetchone()
+
+        source_items = _parse_items(src_order["items"])
+        merged = False
+
+        if dst_order:
+            dest_items = _parse_items(dst_order["items"])
+            dest_items.extend(source_items)
+            merged_items = []
+            for item in dest_items:
+                key = (
+                    str(item.get("name", "")),
+                    float(item.get("price", 0) or 0),
+                    int(item.get("menu_id", 0) or 0),
+                    json.dumps(item.get("modifiers", []), ensure_ascii=False, sort_keys=True),
+                    str(item.get("note", "") or "")
+                )
+                found = next((x for x in merged_items if x.get("_merge_key") == key), None)
+                if found:
+                    found["qty"] = int(found.get("qty", 0)) + int(item.get("qty", 0) or 0)
+                else:
+                    x = dict(item)
+                    x["qty"] = int(x.get("qty", 0) or 0)
+                    x["_merge_key"] = key
+                    merged_items.append(x)
+            for item in merged_items:
+                item.pop("_merge_key", None)
+
+            subtotal = round(sum(float(i.get("price", 0) or 0) * int(i.get("qty", 0) or 0) for i in merged_items), 2)
+            tax = round(subtotal * get_tax_rate(), 2)
+            discount = round(float(dst_order["discount"] or 0) + float(src_order["discount"] or 0), 2)
+            discount = min(discount, round(subtotal + tax, 2))
+            total = max(0, round(subtotal + tax - discount, 2))
+            paid = round(float(dst_order["paid"] or 0) + float(src_order["paid"] or 0), 2)
+            payment_method = dst_order["payment_method"] or src_order["payment_method"] or ""
+            if dst_order["payment_method"] and src_order["payment_method"] and dst_order["payment_method"] != src_order["payment_method"]:
+                payment_method = "متعدد"
+            guests = int(dst_order["guests"] or 1) + int(src_order["guests"] or 1)
+            kitchen_status = "sent" if (src_order["kitchen_status"] == "sent" or dst_order["kitchen_status"] == "sent") else (dst_order["kitchen_status"] or src_order["kitchen_status"] or "sent")
+
+            c.execute(
+                "UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, guests=?, table_num=?, table_section=?, kitchen_status=?, status=? WHERE id=?",
+                (_serialize_items(merged_items), subtotal, tax, discount, total, paid, payment_method, guests,
+                 dst["num"], dst["section"], kitchen_status,
+                 "ready" if kitchen_status == "ready" else "sent", dst_order["id"])
+            )
+            c.execute("UPDATE orders SET status='closed', kitchen_status='ready' WHERE id=?", (src_order["id"],))
+            merged = True
+            result_order_id = dst_order["id"]
+        else:
+            c.execute(
+                "UPDATE orders SET table_id=?, table_num=?, table_section=? WHERE id=?",
+                (to_table, dst["num"], dst["section"], src_order["id"])
+            )
+            result_order_id = src_order["id"]
+
+        conn.commit()
+        action = "دمج" if merged else "نقل"
+        audit("table_transfer", f"{action} الطلب #{result_order_id}: طاولة {src['num']} ({src['section']}) → طاولة {dst['num']} ({dst['section']})")
+        return jsonify({
+            "ok": True,
+            "merged": merged,
+            "order_id": result_order_id,
+            "from_table": {"id": src["id"], "num": src["num"], "section": src["section"]},
+            "to_table": {"id": dst["id"], "num": dst["num"], "section": dst["section"]}
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": f"فشل نقل/دمج الطلب: {e}"}), 500
+    finally:
+        conn.close()
+'''
+          s = s.replace(marker, route + marker, 1)
+          p.write_text(s, encoding='utf-8')
+
+      - name: Validate
+        run: |
+          python -m py_compile app.py
+          node --check public/app.js
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py public/app.js
+          git rm .github/workflows/apply-transfer-fix.yml
+          git commit -m "Fix table transfer merge state and section labels [apply-transfer-fix]"
+          git push
