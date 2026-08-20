@@ -1,0 +1,165 @@
+name: Final table merge patch
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, '[merge-finalized]') == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply merge backend and UI
+        shell: python
+        run: |
+          from pathlib import Path
+
+          # Backend: merge two active orders into the destination order.
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          marker = '# ===== طلب إلغاء طلب (يحتاج موافقة المدير) ====='
+          if '/api/order/merge' not in s and marker in s:
+              insert = r'''
+
+# ===== دمج طلبين من طاولتين =====
+@app.route("/api/order/merge", methods=["POST"])
+def api_order_merge():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    data = request.json or {}
+    from_table = data.get("from_table")
+    to_table = data.get("to_table")
+    try:
+        from_table = int(from_table)
+        to_table = int(to_table)
+    except (TypeError, ValueError):
+        return jsonify({"error": "اختر طاولتين مختلفتين"}), 400
+    if from_table == to_table:
+        return jsonify({"error": "اختر طاولتين مختلفتين"}), 400
+
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        source = c.execute(
+            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
+            (from_table,)
+        ).fetchone()
+        target = c.execute(
+            "SELECT * FROM orders WHERE table_id=? AND status IN ('active','sent','ready') ORDER BY id DESC LIMIT 1",
+            (to_table,)
+        ).fetchone()
+        if not source:
+            return jsonify({"error": "لا يوجد طلب نشط في الطاولة المصدر"}), 404
+        if not target:
+            return jsonify({"error": "الطاولة الوجهة لا تحتوي على طلب نشط"}), 404
+
+        # لا نسمح بدمج طلبات مكتملة/مدفوعة أو آجلة حتى لا تضيع روابط التحصيل.
+        if (source["paid"] or 0) > 0 or (target["paid"] or 0) > 0:
+            return jsonify({"error": "لا يمكن دمج طلبات لها مدفوعات مسجلة. أغلق/سوِّ الدفع أولاً."}), 400
+        if (source["payment_method"] or "") == "آجل" or (target["payment_method"] or "") == "آجل":
+            return jsonify({"error": "لا يمكن دمج فاتورة آجل. يجب تسوية الذمة أولاً."}), 400
+
+        source_items = _parse_items(source["items"])
+        target_items = _parse_items(target["items"])
+        if not isinstance(source_items, list) or not isinstance(target_items, list):
+            return jsonify({"error": "بيانات أصناف الطلب غير صالحة"}), 400
+
+        merged_items = target_items + source_items
+        merged_subtotal = round(sum(float(i.get("price", 0)) * int(i.get("qty", 0)) for i in merged_items), 2)
+        merged_discount = round(float(target["discount"] or 0) + float(source["discount"] or 0), 2)
+        merged_guests = max(1, int(target["guests"] or 0) + int(source["guests"] or 0))
+        merged_tax = round(merged_subtotal * get_tax_rate(), 2)
+        merged_total = max(0, round(merged_subtotal + merged_tax - merged_discount, 2))
+
+        c.execute(
+            "UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, guests=? WHERE id=?",
+            (json.dumps(merged_items, ensure_ascii=False), merged_subtotal, merged_tax, merged_discount, merged_total, merged_guests, target["id"])
+        )
+        c.execute("UPDATE orders SET status='merged' WHERE id=?", (source["id"],))
+        conn.commit()
+        num, section = _table_ref(c, to_table)
+        audit("order_merge", f"دمج طلب طاولة {from_table} داخل طاولة {to_table} — الطلب المصدر #{source['id']} داخل #{target['id']}")
+        return jsonify({"ok": True, "order_id": target["id"], "from_table": from_table, "to_table": to_table,
+                        "items_count": len(merged_items), "subtotal": merged_subtotal, "discount": merged_discount,
+                        "guests": merged_guests, "table_num": num, "table_section": section})
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": "تعذر دمج الطلبين: " + str(e)}), 500
+    finally:
+        conn.close()
+'''
+              s = s.replace(marker, insert + '\n\n' + marker, 1)
+              p.write_text(s, encoding='utf-8')
+
+          # Frontend: the current transfer override lives in voucher-reprint-fix.js.
+          p = Path('public/voucher-reprint-fix.js')
+          s = p.read_text(encoding='utf-8')
+          if 'window.mergeOrder = async function' not in s:
+              old = '''          const disabled = tb.active ? "disabled" : "";
+          const label = `طاولة ${num} — ${sectionName}`;
+          html += `<button class="transfer-table-btn" onclick="transferOrder(${Number(tid)})" ${disabled} title="${esc(label)} — ${esc(status)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;margin:4px 0;padding:10px 12px">` +
+            `<span><b>${esc(label)}</b></span><span style="font-size:12px;white-space:nowrap">${esc(status)}</span></button>`;'''
+              new = '''          const disabled = tb.active ? "disabled" : "";
+          const label = `طاولة ${num} — ${sectionName}`;
+          const mergeAction = tb.active
+            ? `<button class="btn btn-warning btn-sm" type="button" style="margin:4px 0;width:100%" onclick="mergeOrder(${Number(tid)});event.stopPropagation()">🔗 دمج مع هذه الطاولة</button>`
+            : "";
+          html += `<button class="transfer-table-btn" onclick="transferOrder(${Number(tid)})" ${disabled} title="${esc(label)} — ${esc(status)}" style="display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;margin:4px 0;padding:10px 12px">` +
+            `<span><b>${esc(label)}</b></span><span style="font-size:12px;white-space:nowrap">${esc(status)}</span></button>${mergeAction}`;'''
+              if old in s:
+                  s = s.replace(old, new, 1)
+
+              marker2 = '''    return true;
+  }
+
+  let tries = 0;'''
+              merge_fn = r'''
+
+    window.mergeOrder = async function (toTable) {
+      if (!selectedTable || Number(selectedTable) === Number(toTable)) return;
+      const from = tableData[selectedTable] || {};
+      const to = tableData[toTable] || {};
+      const fromSection = typeof tableSectionLabel === "function" ? tableSectionLabel(from) : (from.section || "");
+      const toSection = typeof tableSectionLabel === "function" ? tableSectionLabel(to) : (to.section || "");
+      const fromLabel = `طاولة ${from.num ?? selectedTable}${fromSection ? " — " + fromSection : ""}`;
+      const toLabel = `طاولة ${to.num ?? toTable}${toSection ? " — " + toSection : ""}`;
+      if (!confirm(`⚠️ دمج ${fromLabel} مع ${toLabel}؟\n\nسيتم جمع الأصناف في فاتورة الطاولة الوجهة.\nلن يتم الدمج إذا كان هناك دفع مسجل أو فاتورة آجل.`)) return;
+      try {
+        const res = await api("/api/order/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from_table: Number(selectedTable), to_table: Number(toTable) })
+        });
+        if (!res.ok) throw new Error(res.error || "تعذر دمج الطلبين");
+        closeModal("transfer-modal");
+        await loadTables();
+        await selectTable(toTable);
+        toast(`✅ تم دمج ${fromLabel} + ${toLabel} في فاتورة واحدة`);
+      } catch (e) {
+        toast("❌ " + (e.message || e));
+      }
+    };
+'''
+              if marker2 in s:
+                  s = s.replace(marker2, merge_fn + '\n' + marker2, 1)
+              p.write_text(s, encoding='utf-8')
+
+          # Update the button title in the page.
+          p = Path('templates/index.html')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('<span>🔄 نقل الطلب</span>', '<span>🔄 نقل / دمج الطلب</span>', 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py public/voucher-reprint-fix.js templates/index.html
+          git rm .github/workflows/table-merge-finalize.yml
+          git commit -m "Finalize table merge support [merge-finalized]"
+          git push
