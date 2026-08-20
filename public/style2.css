@@ -1860,3 +1860,35 @@ html[dir="rtl"] .lang-dropdown-menu { right: auto; left: 0; }
   .mobile-nav-btn { flex-basis:58px !important; min-width:58px !important; }
   .top-actions > button[onclick="openDepositModal()"] { min-width:104px !important; font-size:12px !important; }
 }
+
+/* ===== Mobile menu: 2 items per row ===== */
+@media (max-width: 700px) {
+  .acc-group.open .acc-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding: 5px;
+  }
+
+  .acc-item {
+    width: 100%;
+    min-width: 0;
+    padding: 7px 6px;
+    gap: 5px;
+  }
+
+  .acc-item .acc-emoji {
+    font-size: 18px;
+  }
+
+  .acc-item .acc-name {
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .acc-item .acc-price {
+    font-size: 10px;
+  }
+}
+
+
