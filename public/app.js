@@ -1,4 +1,4 @@
-/* PRINT_POPUP_TRACE */
+﻿/* PRINT_POPUP_TRACE */
 (function () {
   const originalOpen = window.open;
   window.open = function () {
@@ -1394,26 +1394,95 @@ function updateStats() {
 
 // ===== نقل الطلب =====
 function showTransferModal() {
-  if (!selectedTable) { toast("⚠️ لا يوجد طاولة محددة"); return; }
+  if (!selectedTable) {
+    toast("⚠ لا يوجد طاولة محددة");
+    return;
+  }
+
   const cur = tableData[selectedTable];
   const curSection = cur ? tableSectionLabel(cur) : "";
-  const curLabel = cur ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`) : selectedTable;
-  let html = `<div style="margin-bottom:12px">نقل طلب الطاولة <b>${curLabel}</b> إلى:</div>`;
+  const curLabel = cur
+    ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`)
+    : selectedTable;
+
+  let html = `
+    <div style="margin-bottom:12px">
+      نقل/دمج طلب الطاولة <b>${curLabel}</b> إلى:
+    </div>
+  `;
+
   for (const [tid, tb] of Object.entries(tableData)) {
-    if (parseInt(tid) === selectedTable) continue;
+    if (parseInt(tid) === Number(selectedTable)) continue;
+
     const sectionName = tableSectionLabel(tb);
-    const tableLabel = sectionName ? `${tb.num} — ${sectionName}` : `${tb.num}`;
-    const status = tb.active ? "🔴" : "🟢";
-    const disabled = tb.active ? "disabled" : "";
-    html += `<button class="transfer-table-btn" onclick="transferOrder(${tid})" ${disabled}>
-      <span>طاولة ${tb.num}</span><span style="font-size:11px">${status}</span>
-    </button>`;
+    const tableLabel = sectionName
+      ? `${tb.num} — ${sectionName}`
+      : `${tb.num}`;
+
+    const isBusy = !!tb.active;
+
+    if (isBusy) {
+      html += `
+        <button
+          class="transfer-table-btn"
+          onclick="transferOrder(${tid}, true)"
+          style="border-color:#f59e0b;background:#fff7ed"
+        >
+          <span>
+            طاولة ${tableLabel}
+            <small style="display:block;color:#b45309">
+              🔗 دمج الطلب
+            </small>
+          </span>
+          <span style="font-size:11px">🔴</span>
+        </button>
+      `;
+    } else {
+      html += `
+        <button
+          class="transfer-table-btn"
+          onclick="transferOrder(${tid}, false)"
+        >
+          <span>طاولة ${tableLabel}</span>
+          <span style="font-size:11px">🟢 نقل</span>
+        </button>
+      `;
+    }
   }
+
   document.getElementById("transfer-body").innerHTML = html;
   openModal("transfer-modal");
 }
 
-async function transferOrder(toTable) {
+async function transferOrder(toTable, merge = false) {
+  const fromTable = Number(selectedTable);
+  const destination = Number(toTable);
+
+  if (!fromTable || !destination) {
+    toast("⚠️ الطاولة غير صحيحة");
+    return;
+  }
+
+  if (merge) {
+    const fromLabel = tableData[fromTable]
+      ? tableData[fromTable].num
+      : fromTable;
+
+    const toLabel = tableData[destination]
+      ? tableData[destination].num
+      : destination;
+
+    const confirmed = confirm(
+      "دمج طلب الطاولة " + fromLabel +
+      " داخل طلب الطاولة " + toLabel +
+      "؟\n\n" +
+      "سيتم جمع الأصناف وعدد الأشخاص، " +
+      "وسيصبح طلب الطاولة المصدر مغلقاً."
+    );
+
+    if (!confirmed) return;
+  }
+
   try {
     const res = await api("/api/order/transfer", {
       method: "POST",
@@ -1421,20 +1490,38 @@ async function transferOrder(toTable) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        from_table: Number(selectedTable),
-        to_table: Number(toTable)
+        from_table: fromTable,
+        to_table: destination,
+        merge: !!merge
       })
     });
 
-    if (res.ok) {
-      const lb = tableData[toTable] ? tableData[toTable].num : toTable;
-      toast("✅ تم النقل إلى الطاولة " + lb);
-      closeModal("transfer-modal");
-      await selectTable(toTable);
-    } else {
-      toast("❌ " + (res.error || "خطأ"));
+    if (!res.ok) {
+      toast("❌ " + (res.error || "تعذر تنفيذ العملية"));
+      return;
     }
-  } catch (e) { toast("❌ " + e.message); }
+
+    const lb = tableData[destination]
+      ? tableData[destination].num
+      : destination;
+
+    if (res.merged) {
+      toast("✅ تم دمج الطلبات في الطاولة " + lb);
+    } else {
+      toast("✅ تم نقل الطلب إلى الطاولة " + lb);
+    }
+
+    closeModal("transfer-modal");
+
+    // إعادة تحميل الطاولات حتى تتحدث حالة المصدر والهدف
+    await loadTables();
+
+    // فتح الطلب الرئيسي في الطاولة الهدف
+    await selectTable(destination);
+
+  } catch (e) {
+    toast("❌ " + e.message);
+  }
 }
 
 // ===== تقسيم الفاتورة =====
@@ -2293,15 +2380,57 @@ function printDepositVoucher(r) {
     const content = document.getElementById("deposit-receipt-print-content");
     if (!content) return;
 
-    const oldBody = document.body.innerHTML;
+    const printHtml = `
+<!doctype html>
+<html dir="${dir}">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(t("depositVoucher"))} ${escapeHtml(r.receipt_no || "")}</title>
+  <style>
+    * { box-sizing: border-box; }
 
-    document.body.innerHTML = content.outerHTML;
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #000;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
 
-    window.print();
+    body {
+      width: 340px;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 18px;
+      text-align: center;
+      font-size: 13px;
+    }
 
-    document.body.innerHTML = oldBody;
+    @media print {
+      @page {
+        size: auto;
+        margin: 0;
+      }
 
-    window.location.reload();
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        width: 340px;
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  ${content.innerHTML}
+</body>
+</html>`;
+
+    hiddenPrint(printHtml);
   };
 }
 // ===== سند قبض (تحصيل آجل من العميل) =====

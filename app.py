@@ -1342,27 +1342,192 @@ def api_order_transfer():
     u = require_user()
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
+
     data = request.json or {}
     from_table = data.get("from_table")
     to_table = data.get("to_table")
+    merge = bool(data.get("merge"))
+
     if not from_table or not to_table:
         return jsonify({"error": "الطاولتان مطلوبتان"}), 400
+
+    try:
+        from_table = int(from_table)
+        to_table = int(to_table)
+    except (TypeError, ValueError):
+        return jsonify({"error": "رقم الطاولة غير صحيح"}), 400
+
+    if from_table == to_table:
+        return jsonify({"error": "لا يمكن النقل إلى نفس الطاولة"}), 400
+
     conn = get_db()
     c = conn.cursor()
-    order = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (from_table,)).fetchone()
-    if not order:
+
+    try:
+        # الطلب النشط في الطاولة المصدر
+        order = c.execute(
+            "SELECT * FROM orders "
+            "WHERE table_id=? AND status IN ('active','sent','ready') "
+            "ORDER BY id DESC LIMIT 1",
+            (from_table,)
+        ).fetchone()
+
+        if not order:
+            conn.close()
+            return jsonify({"error": "لا يوجد طلب نشط في هذه الطاولة"}), 404
+
+        # الطلب النشط في الطاولة الهدف
+        existing = c.execute(
+            "SELECT * FROM orders "
+            "WHERE table_id=? AND status IN ('active','sent','ready') "
+            "ORDER BY id DESC LIMIT 1",
+            (to_table,)
+        ).fetchone()
+
+        # إذا كانت الطاولة مشغولة ولم يطلب المستخدم الدمج
+        if existing and not merge:
+            conn.close()
+            return jsonify({
+                "error": "الطاولة الوجهة مشغولة بالفعل",
+                "can_merge": True
+            }), 400
+
+        num, section = _table_ref(c, to_table)
+
+        # ==================================================
+        # دمج الطلب المصدر داخل الطلب الموجود في الطاولة الهدف
+        # ==================================================
+        if existing and merge:
+
+            source_items = _parse_items(order["items"])
+            target_items = _parse_items(existing["items"])
+
+            # الهدف أولاً ثم أصناف المصدر
+            merged_items = target_items + source_items
+
+            # جمع الخصومات
+            source_discount = float(order["discount"] or 0)
+            target_discount = float(existing["discount"] or 0)
+            merged_discount = round(
+                target_discount + source_discount, 2
+            )
+
+            # جمع عدد الأشخاص
+            source_guests = int(order["guests"] or 1)
+            target_guests = int(existing["guests"] or 1)
+            merged_guests = target_guests + source_guests
+
+            # تحديث الطلب الهدف بالأصناف المدمجة
+            c.execute(
+                "UPDATE orders SET "
+                "items=?, "
+                "discount=?, "
+                "guests=?, "
+                "table_num=?, "
+                "table_section=? "
+                "WHERE id=?",
+                (
+                    _serialize_items(merged_items),
+                    merged_discount,
+                    merged_guests,
+                    num,
+                    section,
+                    existing["id"]
+                )
+            )
+
+            # إغلاق الطلب المصدر حتى لا يظهر كطلب مستقل
+            c.execute(
+                "UPDATE orders SET "
+                "status='closed', "
+                "kitchen_status='ready' "
+                "WHERE id=?",
+                (order["id"],)
+            )
+
+            # إذا كان هناك حجز مرتبط بالمصدر فقط،
+            # ننقله إلى الطلب الرئيسي
+            try:
+                source_reservation = order["reservation_id"]
+                target_reservation = existing["reservation_id"]
+
+                if source_reservation and not target_reservation:
+                    c.execute(
+                        "UPDATE orders SET reservation_id=? WHERE id=?",
+                        (
+                            source_reservation,
+                            existing["id"]
+                        )
+                    )
+            except Exception:
+                pass
+
+            conn.commit()
+            conn.close()
+
+            audit(
+                "order_merge",
+                f"دمج طلب طاولة {from_table} في طاولة {to_table} "
+                f"(المصدر #{order['id']} ← الهدف #{existing['id']})"
+            )
+
+            return jsonify({
+                "ok": True,
+                "merged": True,
+                "order_id": existing["id"],
+                "source_order_id": order["id"],
+                "table_num": num
+            })
+
+        # ==================================================
+        # نقل عادي إلى طاولة فارغة
+        # ==================================================
+        c.execute(
+            "UPDATE orders SET "
+            "table_id=?, "
+            "table_num=?, "
+            "table_section=? "
+            "WHERE id=?",
+            (
+                to_table,
+                num,
+                section,
+                order["id"]
+            )
+        )
+
+        conn.commit()
         conn.close()
-        return jsonify({"error": "لا يوجد طلب نشط في هذه الطاولة"}), 404
-    existing = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (to_table,)).fetchone()
-    if existing:
-        conn.close()
-        return jsonify({"error": "الطاولة الوجهة مشغولة بالفعل"}), 400
-    num, section = _table_ref(c, to_table)
-    c.execute("UPDATE orders SET table_id=?, table_num=?, table_section=? WHERE id=?", (to_table, num, section, order['id']))
-    conn.commit()
-    conn.close()
-    audit("order_transfer", f"نقل طلب من طاولة {from_table} إلى {to_table}")
-    return jsonify({"ok": True})
+
+        audit(
+            "order_transfer",
+            f"نقل طلب من طاولة {from_table} إلى {to_table}"
+        )
+
+        return jsonify({
+            "ok": True,
+            "merged": False,
+            "order_id": order["id"],
+            "table_num": num
+        })
+
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+        print("ORDER TRANSFER/MERGE ERROR:", repr(e))
+
+        return jsonify({
+            "error": "حدث خطأ أثناء نقل أو دمج الطلب",
+            "details": str(e)
+        }), 500
+
 
 
 # ===== طلب إلغاء طلب (يحتاج موافقة المدير) =====
