@@ -1903,15 +1903,14 @@ async function confirmPayment() {
 function printReceipt(o, existingWindow = null) {
   const name = RESTAURANT_NAME;
   const rows = o.items.map(i => {
-    const mods = (i.modifiers && i.modifiers.length) 
-      ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>` 
+    const mods = (i.modifiers && i.modifiers.length)
+      ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>`
       : "";
     return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
   }).join("");
-  const w = existingWindow || window.open("", "_blank", "width=320,height=600");
-  if (!w) { console.error("POPUP_BLOCKED_A"); toast("⚠️ POPUP_BLOCKED_A"); return; }
+
   const dir = document.documentElement.dir;
-  w.document.write(`<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("receipt")} #${o.order_id}</title><style>
+  const html = `<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("receipt")} #${o.order_id}</title><style>
     body{font-family:'Segoe UI',Tahoma,sans-serif;width:290px;margin:0 auto;text-align:center;font-size:13px;color:#000}
     h3{margin:4px 0}.muted{font-size:11px;color:#555}
     .dash{border-top:1px dashed #000;margin:6px 0}
@@ -1949,31 +1948,37 @@ function printReceipt(o, existingWindow = null) {
     <div class="barcode">||||| ${o.order_id} |||||</div>
     <div class="muted" style="margin-top:8px">${t("thanks")}</div>
     <div class="muted">${new Date().toLocaleString()}</div>
-  </body></html>`);
-  w.document.close();
-  setTimeout(() => {
-    try {
-      w.focus();
-      w.print();
-    } catch (e) {
-      console.error("PRINT ERROR:", e);
-      console.error("POPUP_BLOCKED_B"); toast("⚠️ POPUP_BLOCKED_B");
-    }
-  }, 100);
+  </body></html>`;
+
+  if (existingWindow) {
+    existingWindow.document.open();
+    existingWindow.document.write(html);
+    existingWindow.document.close();
+
+    setTimeout(() => {
+      try {
+        existingWindow.focus();
+        existingWindow.print();
+      } catch (e) {
+        console.error("PRINT ERROR:", e);
+        toast("⚠️ PRINT ERROR: " + (e && e.message ? e.message : String(e)));
+      }
+    }, 100);
+
+    return;
+  }
+
+  hiddenPrint(html);
 }
 
 async function reprintInvoice(oid) {
-  const w = window.open("", "_blank", "width=320,height=600");
-  if (!w) { console.error("POPUP_BLOCKED_A"); toast("⚠️ POPUP_BLOCKED_A"); return; }
   try {
     const o = await api("/api/orders/" + oid);
-    printReceipt(o, w);
+    printReceipt(o);
   } catch (e) {
-    try { w.close(); } catch (_) {}
     toast(e.message);
   }
 }
-
 // ===== سند مردودات (استرداد) =====
 function printRefundReceipt(r) {
   const name = RESTAURANT_NAME;
