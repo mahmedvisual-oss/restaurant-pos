@@ -1,0 +1,173 @@
+name: Fix unified customer receivable statement
+on:
+  push:
+    paths:
+      - .github/workflows/fix-ar-single-statement.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch unified customer statement
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          marker = '\n@app.route("/api/credit/summary")\n'
+          route = r'''
+@app.route("/api/credit/customer-statement")
+def api_credit_customer_statement():
+    """كشف حساب موحد لعميل واحد: كل فواتير الآجل + كل التحصيلات الفعلية + رصيد جارٍ."""
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    raw_cid = str(request.args.get("customer_id") or "").strip()
+    name = str(request.args.get("name") or "").strip()
+    phone = str(request.args.get("phone") or "").strip()
+    if not raw_cid and not name and not phone:
+        return jsonify({"error": "اختر العميل"}), 400
+    conn = get_db()
+    c = conn.cursor()
+    try:
+        customer = None
+        if raw_cid:
+            try:
+                customer = c.execute("SELECT id, name, phone FROM customers WHERE id=? LIMIT 1", (int(raw_cid),)).fetchone()
+            except (TypeError, ValueError):
+                customer = None
+        if not customer and phone:
+            customer = c.execute("SELECT id, name, phone FROM customers WHERE trim(phone)=trim(?) LIMIT 1", (phone,)).fetchone()
+        if not customer and name:
+            customer = c.execute("SELECT id, name, phone FROM customers WHERE lower(trim(name))=lower(trim(?)) LIMIT 1", (name,)).fetchone()
+        cid = customer["id"] if customer else None
+        resolved_name = (customer["name"] if customer else name).strip()
+        resolved_phone = (customer["phone"] if customer else phone).strip()
+
+        if cid is not None:
+            ledgers = c.execute(
+                "SELECT * FROM credit_ledger WHERE customer_id=? OR (customer_id IS NULL AND phone IS NOT NULL AND trim(phone)=trim(?)) OR (customer_id IS NULL AND lower(trim(customer_name))=lower(trim(?))) ORDER BY datetime(COALESCE(created_at,'1970-01-01')), id",
+                (cid, resolved_phone, resolved_name)).fetchall()
+        else:
+            ledgers = c.execute(
+                "SELECT * FROM credit_ledger WHERE lower(trim(customer_name))=lower(trim(?)) OR (phone IS NOT NULL AND trim(phone)=trim(?)) ORDER BY datetime(COALESCE(created_at,'1970-01-01')), id",
+                (resolved_name, resolved_phone)).fetchall()
+
+        ledger_ids = [r["id"] for r in ledgers]
+        payments = []
+        if ledger_ids:
+            marks = ",".join("?" for _ in ledger_ids)
+            payments = c.execute(
+                f"SELECT p.*, l.customer_name, l.order_id, l.table_num FROM credit_payments p JOIN credit_ledger l ON l.id=p.ledger_id WHERE p.ledger_id IN ({marks}) AND COALESCE(p.method,'') != 'آجل' ORDER BY datetime(COALESCE(p.date,'1970-01-01')), p.id",
+                ledger_ids).fetchall()
+
+        if cid is not None:
+            orders = c.execute(
+                "SELECT id, credit_name, credit_phone, table_num, table_section, total, paid, date FROM orders WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL) AND (lower(trim(COALESCE(credit_name,'')))=lower(trim(?)) OR (credit_phone IS NOT NULL AND trim(credit_phone)=trim(?))) ORDER BY datetime(COALESCE(date,'1970-01-01')), id",
+                (resolved_name, resolved_phone)).fetchall()
+        else:
+            orders = c.execute(
+                "SELECT id, credit_name, credit_phone, table_num, table_section, total, paid, date FROM orders WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL) AND lower(trim(COALESCE(credit_name,'')))=lower(trim(?)) ORDER BY datetime(COALESCE(date,'1970-01-01')), id",
+                (resolved_name,)).fetchall()
+
+        movements = []
+        payments_by_ledger = {}
+        for p in payments:
+            payments_by_ledger.setdefault(p["ledger_id"], []).append(p)
+        for l in ledgers:
+            inv_date = l["created_at"] or _now_sql()
+            movements.append({"date": inv_date, "seq": 0, "kind": "invoice", "reference": "#" + str(l["order_id"] or l["id"]), "invoice_id": l["order_id"] or l["id"], "ledger_id": l["id"], "description": "فاتورة آجل", "debit": round(l["total"] or 0, 2), "credit": 0, "method": "", "receipt_no": "", "table_num": l["table_num"] or ""})
+            actual_paid = round(sum(float(p["amount"] or 0) for p in payments_by_ledger.get(l["id"], [])), 2)
+            ledger_paid = round(float(l["paid"] or 0), 2)
+            initial_gap = round(max(ledger_paid - actual_paid, 0), 2)
+            if initial_gap > 0.001:
+                movements.append({"date": inv_date, "seq": 1, "kind": "payment", "reference": "دفعة عند إصدار الفاتورة", "invoice_id": l["order_id"] or l["id"], "ledger_id": l["id"], "description": "مدفوع عند إصدار فاتورة الآجل", "debit": 0, "credit": initial_gap, "method": "", "receipt_no": "", "table_num": l["table_num"] or ""})
+        for o in orders:
+            inv_date = o["date"] or _now_sql()
+            total = round(o["total"] or 0, 2)
+            paid = round(min(float(o["paid"] or 0), total), 2)
+            movements.append({"date": inv_date, "seq": 0, "kind": "invoice", "reference": "#" + str(o["id"]), "invoice_id": o["id"], "ledger_id": None, "description": "فاتورة آجل", "debit": total, "credit": 0, "method": "", "receipt_no": "", "table_num": o["table_num"] or ""})
+            if paid > 0:
+                movements.append({"date": inv_date, "seq": 1, "kind": "payment", "reference": "دفعة عند إصدار الفاتورة", "invoice_id": o["id"], "ledger_id": None, "description": "مدفوع عند إصدار فاتورة الآجل", "debit": 0, "credit": paid, "method": "", "receipt_no": "", "table_num": o["table_num"] or ""})
+        for p in payments:
+            movements.append({"date": p["date"] or _now_sql(), "seq": 2, "kind": "payment", "reference": p["receipt_no"] or ("#" + str(p["id"])), "invoice_id": p["order_id"], "ledger_id": p["ledger_id"], "description": "تحصيل من العميل", "debit": 0, "credit": round(p["amount"] or 0, 2), "method": p["method"] or "نقدي", "receipt_no": p["receipt_no"] or "", "table_num": p["table_num"] or ""})
+        movements.sort(key=lambda m: (m["date"] or "", m["seq"], str(m["reference"])))
+        running = 0.0
+        for m in movements:
+            running = round(running + float(m["debit"] or 0) - float(m["credit"] or 0), 2)
+            m["balance"] = running
+            m.pop("seq", None)
+        total_debit = round(sum(float(m["debit"] or 0) for m in movements), 2)
+        total_credit = round(sum(float(m["credit"] or 0) for m in movements), 2)
+        balance = round(max(total_debit - total_credit, 0), 2)
+        conn.close()
+        return jsonify({"customer_id": cid, "customer_name": resolved_name or "—", "phone": resolved_phone, "movements": movements, "total_debit": total_debit, "total_credit": total_credit, "balance": balance, "count": len(movements)})
+    except Exception as e:
+        try: conn.close()
+        except Exception: pass
+        print("CUSTOMER STATEMENT ERR:", repr(e))
+        return jsonify({"error": "تعذر إنشاء كشف حساب العميل"}), 500
+'''
+          if 'def api_credit_customer_statement()' not in s:
+              if marker not in s: raise SystemExit('credit summary marker not found')
+              s = s.replace(marker, route + marker, 1)
+          p.write_text(s, encoding='utf-8')
+
+          ui = Path('public/customer-statement.js')
+          ui.write_text(r'''/* Unified customer receivable statement UI */
+(function () {
+  "use strict";
+  function esc(v){ return typeof window.escapeHtml === "function" ? window.escapeHtml(v == null ? "" : v) : String(v == null ? "" : v).replace(/[&<>"']/g, function(m){return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[m];}); }
+  function cur(v){ return typeof window.fmtCur === "function" ? window.fmtCur(v) : Number(v||0).toLocaleString(); }
+  function meth(v){ return typeof window.methodName === "function" ? window.methodName(v) : (v||"—"); }
+  async function openStatement(customerId, customerName, phone){
+    const qs=new URLSearchParams(); if(customerId)qs.set("customer_id",customerId); if(customerName)qs.set("name",customerName); if(phone)qs.set("phone",phone);
+    try{
+      const data=await window.api("/api/credit/customer-statement?"+qs.toString());
+      const rows=(data.movements||[]).map(function(m){const d=Number(m.debit||0),cr=Number(m.credit||0),b=Number(m.balance||0);return "<tr><td>"+esc(m.date||"—")+"</td><td>"+esc(m.reference||"—")+"</td><td style='text-align:right'>"+esc(m.description||"")+(m.table_num?"<br><small>طاولة "+esc(m.table_num)+"</small>":"")+(m.method?"<br><small>"+esc(meth(m.method))+"</small>":"")+"</td><td>"+(d?cur(d):"—")+"</td><td style='color:var(--success)'>"+(cr?cur(cr):"—")+"</td><td style='font-weight:700;color:"+(b>0?"var(--danger)":"var(--success)")+"'>"+cur(b)+"</td></tr>";}).join("");
+      const modal=document.createElement("div"); modal.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:9999;display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto";
+      modal.innerHTML="<div style='background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:14px;width:min(1100px,100%);max-height:94vh;overflow:auto;padding:18px'><div id='customer-statement-print'><div style='text-align:center'><h2 style='margin:0 0 4px'>"+esc(window.RESTAURANT_NAME||"POS")+"</h2><h3 style='margin:0 0 12px'>كشف حساب الذمم المدينة</h3></div><div style='display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--border);padding:10px;border-radius:8px'><b>العميل: "+esc(data.customer_name||customerName||"—")+"</b><span>الهاتف: "+esc(data.phone||phone||"—")+"</span><span>تاريخ الكشف: "+esc(new Date().toLocaleString())+"</span></div><div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0'><div style='border:1px solid var(--border);padding:9px;text-align:center'><b>إجمالي المدين</b><div>"+cur(data.total_debit)+"</div></div><div style='border:1px solid var(--border);padding:9px;text-align:center'><b>إجمالي المسدد</b><div>"+cur(data.total_credit)+"</div></div><div style='border:1px solid var(--border);padding:9px;text-align:center'><b>الرصيد المستحق</b><div style='font-weight:700'>"+cur(data.balance)+"</div></div></div><table class='report-table' style='width:100%;border-collapse:collapse'><thead><tr><th>التاريخ</th><th>المرجع</th><th>البيان</th><th>مدين</th><th>دائن / مسدد</th><th>الرصيد</th></tr></thead><tbody>"+(rows||"<tr><td colspan='6' style='text-align:center'>لا توجد حركات</td></tr>")+"</tbody><tfoot><tr><th colspan='3'>الإجمالي</th><th>"+cur(data.total_debit)+"</th><th>"+cur(data.total_credit)+"</th><th>"+cur(data.balance)+"</th></tr></tfoot></table></div><div style='display:flex;justify-content:center;gap:8px;margin-top:14px'><button id='customer-statement-print-btn' class='btn btn-info' type='button'>🖨️ طباعة</button><button id='customer-statement-close-btn' class='btn' type='button'>✕ إغلاق</button></div></div>";
+      document.body.appendChild(modal); modal.querySelector("#customer-statement-close-btn").onclick=function(){modal.remove();};
+      modal.querySelector("#customer-statement-print-btn").onclick=function(){const content=modal.querySelector("#customer-statement-print");const w=window.open("","customer-statement-print","width=1000,height=800");if(!w){if(window.toast)window.toast("⚠️ امنع النوافذ المنبثقة للطباعة");return;}w.document.write("<!doctype html><html dir='"+esc(document.documentElement.dir||"rtl")+"'><head><meta charset='utf-8'><title>كشف حساب - "+esc(data.customer_name||customerName||"")+"</title><style>body{font-family:Segoe UI,Tahoma,sans-serif;margin:20px;color:#000;font-size:13px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:center}button{display:none!important}</style></head><body>"+content.innerHTML+"</body></html>");w.document.close();w.focus();setTimeout(function(){try{w.print();}catch(e){}},100);};
+    }catch(e){if(window.toast)window.toast(e.message||e);}
+  }
+  async function chooseCustomer(){
+    try{
+      const d=await window.api("/api/customer/analytics"); const list=(d.customers||[]).filter(function(c){return Number(c.total||0)>0||Number(c.remaining||0)>0;});
+      if(!list.length){window.toast("لا توجد ذمم مدينة مسجلة");return;}
+      const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:9998;display:flex;align-items:center;justify-content:center;padding:14px";
+      o.innerHTML="<div style='background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:14px;width:min(620px,100%);max-height:85vh;overflow:auto;padding:18px'><h3 style='margin-top:0'>اختر العميل لفتح كشف حساب واحد</h3><input id='customer-statement-search' class='form-input' placeholder='بحث بالاسم أو الهاتف' style='width:100%;margin-bottom:10px'><div id='customer-statement-list'></div><div style='text-align:center;margin-top:10px'><button id='customer-statement-cancel' class='btn'>إلغاء</button></div></div>";document.body.appendChild(o);
+      const inp=o.querySelector("#customer-statement-search"),box=o.querySelector("#customer-statement-list");
+      function render(q){const qq=String(q||"").trim().toLowerCase();const items=list.filter(function(c){return !qq||String(c.name||"").toLowerCase().includes(qq)||String(c.phone||"").toLowerCase().includes(qq);});box.innerHTML=items.map(function(c){return "<button type='button' class='btn' style='width:100%;margin:4px 0;text-align:right' data-cid='"+esc(c.cid||"")+"' data-name='"+esc(c.name||"")+"' data-phone='"+esc(c.phone||"")+"'>📒 "+esc(c.name||"—")+" — المتبقي "+esc(cur(c.remaining))+"</button>";}).join("")||"<div style='padding:12px;text-align:center'>لا يوجد عميل مطابق</div>";box.querySelectorAll("button[data-name]").forEach(function(btn){btn.onclick=function(){const cid=btn.dataset.cid||"",nm=btn.dataset.name||"",ph=btn.dataset.phone||"";o.remove();openStatement(cid,nm,ph);};});}
+      inp.oninput=function(){render(inp.value);};o.querySelector("#customer-statement-cancel").onclick=function(){o.remove();};render("");inp.focus();
+    }catch(e){if(window.toast)window.toast(e.message||e);}
+  }
+  function boot(){if(typeof window.api!=="function")return;if(document.getElementById("customer-statement-launcher"))return;const b=document.createElement("button");b.id="customer-statement-launcher";b.type="button";b.className="btn btn-info";b.textContent="📒 كشف حساب ذمم مدينة";b.style.cssText="position:fixed;left:18px;bottom:18px;z-index:2500;box-shadow:0 4px 16px rgba(0,0,0,.25)";b.onclick=chooseCustomer;document.body.appendChild(b);window.showCustomerFullStatement=openStatement;}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",boot,{once:true});else boot();
+})();
+''', encoding='utf-8')
+
+          p = Path('public/payment-methods.js')
+          s = p.read_text(encoding='utf-8')
+          marker2 = '  // Unified reporting: cashier thermal close + manager full report.\n'
+          loader = '''  if (!document.querySelector('script[data-customer-statement="1"]')) {\n    const cs = document.createElement("script");\n    cs.src = "/customer-statement.js?v=1";\n    cs.dataset.customerStatement = "1";\n    cs.async = false;\n    document.head.appendChild(cs);\n  }\n\n'''
+          if 'data-customer-statement="1"' not in s:
+              if marker2 not in s: raise SystemExit('payment-methods loader marker not found')
+              s = s.replace(marker2, loader + marker2, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Syntax checks
+        run: |
+          python -m py_compile app.py
+          node --check public/payment-methods.js
+          node --check public/customer-statement.js
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/fix-ar-single-statement.yml
+          git add app.py public/payment-methods.js public/customer-statement.js
+          git commit -m 'Fix unified customer receivable statement'
+          git push origin HEAD
