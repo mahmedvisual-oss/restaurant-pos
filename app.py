@@ -4599,7 +4599,16 @@ def api_reports_ar():
 
     # backfill فوري: أي طلب آجل لم يُسجل بعد في credit_ledger يُضاف الآن (كله رصيد مفتوح)
     try:
-        c.execute("UPDATE credit_ledger SET status='open' WHERE order_id IN (SELECT id FROM orders WHERE payment_method='آجل')")
+        c.execute("""
+    UPDATE credit_ledger
+    SET status = CASE
+        WHEN COALESCE(paid, 0) >= COALESCE(total, 0) THEN 'settled'
+        ELSE 'open'
+    END
+    WHERE order_id IN (
+        SELECT id FROM orders WHERE payment_method='آجل'
+    )
+""")
         c.execute("SELECT id, table_num, total, paid, credit_name, date FROM orders "
                   "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
         _backfilled = 0
