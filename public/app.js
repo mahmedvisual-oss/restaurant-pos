@@ -2196,15 +2196,54 @@ function printRefundReceipt(r) {
     const content = document.getElementById("refund-receipt-print-content");
     if (!content) return;
 
-    const oldBody = document.body.innerHTML;
+    const printHtml = `<!doctype html>
+<html dir="${document.documentElement.dir || "rtl"}">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(t("refundVoucher"))}</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #000;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+    body {
+      width: 340px;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 18px;
+      text-align: center;
+      font-size: 13px;
+    }
+    button {
+      display: none !important;
+    }
+    @media print {
+      @page {
+        size: auto;
+        margin: 0;
+      }
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        width: 340px;
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  ${content.outerHTML}
+</body>
+</html>`;
 
-    document.body.innerHTML = content.outerHTML;
-
-    window.print();
-
-    document.body.innerHTML = oldBody;
-
-    window.location.reload();
+    hiddenPrint(printHtml);
   };
 }
 // ===== سند قبض (دفعة مقدمة للحفلات الخاصة) =====
@@ -2547,15 +2586,54 @@ function printCreditReceipt(r) {
     const content = document.getElementById("credit-receipt-print-content");
     if (!content) return;
 
-    const oldBody = document.body.innerHTML;
+    const printHtml = `<!doctype html>
+<html dir="${document.documentElement.dir || "rtl"}">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(t("creditVoucher"))}</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
+      color: #000;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+    body {
+      width: 340px;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 18px;
+      text-align: center;
+      font-size: 13px;
+    }
+    button {
+      display: none !important;
+    }
+    @media print {
+      @page {
+        size: auto;
+        margin: 0;
+      }
+      html, body {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        width: 340px;
+        padding: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  ${content.outerHTML}
+</body>
+</html>`;
 
-    document.body.innerHTML = content.outerHTML;
-
-    window.print();
-
-    document.body.innerHTML = oldBody;
-
-    window.location.reload();
+    hiddenPrint(printHtml);
   };
 }
 
