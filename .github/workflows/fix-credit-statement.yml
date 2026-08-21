@@ -1,0 +1,78 @@
+name: Fix customer debt statement payment linkage
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/fix-credit-statement.yml
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch credit payment history endpoint
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''@app.route("/api/credit/<int:lid>/payments")
+def api_credit_payments(lid):
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM credit_payments WHERE ledger_id=? ORDER BY id ASC", (lid,)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+'''
+          new = '''@app.route("/api/credit/<int:lid>/payments")
+def api_credit_payments(lid):
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    conn = get_db()
+    c = conn.cursor()
+    ledger = c.execute("SELECT * FROM credit_ledger WHERE id=?", (lid,)).fetchone()
+    if not ledger:
+        conn.close()
+        return jsonify({"error": "الرصيد غير موجود"}), 404
+
+    rows = c.execute(
+        "SELECT * FROM credit_payments WHERE ledger_id=? ORDER BY id ASC", (lid,)
+    ).fetchall()
+
+    # الفواتير الآجلة القديمة قد تحتوي paid في credit_ledger بدون حركة في
+    # credit_payments. أنشئ حركة تاريخية واحدة بنفس المبلغ حتى يظهر كشف الحساب
+    # كاملاً، من دون تغيير إجمالي الذمة أو احتسابها كتحصيل نقدي حديث.
+    paid = round(float(ledger["paid"] or 0), 2)
+    if paid > 0 and not rows:
+        historical_date = ledger["created_at"] or _now_sql()
+        c.execute(
+            "INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
+            "VALUES (?,?,?,?,?)",
+            (lid, paid, "آجل", ledger["employee"] if "employee" in ledger.keys() else "مدير", historical_date),
+        )
+        conn.commit()
+        rows = c.execute(
+            "SELECT * FROM credit_payments WHERE ledger_id=? ORDER BY id ASC", (lid,)
+        ).fetchall()
+
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+'''
+          if old not in s:
+              raise SystemExit('credit payment endpoint block not found; aborting')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+      - name: Syntax check
+        run: python -m py_compile app.py
+      - name: Commit and remove patch workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/fix-credit-statement.yml
+          git add app.py
+          git commit -m 'Fix customer debt statement payment linkage'
+          git push origin HEAD:main
