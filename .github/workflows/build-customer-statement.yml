@@ -66,8 +66,9 @@ def api_credit_customer_statement():
           p.write_text(s, encoding='utf-8')
           p = Path('public/app.js')
           s = p.read_text(encoding='utf-8-sig')
-          s = re.sub(r'\nasync function showCustomerStatement\(customerName\)\s*\{.*?\n\}\s*$', '\n', s, flags=re.S)
-          fn = r'''
+          if 'async function showCustomerFullStatement(customerName)' not in s:
+              s += r'''
+
 async function showCustomerFullStatement(customerName) {
   const name = String(customerName || "").trim();
   if (!name) return;
@@ -83,11 +84,14 @@ async function showCustomerFullStatement(customerName) {
   } catch (e) { toast(e.message); }
 }
 '''
-          s = s.rstrip() + '\n' + fn + '\n'
-          needle = '      <table class="report-table">\n'
-          insert = '''      ${(() => { const names = [...new Set(rowsF.map(r => String(r.customer_name || "").trim()).filter(Boolean))]; return names.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px"><b style="width:100%">كشف حساب العميل:</b>${names.map(n => `<button class="btn btn-sm btn-info" onclick="showCustomerFullStatement(${JSON.stringify(n).replace(/</g,'\\u003c')})">📒 ${escapeHtml(n)}</button>`).join("")}</div>` : ""; })()}\n'''
-          if 'showCustomerFullStatement' not in s:
-              s = s.replace(needle, insert + needle, 1)
+          # Insert a launcher in the AR customer section. Use the already-rendered customer names.
+          if 'onclick="showCustomerFullStatement(' not in s:
+              marker2 = '<div class="report-section-title">${t("rptAccountsByCustomer")} ('
+              pos = s.find(marker2)
+              if pos == -1: raise SystemExit('AR customer section marker not found')
+              insert = r'''<div class="report-section" style="margin-bottom:10px"><div class="report-section-title">📒 كشف حساب عميل كامل</div><div style="display:flex;gap:8px;flex-wrap:wrap">${[...new Set((d.customers || []).map(x => String(x.customer_name || "").trim()).filter(Boolean))].map(n => `<button class="btn btn-sm btn-info" type="button" onclick="showCustomerFullStatement(${JSON.stringify(n).replace(/</g,"\u003c")})">📒 ${escapeHtml(n)}</button>`).join("") || '<span style="color:var(--muted)">لا توجد حسابات آجلة</span>'}</div></div>
+      '''
+              s = s[:pos] + insert + s[pos:]
           p.write_text(s, encoding='utf-8-sig')
       - name: Syntax checks
         run: |
