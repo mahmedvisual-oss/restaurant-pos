@@ -2314,7 +2314,7 @@ function printDepositVoucher(r) {
         </table>
       </div>
 
-      ${r.transfer_ref ? `
+      ${(r.transfer_ref != null && String(r.transfer_ref).trim() !== "" && String(r.transfer_ref).trim() !== "0") ? `
       <table style="width:100%;border-collapse:collapse">
         <tr>
           <td class="right"
