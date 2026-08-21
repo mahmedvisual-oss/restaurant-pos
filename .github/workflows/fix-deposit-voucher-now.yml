@@ -1,0 +1,83 @@
+name: Fix deposit voucher open flow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch deposit voucher UI
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('public/voucher-reprint-fix.js')
+          s = p.read_text(encoding='utf-8')
+          marker = '/* DEPOSIT_VOUCHER_OPEN_FIX_V1 */'
+          if marker not in s:
+              s += r'''
+
+/* DEPOSIT_VOUCHER_OPEN_FIX_V1 */
+(function () {
+  "use strict";
+
+  function openDepositVoucherSafely() {
+    const ids = [
+      "modal-sandqabd", "dv-customer", "dv-phone", "dv-party-date",
+      "dv-desc", "dv-amount", "dv-method", "dv-ref"
+    ];
+    const missing = ids.filter(id => !document.getElementById(id));
+    if (missing.length) {
+      console.error("DEPOSIT_VOUCHER_OPEN_FIX: missing elements", missing);
+      if (typeof toast === "function") toast("⚠️ تعذر فتح سند القبض — عناصر النافذة غير موجودة");
+      return false;
+    }
+
+    document.getElementById("dv-customer").value = "";
+    document.getElementById("dv-phone").value = "";
+    document.getElementById("dv-party-date").value = "";
+    document.getElementById("dv-desc").value = "";
+    document.getElementById("dv-amount").value = "";
+    document.getElementById("dv-method").value = "نقدي";
+    document.getElementById("dv-ref").value = "";
+
+    if (typeof toggleDepositRef === "function") toggleDepositRef();
+    const modal = document.getElementById("modal-sandqabd");
+    modal.classList.add("show");
+    modal.style.display = "flex";
+    setTimeout(function () {
+      const input = document.getElementById("dv-customer");
+      if (input) input.focus();
+    }, 50);
+    return true;
+  }
+
+  window.openDepositModal = openDepositVoucherSafely;
+
+  // Inline onclick handlers resolve the global function, so expose the fixed
+  // implementation explicitly after app.js has finished loading.
+  window.__depositVoucherOpenFixed = true;
+})();
+'''
+              p.write_text(s, encoding='utf-8')
+              print('PATCH_OK')
+          else:
+              print('ALREADY_PATCHED')
+
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/voucher-reprint-fix.js
+          git rm .github/workflows/fix-deposit-voucher-now.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: make deposit voucher modal open reliably'
+          git push
