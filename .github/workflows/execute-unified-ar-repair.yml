@@ -1,0 +1,52 @@
+name: Execute unified AR repair
+
+on:
+  push:
+    branches: [fix/unified-ar-statement]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[execute-unified-ar]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Execute the existing repair steps
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, textwrap
+          wf = Path('.github/workflows/fix-unified-ar-statement.yml').read_text(encoding='utf-8')
+          lines = wf.splitlines()
+          blocks = []
+          i = 0
+          while i < len(lines):
+              if lines[i].strip() == 'run: |':
+                  i += 1
+                  buf = []
+                  while i < len(lines) and (not lines[i].strip() or len(lines[i]) - len(lines[i].lstrip()) >= 10):
+                      buf.append(lines[i][10:] if len(lines[i]) >= 10 else '')
+                      i += 1
+                  blocks.append('\n'.join(buf))
+              else:
+                  i += 1
+          if len(blocks) < 2:
+              raise SystemExit(f'Expected 2 Python repair blocks, found {len(blocks)}')
+          for n, code in enumerate(blocks[:2], 1):
+              print(f'Executing repair block {n}')
+              exec(compile(code, f'<repair-block-{n}>', 'exec'), {'__name__': '__main__'})
+      - name: Validate
+        run: |
+          python -m py_compile app.py
+          node --check public/app.js
+          git diff --check
+      - name: Commit repaired files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py public/app.js
+          git diff --cached --quiet && { echo 'No repair changes produced'; exit 1; }
+          git commit -m "fix: unified customer AR statements [execute-unified-ar]"
+          git push
