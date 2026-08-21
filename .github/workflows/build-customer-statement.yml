@@ -1,0 +1,104 @@
+name: Build customer full statement
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/build-customer-statement.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch backend and frontend
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          marker = '\n@app.route("/api/credit/summary")\n'
+          route = r'''
+@app.route("/api/credit/customer-statement")
+def api_credit_customer_statement():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    name = str(request.args.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "اسم العميل مطلوب"}), 400
+    conn = get_db()
+    c = conn.cursor()
+    ledgers = c.execute("SELECT * FROM credit_ledger WHERE TRIM(COALESCE(customer_name,''))=? ORDER BY datetime(created_at), id", (name,)).fetchall()
+    ledger_ids = [r["id"] for r in ledgers]
+    payments = []
+    if ledger_ids:
+        marks = ",".join("?" for _ in ledger_ids)
+        payments = c.execute(f"SELECT p.*, l.customer_name, l.order_id, l.table_num FROM credit_payments p JOIN credit_ledger l ON l.id=p.ledger_id WHERE p.ledger_id IN ({marks}) ORDER BY datetime(p.date), p.id", ledger_ids).fetchall()
+    orders = c.execute("SELECT id, credit_name, table_num, table_section, total, paid, date FROM orders WHERE payment_method='آجل' AND TRIM(COALESCE(credit_name,''))=? AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL) ORDER BY datetime(date), id", (name,)).fetchall()
+    conn.close()
+    movements = []
+    payment_ledger_ids = set()
+    for r in ledgers:
+        movements.append({"date": r["created_at"] or "", "kind": "invoice", "reference": ("#" + str(r["order_id"])) if r["order_id"] else ("#" + str(r["id"])), "invoice_id": r["order_id"] or r["id"], "ledger_id": r["id"], "description": "فاتورة آجل", "debit": round(r["total"] or 0, 2), "credit": 0, "method": "", "receipt_no": "", "table_num": r["table_num"]})
+    for r in orders:
+        movements.append({"date": r["date"] or "", "kind": "invoice", "reference": "#" + str(r["id"]), "invoice_id": r["id"], "ledger_id": None, "description": "فاتورة آجل", "debit": round(r["total"] or 0, 2), "credit": 0, "method": "", "receipt_no": "", "table_num": r["table_num"]})
+    for r in payments:
+        payment_ledger_ids.add(r["ledger_id"])
+        movements.append({"date": r["date"] or "", "kind": "payment", "reference": str(r["receipt_no"]) if r["receipt_no"] else ("#" + str(r["id"])), "invoice_id": r["order_id"], "ledger_id": r["ledger_id"], "description": "سداد / تحصيل", "debit": 0, "credit": round(r["amount"] or 0, 2), "method": r["method"] or "", "receipt_no": r["receipt_no"] or "", "table_num": r["table_num"]})
+    for r in ledgers:
+        paid = round(r["paid"] or 0, 2)
+        if paid > 0 and r["id"] not in payment_ledger_ids:
+            movements.append({"date": r["updated_at"] or r["created_at"] or "", "kind": "payment", "reference": "سداد سابق", "invoice_id": r["order_id"] or r["id"], "ledger_id": r["id"], "description": "سداد مسجل سابقاً", "debit": 0, "credit": paid, "method": "", "receipt_no": "", "table_num": r["table_num"]})
+    movements.sort(key=lambda x: (x["date"] or "", 0 if x["kind"] == "invoice" else 1, str(x["reference"])))
+    running = 0
+    for m in movements:
+        running = round(running + m["debit"] - m["credit"], 2)
+        m["balance"] = running
+    total_debit = round(sum(m["debit"] for m in movements), 2)
+    total_credit = round(sum(m["credit"] for m in movements), 2)
+    return jsonify({"customer_name": name, "movements": movements, "total_debit": total_debit, "total_credit": total_credit, "balance": round(total_debit - total_credit, 2), "count": len(movements)})
+'''
+          if 'def api_credit_customer_statement()' not in s:
+              if marker not in s: raise SystemExit('credit summary marker not found')
+              s = s.replace(marker, route + marker, 1)
+          p.write_text(s, encoding='utf-8')
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8-sig')
+          s = re.sub(r'\nasync function showCustomerStatement\(customerName\)\s*\{.*?\n\}\s*$', '\n', s, flags=re.S)
+          fn = r'''
+async function showCustomerFullStatement(customerName) {
+  const name = String(customerName || "").trim();
+  if (!name) return;
+  try {
+    const data = await api("/api/credit/customer-statement?name=" + encodeURIComponent(name));
+    const modal = document.createElement("div");
+    modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:3200;padding:15px;overflow:auto";
+    const rows = (data.movements || []).map(m => `<tr><td>${escapeHtml(m.date || "—")}</td><td>${escapeHtml(m.reference || "—")}</td><td>${escapeHtml(m.description || "")}${m.table_num ? `<br><small>طاولة ${escapeHtml(String(m.table_num))}</small>` : ""}${m.method ? `<br><small>${escapeHtml(methodName(m.method))}</small>` : ""}</td><td>${m.debit ? fmtCur(m.debit) : "—"}</td><td style="color:var(--success)">${m.credit ? fmtCur(m.credit) : "—"}</td><td style="font-weight:bold;color:${m.balance > 0 ? "var(--danger)" : "var(--success)"}">${fmtCur(m.balance)}</td></tr>`).join("");
+    modal.innerHTML = `<div style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:14px;width:100%;max-width:1100px;max-height:92vh;overflow:auto;padding:20px"><div id="customer-full-statement-print-content"><div style="text-align:center;margin-bottom:16px"><h2 style="margin:0 0 5px">${escapeHtml(RESTAURANT_NAME)}</h2><h3 style="margin:0">كشف حساب كامل للعميل</h3></div><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:14px"><b>اسم العميل: ${escapeHtml(name)}</b><span>تاريخ الكشف: ${new Date().toLocaleString()}</span></div><div class="report-kpi"><div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(data.total_debit)}</div><div class="report-kpi-label">إجمالي المدين</div></div><div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(data.total_credit)}</div><div class="report-kpi-label">إجمالي الدائن / المسدد</div></div><div class="report-kpi-item"><div class="report-kpi-value" style="color:${data.balance > 0 ? "var(--danger)" : "var(--success)"}">${fmtCur(data.balance)}</div><div class="report-kpi-label">الرصيد المستحق</div></div></div><table class="report-table" style="margin-top:15px"><tr><th>التاريخ</th><th>المرجع</th><th>البيان</th><th>مدين</th><th>دائن / مسدد</th><th>الرصيد</th></tr>${rows || `<tr><td colspan="6" style="text-align:center">لا توجد حركات</td></tr>`}<tr class="total-row"><td colspan="3"><b>الإجمالي</b></td><td><b>${fmtCur(data.total_debit)}</b></td><td style="color:var(--success)"><b>${fmtCur(data.total_credit)}</b></td><td style="color:${data.balance > 0 ? "var(--danger)" : "var(--success)"}"><b>${fmtCur(data.balance)}</b></td></tr></table></div><div style="display:flex;gap:8px;justify-content:center;margin-top:18px"><button class="btn btn-info" type="button" id="customer-full-statement-print">🖨️ طباعة كشف الحساب</button><button class="btn" type="button" id="customer-full-statement-close">✕ إغلاق</button></div></div>`;
+    document.body.appendChild(modal);
+    document.getElementById("customer-full-statement-close").onclick = () => modal.remove();
+    document.getElementById("customer-full-statement-print").onclick = () => { const content = document.getElementById("customer-full-statement-print-content"); if (!content) return; hiddenPrint(`<!doctype html><html dir="${document.documentElement.dir || "rtl"}"><head><meta charset="utf-8"><title>كشف حساب - ${escapeHtml(name)}</title><style>*{box-sizing:border-box}body{margin:0;padding:20px;background:#fff;color:#000;font-family:"Segoe UI",Tahoma,sans-serif;font-size:13px}button{display:none!important}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:center}th{font-weight:bold}.report-kpi{display:flex;gap:10px;margin:12px 0}.report-kpi-item{flex:1;text-align:center;border:1px solid #999;padding:8px}.report-kpi-value{font-weight:bold;font-size:16px}.report-kpi-label{font-size:11px}</style></head><body>${content.outerHTML}</body></html>`); };
+  } catch (e) { toast(e.message); }
+}
+'''
+          s = s.rstrip() + '\n' + fn + '\n'
+          needle = '      <table class="report-table">\n'
+          insert = '''      ${(() => { const names = [...new Set(rowsF.map(r => String(r.customer_name || "").trim()).filter(Boolean))]; return names.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;padding:10px;border:1px solid var(--border);border-radius:10px"><b style="width:100%">كشف حساب العميل:</b>${names.map(n => `<button class="btn btn-sm btn-info" onclick="showCustomerFullStatement(${JSON.stringify(n).replace(/</g,'\\u003c')})">📒 ${escapeHtml(n)}</button>`).join("")}</div>` : ""; })()}\n'''
+          if 'showCustomerFullStatement' not in s:
+              s = s.replace(needle, insert + needle, 1)
+          p.write_text(s, encoding='utf-8-sig')
+      - name: Syntax checks
+        run: |
+          python -m py_compile app.py
+          node --check public/app.js
+      - name: Commit changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/fix-credit-statement.yml .github/workflows/build-customer-statement.yml
+          git add app.py public/app.js
+          git commit -m 'Add full customer account statement'
+          git push origin HEAD:main
