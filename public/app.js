@@ -5560,7 +5560,7 @@ async function checkLowStock() {
 }
 
 async function init() {
-  setLang(localStorage.getItem("pos_lang") || "id");
+  setLang(localStorage.getItem("pos_lang") || "ar");
   applyUiPrefs();
   const cache = posCacheLoad();
   const cacheValid = !!(cache && cache.settings && (Date.now() - cache.ts) < 24 * 3600 * 1000);
