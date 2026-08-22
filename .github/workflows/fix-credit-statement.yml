@@ -17,6 +17,7 @@ jobs:
           from pathlib import Path
           import re
 
+          # TRIGGER NOW: complete customer credit statement
           # 1) Repair old credit payment history endpoint without changing totals.
           p = Path('app.py')
           s = p.read_text(encoding='utf-8')
