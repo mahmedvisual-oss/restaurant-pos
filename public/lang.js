@@ -2031,7 +2031,7 @@ const I18N = {
   },
 };
 
-let currentLang = "ar";
+let currentLang = "id";
 
 function setLang(l) {
   if (!I18N[l]) l = "id";
