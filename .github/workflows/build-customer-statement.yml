@@ -84,7 +84,6 @@ async function showCustomerFullStatement(customerName) {
   } catch (e) { toast(e.message); }
 }
 '''
-          # Insert a launcher in the AR customer section. Use the already-rendered customer names.
           if 'onclick="showCustomerFullStatement(' not in s:
               marker2 = '<div class="report-section-title">${t("rptAccountsByCustomer")} ('
               pos = s.find(marker2)
@@ -106,3 +105,5 @@ async function showCustomerFullStatement(customerName) {
           git add app.py public/app.js
           git commit -m 'Add full customer account statement'
           git push origin HEAD:main
+
+# Trigger verification run
