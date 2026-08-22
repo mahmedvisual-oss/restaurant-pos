@@ -3601,9 +3601,9 @@ def api_day_status():
 
 @app.route("/api/day/close", methods=["POST"])
 def api_day_close():
-    u, err, code = require_manager()
-    if err:
-        return jsonify({"error": err}), code
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     data = request.json or {}
     try:
         counted = round(float(data.get("counted_cash", 0)), 2)
