@@ -1,0 +1,415 @@
+name: Fix unified accounts receivable statement
+
+on:
+  push:
+    branches: [fix/unified-ar-statement]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[unified-ar-statement]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace AR backend with unified customer accounts
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8-sig')
+
+          new_func = r'''@app.route("/api/reports/ar")
+          def api_reports_ar():
+              """تقرير الذمم المدينة مع كشف حساب موحّد لكل عميل.
+              يربط customer_id أولاً، ثم الهاتف/الاسم للبيانات القديمة.
+              فواتير الآجل = مدين، والتحصيلات الفعلية فقط (method != 'آجل') = دائن.
+              """
+              u, err, code = require_manager()
+              if err:
+                  return jsonify({"error": err}), code
+              from_d = (request.args.get("from") or "").strip()
+              to_d = (request.args.get("to") or "").strip()
+              conn = get_db()
+              c = conn.cursor()
+              today = _now().strftime("%Y-%m-%d")
+
+              ledgers = [dict(r) for r in c.execute("SELECT * FROM credit_ledger ORDER BY id ASC").fetchall()]
+              customers = [dict(r) for r in c.execute("SELECT id, name, phone, points FROM customers").fetchall()]
+              payments_all = [dict(r) for r in c.execute(
+                  "SELECT p.*, l.customer_name, l.customer_id, l.phone AS ledger_phone "
+                  "FROM credit_payments p LEFT JOIN credit_ledger l ON l.id=p.ledger_id "
+                  "ORDER BY p.date ASC, p.id ASC"
+              ).fetchall()]
+
+              phone_to_cid = {}
+              name_to_cid = {}
+              customers_map = {cu["id"]: cu for cu in customers}
+              for cu in customers:
+                  if cu.get("phone"):
+                      phone_to_cid[str(cu["phone"]).strip().lower()] = cu["id"]
+                  name_to_cid[(cu.get("name") or "").strip().lower()] = cu["id"]
+
+              def resolve_key(row):
+                  cid = row.get("customer_id")
+                  if cid and cid in customers_map:
+                      return ("id", cid)
+                  phone = row.get("phone") or row.get("ledger_phone")
+                  if phone and str(phone).strip().lower() in phone_to_cid:
+                      return ("id", phone_to_cid[str(phone).strip().lower()])
+                  nm = (row.get("customer_name") or "").strip().lower()
+                  if nm in name_to_cid:
+                      return ("id", name_to_cid[nm])
+                  return ("name", nm or "—")
+
+              # الحفاظ على إجماليات AR الحالية.
+              summary = {"open_count": 0, "settled_count": 0, "total_invoiced": 0.0,
+                         "total_paid": 0.0, "total_open_due": 0.0,
+                         "overpaid_count": 0, "overpaid_amount": 0.0}
+              aging = {"current": [0, 0.0], "31_60": [0, 0.0], "61_90": [0, 0.0], "90_plus": [0, 0.0]}
+              paymap = {}
+              for p in payments_all:
+                  paymap.setdefault(p.get("ledger_id"), []).append(p)
+
+              for r in ledgers:
+                  total = float(r.get("total") or 0)
+                  paid = float(r.get("paid") or 0)
+                  due = round(max(total - paid, 0), 2)
+                  is_open = r.get("status") == "open"
+                  summary["total_invoiced"] += total
+                  summary["total_paid"] += paid
+                  if is_open:
+                      summary["open_count"] += 1
+                      summary["total_open_due"] += due
+                  else:
+                      summary["settled_count"] += 1
+                  if paid > total + 0.001:
+                      summary["overpaid_count"] += 1
+                      summary["overpaid_amount"] += paid - total
+                  days = 0
+                  created = (r.get("created_at") or "")
+                  try:
+                      days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(created[:10], "%Y-%m-%d")).days
+                  except Exception:
+                      pass
+                  if is_open:
+                      if days <= 30:
+                          aging["current"][0] += 1; aging["current"][1] += due
+                      elif days <= 60:
+                          aging["31_60"][0] += 1; aging["31_60"][1] += due
+                      elif days <= 90:
+                          aging["61_90"][0] += 1; aging["61_90"][1] += due
+                      else:
+                          aging["90_plus"][0] += 1; aging["90_plus"][1] += due
+
+              # تجميع كشف حساب واحد لكل عميل.
+              accounts = {}
+              def ensure_account(key):
+                  if key not in accounts:
+                      cid = key[1] if key[0] == "id" else None
+                      cu = customers_map.get(cid) if cid else None
+                      accounts[key] = {
+                          "key": "%s:%s" % (key[0], key[1]),
+                          "customer_id": cid,
+                          "customer_name": (cu.get("name") if cu else "") or "",
+                          "phone": (cu.get("phone") if cu else "") or "",
+                          "points": (cu.get("points") if cu else 0) or 0,
+                          "total_invoiced": 0.0,
+                          "total_paid": 0.0,
+                          "ledger_due": 0.0,
+                          "open_count": 0,
+                          "settled_count": 0,
+                          "invoices": [],
+                          "payments": [],
+                          "statement": [],
+                      }
+                  return accounts[key]
+
+              for l in ledgers:
+                  key = resolve_key(l)
+                  a = ensure_account(key)
+                  if not a["customer_name"]:
+                      a["customer_name"] = l.get("customer_name") or "—"
+                  if not a["phone"]:
+                      a["phone"] = l.get("phone") or ""
+                  total = round(float(l.get("total") or 0), 2)
+                  paid = round(float(l.get("paid") or 0), 2)
+                  due = round(max(total - paid, 0), 2)
+                  inv = dict(l)
+                  inv["due"] = due
+                  inv["payments"] = paymap.get(l.get("id"), [])
+                  inv["days_open"] = 0
+                  try:
+                      inv["days_open"] = max((datetime.strptime(today, "%Y-%m-%d") - datetime.strptime((l.get("created_at") or "")[:10], "%Y-%m-%d")).days, 0)
+                  except Exception:
+                      pass
+                  inv["overdue_days"] = 0
+                  if l.get("due_date") and l.get("status") == "open":
+                      try:
+                          inv["overdue_days"] = max((datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(l["due_date"], "%Y-%m-%d")).days, 0)
+                      except Exception:
+                          pass
+                  a["total_invoiced"] = round(a["total_invoiced"] + total, 2)
+                  a["total_paid"] = round(a["total_paid"] + paid, 2)
+                  a["ledger_due"] = round(a["ledger_due"] + due, 2)
+                  if l.get("status") == "open": a["open_count"] += 1
+                  else: a["settled_count"] += 1
+                  a["invoices"].append(inv)
+
+              # التحصيلات الفعلية فقط: أي حركة method='آجل' هي قيد فتح/تسوية دفترية وليست قبضاً جديداً.
+              actual_payments = []
+              for p in payments_all:
+                  method = str(p.get("method") or "").strip()
+                  if method == "آجل":
+                      continue
+                  key = resolve_key(p)
+                  a = ensure_account(key)
+                  if not a["customer_name"]:
+                      a["customer_name"] = p.get("customer_name") or "—"
+                  if not a["phone"]:
+                      a["phone"] = p.get("ledger_phone") or ""
+                  amount = round(float(p.get("amount") or 0), 2)
+                  pp = dict(p)
+                  pp["amount"] = amount
+                  actual_payments.append(pp)
+                  a["payments"].append(pp)
+
+              # كشف زمني موحّد: الفاتورة مدين والتحصيل الفعلي دائن مع رصيد متحرك.
+              for a in accounts.values():
+                  events = []
+                  for inv in a["invoices"]:
+                      events.append({
+                          "sort_date": (inv.get("created_at") or "")[:19],
+                          "sort_id": int(inv.get("id") or 0),
+                          "type": "invoice",
+                          "date": inv.get("created_at") or "",
+                          "reference": inv.get("order_id") or inv.get("id") or "",
+                          "description": "فاتورة آجل",
+                          "debit": round(float(inv.get("total") or 0), 2),
+                          "credit": 0.0,
+                          "ledger_id": inv.get("id"),
+                          "receipt_no": "",
+                          "method": "آجل",
+                      })
+                  for p in a["payments"]:
+                      events.append({
+                          "sort_date": (p.get("date") or "")[:19],
+                          "sort_id": 100000000 + int(p.get("id") or 0),
+                          "type": "payment",
+                          "date": p.get("date") or "",
+                          "reference": p.get("receipt_no") or p.get("id") or "",
+                          "description": "تحصيل فعلي",
+                          "debit": 0.0,
+                          "credit": round(float(p.get("amount") or 0), 2),
+                          "ledger_id": p.get("ledger_id"),
+                          "receipt_no": p.get("receipt_no") or "",
+                          "method": p.get("method") or "",
+                      })
+                  events.sort(key=lambda e: (e["sort_date"], e["sort_id"]))
+                  running = 0.0
+                  statement = []
+                  for e in events:
+                      running = round(running + e["debit"] - e["credit"], 2)
+                      e["balance"] = running
+                      e.pop("sort_date", None); e.pop("sort_id", None)
+                      statement.append(e)
+                  a["statement"] = statement
+                  actual_collected = round(sum(p["amount"] for p in a["payments"]), 2)
+                  a["actual_collected"] = actual_collected
+                  a["remaining"] = round(max(a["total_invoiced"] - actual_collected, 0), 2)
+                  a["reconciliation_difference"] = round(a["remaining"] - a["ledger_due"], 2)
+
+              accounts_list = sorted(accounts.values(), key=lambda x: (-x["remaining"], x["customer_name"]))
+
+              payments_period = []
+              for p in actual_payments:
+                  dt = (p.get("date") or "")[:10]
+                  if from_d and dt < from_d: continue
+                  if to_d and dt > to_d: continue
+                  payments_period.append(p)
+
+              period_collected = round(sum(float(p.get("amount") or 0) for p in payments_period), 2)
+              if from_d and to_d:
+                  period_new = round(c.execute(
+                      "SELECT COALESCE(SUM(total),0) FROM credit_ledger WHERE date(created_at)>=? AND date(created_at)<=?",
+                      (from_d, to_d)).fetchone()[0], 2)
+              else:
+                  period_new = round(summary["total_invoiced"], 2)
+
+              conn.close()
+              return jsonify({
+                  "as_of": today, "from": from_d, "to": to_d,
+                  "summary": {
+                      "open_count": summary["open_count"],
+                      "settled_count": summary["settled_count"],
+                      "total_invoiced": round(summary["total_invoiced"], 2),
+                      "total_paid": round(summary["total_paid"], 2),
+                      "total_open_due": round(summary["total_open_due"], 2),
+                      "overpaid_count": summary["overpaid_count"],
+                      "overpaid_amount": round(summary["overpaid_amount"], 2),
+                  },
+                  "aging": [
+                      {"bucket": "current", "count": aging["current"][0], "total": round(aging["current"][1], 2)},
+                      {"bucket": "31_60", "count": aging["31_60"][0], "total": round(aging["31_60"][1], 2)},
+                      {"bucket": "61_90", "count": aging["61_90"][0], "total": round(aging["61_90"][1], 2)},
+                      {"bucket": "90_plus", "count": aging["90_plus"][0], "total": round(aging["90_plus"][1], 2)},
+                  ],
+                  "accounts": accounts_list,
+                  "customers": ledgers,
+                  "payments": payments_period,
+                  "period_collected": period_collected,
+                  "period_new": period_new,
+              })
+          
+          pattern = r'@app\.route\("/api/reports/ar"\)\s+def api_reports_ar\(\):.*?(?=\n@app\.route\("/api/credit/overdue"\))'
+          ns, count = re.subn(pattern, new_func.rstrip() + '\n\n', s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('AR backend function not found')
+          p.write_text(ns, encoding='utf-8')
+
+      - name: Replace AR report UI with one statement per customer
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8-sig')
+
+          new_func = r'''async function renderAR(c) {
+            const from = document.getElementById("report-from").value;
+            const to = document.getElementById("report-to").value;
+            c.innerHTML = `<div class="report-section"><div class="report-section-title">${t("rptARTitle")}</div><p style="color:var(--muted);font-size:12px">${t("rptLoading")}</p></div>`;
+            try {
+              const d = await trackReportLoad(api("/api/reports/ar?from=" + encodeURIComponent(from || "") + "&to=" + encodeURIComponent(to || "")));
+              if (d.error) { c.innerHTML = `<span style="color:var(--danger)">${d.error}</span>`; return; }
+              const s = d.summary || {};
+              const recon = Number(s.total_invoiced || 0) - (Number(s.total_paid || 0) + Number(s.total_open_due || 0));
+              const agingRows = [
+                { k: "current", lbl: t("rptAgingCurrent") },
+                { k: "31_60", lbl: t("rptAging31_60") },
+                { k: "61_90", lbl: t("rptAging61_90") },
+                { k: "90_plus", lbl: t("rptAging90") },
+              ];
+              const aging = {};
+              (d.aging || []).forEach(a => { aging[a.bucket] = a; });
+              const accounts = d.accounts || [];
+              c.innerHTML = `
+                <div class="report-section">
+                  <div class="report-section-title">${t("rptARTitle")} <span style="font-weight:400;font-size:11px;color:var(--muted)">${t("rptAsOf")} ${d.as_of}</span>
+                    <button class="btn btn-sm btn-info" style="margin-left:auto" onclick="printARReport()">🖨️ ${t("rptPrintBtn")}</button>
+                  </div>
+                  <div class="report-kpi">
+                    <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(s.total_invoiced)}</div><div class="report-kpi-label">${t("rptTotalInvoiced")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(s.total_paid)}</div><div class="report-kpi-label">${t("rptTotalCollected")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--danger)">${fmtCur(s.total_open_due)}</div><div class="report-kpi-label">${t("rptOpenDue")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value">${s.open_count || 0}</div><div class="report-kpi-label">${t("rptOpenAccounts")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value">${s.settled_count || 0}</div><div class="report-kpi-label">${t("rptSettledAccounts")}</div></div>
+                  </div>
+                  <div class="report-kpi">
+                    <div class="report-kpi-item"><div class="report-kpi-value">${fmtCur(d.period_new || 0)}</div><div class="report-kpi-label">${t("rptPeriodNew")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value" style="color:var(--success)">${fmtCur(d.period_collected || 0)}</div><div class="report-kpi-label">${t("rptPeriodCollected")}</div></div>
+                    <div class="report-kpi-item"><div class="report-kpi-value" style="color:${s.overpaid_count ? "var(--danger)" : "var(--muted)"}">${s.overpaid_count || 0}${s.overpaid_amount ? " · " + fmtCur(s.overpaid_amount) : ""}</div><div class="report-kpi-label">${t("rptOverpaid")}</div></div>
+                  </div>
+                  <div style="font-size:11px;color:var(--muted)">${t("rptReconNote")}: ${fmtCur(s.total_invoiced || 0)} = ${fmtCur(s.total_paid || 0)} + ${fmtCur(s.total_open_due || 0)}${Math.abs(recon) > 0.01 ? ` <b style="color:${recon > 0 ? "var(--danger)" : "var(--warning)"}">(${t("rptDifference")}: ${fmtCur(recon)})</b>` : ""}</div>
+                </div>
+
+                <div class="report-section">
+                  <div class="report-section-title">${t("rptAgingTitle")}</div>
+                  <table class="report-table">
+                    <tr><th>${t("rptAgingBucket")}</th><th>${t("rptAccounts")}</th><th>${t("rptRemaining")}</th></tr>
+                    ${agingRows.map(a => { const v = aging[a.k] || { count: 0, total: 0 }; return `<tr><td>${a.lbl}</td><td>${v.count}</td><td style="color:var(--danger)">${fmtCur(v.total)}</td></tr>`; }).join("")}
+                    <tr class="total-row"><td>${t("rptTotal")}</td><td>${s.open_count || 0}</td><td>${fmtCur(s.total_open_due || 0)}</td></tr>
+                  </table>
+                </div>
+
+                <div class="report-section">
+                  <div class="report-section-title">${t("rptAccountsByCustomer")} (${accounts.length})</div>
+                  ${accounts.length ? accounts.map((a, idx) => {
+                    const key = "ar-customer-" + idx;
+                    const phone = a.phone ? ` · ${escapeHtml(a.phone)}` : "";
+                    const diff = Number(a.reconciliation_difference || 0);
+                    return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+                      <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--card);cursor:pointer" onclick="toggleArCustomerStatement('${key}')">
+                        <b style="font-size:13px;flex:1">${escapeHtml(a.customer_name || "—")}${phone}</b>
+                        <span style="font-size:11px;color:var(--muted)">${a.invoices.length} ${t("rptInvoices")}</span>
+                        <span style="font-size:11px">${a.open_count} ${t("rptOpen")} · ${a.settled_count} ${t("rptSettled")}</span>
+                        <span style="font-size:11px;color:var(--success)">${fmtCur(a.actual_collected || 0)}</span>
+                        <span style="font-size:13px;color:var(--danger);font-weight:bold">${fmtCur(a.remaining || 0)}</span>
+                        <span id="arrow-${key}" style="font-size:11px">▼</span>
+                      </div>
+                      <div id="${key}" style="display:none;padding:8px">
+                        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin:4px 0 8px">
+                          <span>المدين: <b>${fmtCur(a.total_invoiced)}</b></span>
+                          <span style="color:var(--success)">المسدّد فعلياً: <b>${fmtCur(a.actual_collected)}</b></span>
+                          <span style="color:var(--danger);font-weight:700">الرصيد: <b>${fmtCur(a.remaining)}</b></span>
+                          ${diff ? `<span style="color:var(--warning)">فرق التسوية: ${fmtCur(diff)}</span>` : ""}
+                        </div>
+                        <table class="report-table">
+                          <tr><th>التاريخ</th><th>المرجع</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr>
+                          ${a.statement.map(e => `<tr>
+                            <td>${escapeHtml(e.date || "")}</td>
+                            <td>${escapeHtml(String(e.reference || ""))}</td>
+                            <td>${escapeHtml(e.description || "")}${e.method && e.type === "payment" ? " — " + escapeHtml(methodName(e.method)) : ""}</td>
+                            <td>${e.debit ? fmtCur(e.debit) : "—"}</td>
+                            <td style="color:var(--success)">${e.credit ? fmtCur(e.credit) : "—"}</td>
+                            <td style="font-weight:700;color:${e.balance > 0 ? "var(--danger)" : "var(--success)"}">${fmtCur(e.balance)}</td>
+                          </tr>`).join("")}
+                        </table>
+                        <div style="font-size:11px;color:var(--muted);margin-top:6px">كشف الحساب موحّد: الفواتير مدين والتحصيلات الفعلية دائن. الحركات القديمة غير النقدية المستعملة لفتح الآجل لا تُحتسب كتحصيل جديد.</div>
+                      </div>
+                    </div>`;
+                  }).join("") : `<p style="color:var(--muted)">${t("rptNoAR")}</p>`}
+                </div>
+
+                <div class="report-section">
+                  <div class="report-section-title">${t("rptPaymentOps")} (${(d.payments || []).length})</div>
+                  <table class="report-table">
+                    <tr><th>#</th><th>${t("rptDate")}</th><th>${t("rptCustomer")}</th><th>${t("rptAmount")}</th><th>${t("rptMethod")}</th><th>${t("rptCashier")}</th></tr>
+                    ${(d.payments || []).length ? d.payments.map(p => `<tr><td>#${p.id}</td><td>${p.date}</td><td>${escapeHtml(p.customer_name || "")}</td><td style="color:var(--success)">${fmtCur(p.amount)}</td><td>${methodName(p.method)}</td><td>${escapeHtml(p.employee || "")}</td></tr>`).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">${t("rptNoPaymentsPeriod")}</td></tr>`}
+                  </table>
+                </div>`;
+            } catch (e) { c.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`; }
+          }
+
+          function toggleArCustomerStatement(key) {
+            const el = document.getElementById(key);
+            const arrow = document.getElementById("arrow-" + key);
+            if (!el) return;
+            const show = el.style.display === "none";
+            el.style.display = show ? "" : "none";
+            if (arrow) arrow.textContent = show ? "▲" : "▼";
+          }
+
+          function toggleArStatement(id) {
+            const el = document.getElementById("ar-statement-" + id);
+            if (el) el.style.display = (el.style.display === "none") ? "" : "none";
+          }
+          '''
+
+          pattern = r'async function renderAR\(c\)\s*\{.*?(?=\nfunction toggleArStatement\(id\))'
+          ns, count = re.subn(pattern, new_func.rstrip() + '\n\n', s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('AR render function not found')
+          p.write_text(ns, encoding='utf-8')
+
+      - name: Validate code
+        shell: bash
+        run: |
+          python -m py_compile app.py
+          node --check public/app.js
+
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-unified-ar-statement.yml
+          git add app.py public/app.js
+          git diff --cached --check
+          git commit -m "fix: unified customer AR statements [unified-ar-statement]"
+          git push
