@@ -4211,7 +4211,9 @@ def _do_pay(u, data):
     payment_method = str(data.get("payment_method", "نقدي"))
     guests = int(data.get("guests", 1) or 1)
     credit_name = str(data.get("credit_name") or "").strip() or None
-    transfer_ref = str(data.get("transfer_ref") or "").strip() or None
+    transfer_ref = str(data.get("transfer_ref") or "").strip()
+    if transfer_ref in ("", "0", "None", "null"):
+        transfer_ref = None
     transfer_name = str(data.get("transfer_name") or "").strip() or None
     if payment_method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
         return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
