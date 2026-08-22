@@ -3632,9 +3632,9 @@ def api_day_close():
 @app.route("/api/day/start", methods=["POST"])
 def api_day_start():
     """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""
-    u, err, code = require_manager()
-    if err:
-        return jsonify({"error": err}), code
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
