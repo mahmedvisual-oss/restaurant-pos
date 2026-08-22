@@ -17,12 +17,16 @@
     bank_other: "تحويل بنكي - بنك آخر"
   };
 
-  const LABELS = {
-    credit: "💳 بطاقة ائتمان",
-    debit: "🏧 بطاقة خصم",
-    wallet: "📱 محفظة إلكترونية",
-    bank: "💸 تحويل بنكي"
-  };
+ function paymentLabel(key, fallback) {
+    return (typeof t === "function") ? t(key) : fallback;
+}
+
+const LABELS = {
+    credit: "💳 " + (typeof t === "function" ? t("creditCard") : "بطاقة ائتمان"),
+    debit: "🏧 " + (typeof t === "function" ? t("debitCard") : "بطاقة خصم"),
+    wallet: "📱 " + (typeof t === "function" ? t("wallet") : "محفظة إلكترونية"),
+    bank: "💸 " + (typeof t === "function" ? t("bankTransfer") : "تحويل بنكي")
+};
 
   Object.assign(window.__POS_PAYMENT_METHODS__ || (window.__POS_PAYMENT_METHODS__ = {}), PAYMENT_METHODS);
 
@@ -36,9 +40,9 @@
     const box = document.getElementById("pay-methods");
     if (!box || box.dataset.expanded === "1") return;
     box.innerHTML = [
-      '<button type="button" class="pay-method selected" data-method="نقدي" data-i18n="cash" onclick="setPayMethod(this)">💵 نقداً</button>',
-      '<button type="button" class="pay-method" data-method="آجل" data-i18n="credit" onclick="setPayMethod(this)">📝 آجل</button>',
-      '<button type="button" class="pay-method" data-method="كيروس" data-i18n="kiros" onclick="setPayMethod(this)">🧾 كيروس</button>',
+      '<button type="button" class="pay-method selected" data-method="نقدي" data-i18n="cash" onclick="setPayMethod(this)">💵 ' + paymentLabel("cash", "نقداً") + '</button>',
+      '<button type="button" class="pay-method" data-method="آجل" data-i18n="credit" onclick="setPayMethod(this)">📝 ' + paymentLabel("credit", "آجل") + '</button>',
+      '<button type="button" class="pay-method" data-method="كيروس" data-i18n="kiros" onclick="setPayMethod(this)">🧾 ' + paymentLabel("kiros", "كيروس") + '</button>',
       '<div class="payment-method-group"><button type="button" class="pay-method payment-group" onclick="togglePaymentGroup(this)">' + LABELS.credit + ' ▾</button><div class="payment-submethods">' + optionButtons([{ value: PAYMENT_METHODS.credit_bca, label: "🏦 BCA" }, { value: PAYMENT_METHODS.credit_mandiri, label: "💳 Mandiri" }]) + '</div></div>',
       '<div class="payment-method-group"><button type="button" class="pay-method payment-group" onclick="togglePaymentGroup(this)">' + LABELS.debit + ' ▾</button><div class="payment-submethods">' + optionButtons([{ value: PAYMENT_METHODS.debit_bca, label: "🏦 BCA" }, { value: PAYMENT_METHODS.debit_mandiri, label: "💳 Mandiri" }]) + '</div></div>',
       '<div class="payment-method-group"><button type="button" class="pay-method payment-group" onclick="togglePaymentGroup(this)">' + LABELS.wallet + ' ▾</button><div class="payment-submethods">' + optionButtons([{ value: PAYMENT_METHODS.wallet_gopay, label: "GoPay" }, { value: PAYMENT_METHODS.wallet_ovo, label: "OVO" }, { value: PAYMENT_METHODS.wallet_dana, label: "DANA" }, { value: PAYMENT_METHODS.wallet_shopeepay, label: "ShopeePay" }, { value: PAYMENT_METHODS.wallet_linkaja, label: "LinkAja" }]) + '</div></div>',
