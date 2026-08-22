@@ -71,6 +71,13 @@ METHOD_SYNONYMS = {
 def _canon_method(m):
     return METHOD_SYNONYMS.get(m, m)
 
+def _report_method(m):
+    m = _canon_method(m)
+    return {
+        "BCA": "تحويل بنكي - BCA",
+        "مانديري": "تحويل بنكي - Mandiri",
+    }.get(m, m)
+
 app = Flask(__name__, static_folder="public", static_url_path="")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
@@ -3557,7 +3564,7 @@ def _day_summary(c, day):
     by_method = {}
     opened = None
     for r in rows:
-        m = _canon_method(r["payment_method"] or "نقدي")
+        m = _report_method(r["payment_method"] or "نقدي")
         bm = by_method.setdefault(m, {"total": 0.0, "count": 0})
         bm["total"] = round(bm["total"] + (r["total"] or 0), 2)
         bm["count"] += 1
@@ -4580,7 +4587,7 @@ def api_reports_advanced():
         cost_map[mid] = existing + float(qp or 0) * float(inv.cost or 0)
     cogs = 0.0
     for r in rows:
-        method = _canon_method(r["payment_method"] or "نقدي")
+        method = _report_method(r["payment_method"] or "نقدي")
         m = by_method.setdefault(method, {"total": 0.0, "count": 0})
         m["total"] = round(m["total"] + (r["total"] or 0), 2)
         m["count"] += 1
@@ -5206,7 +5213,7 @@ def api_reports_income():
     # تحليل حسب طريقة الدفع (مبالغ مقبوضة فعلاً)
     by_method = {}
     for r in rows:
-        m = _canon_method(r["payment_method"] or "نقدي")
+        m = _report_method(r["payment_method"] or "نقدي")
         b = by_method.setdefault(m, {"count": 0, "paid": 0.0, "total": 0.0})
         b["count"] += 1
         b["paid"] = round(b["paid"] + (r["paid"] or 0), 2)
