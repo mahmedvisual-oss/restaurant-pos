@@ -1,4 +1,4 @@
-/* Credit settlement receipt fix: no popup is used for a NEW receipt. */
+/* Credit settlement receipt fix + cloud invoice reprint fix. */
 (function () {
   "use strict";
 
@@ -109,10 +109,6 @@
   const timer = setInterval(function () { tries += 1; if (install() || tries >= 60) clearInterval(timer); }, 100);
   install();
 
-  // Refresh table state after a successful full transfer. The original app.js
-  // selects the destination before refreshing tableData, so the old table can
-  // remain visually occupied until a manual reload. Wrap it once, without
-  // changing the transfer API itself.
   let wrapTries = 0;
   const wrapTimer = setInterval(function () {
     wrapTries += 1;
@@ -130,5 +126,31 @@
     };
     window.__transferStatusRefreshFixed = true;
     clearInterval(wrapTimer);
+  }, 100);
+
+  let reprintTries = 0;
+  const reprintTimer = setInterval(function () {
+    reprintTries += 1;
+    if (typeof window.reprintInvoice !== "function" || typeof window.printReceipt !== "function") {
+      if (reprintTries >= 60) clearInterval(reprintTimer);
+      return;
+    }
+    if (window.__cloudInvoiceReprintFixed) { clearInterval(reprintTimer); return; }
+    window.reprintInvoice = async function (oid) {
+      const w = window.open("", "_blank", "width=320,height=600");
+      if (!w) {
+        toast("⚠️ " + t("toast.allowPopups"));
+        return;
+      }
+      try {
+        const o = await api("/api/orders/" + oid);
+        window.printReceipt(o, w);
+      } catch (e) {
+        try { w.close(); } catch (_) {}
+        toast(e.message);
+      }
+    };
+    window.__cloudInvoiceReprintFixed = true;
+    clearInterval(reprintTimer);
   }, 100);
 })();
