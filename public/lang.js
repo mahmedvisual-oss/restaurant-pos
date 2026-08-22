@@ -2,6 +2,10 @@
 const I18N = {
   ar: {
     appSubtitle: "نظام نقاط البيع الاحترافي",
+    cashierClose: "إغلاق الكاشير",
+    cashierCloseDaily: "إغلاق الكاشير اليومي",
+    financialAdminReport: "التقرير المالي والإداري الشامل",
+    unifiedReport: "نظام نقاط البيع — تقرير موحد",
     menuFood: "قائمة الطعام",
     reports: "التقارير",
     kitchen: "المطبخ",
@@ -678,6 +682,10 @@ const I18N = {
 
   en: {
     appSubtitle: "Professional POS System",
+    cashierClose: "Cashier Close",
+    cashierCloseDaily: "Daily Cashier Closing",
+    financialAdminReport: "Complete Financial & Administrative Report",
+    unifiedReport: "Unified POS Report",
     menuFood: "Food Menu",
     reports: "Reports",
     kitchen: "Kitchen",
@@ -1349,6 +1357,10 @@ const I18N = {
 
   id: {
     appSubtitle: "Sistem POS Profesional",
+    cashierClose: "Tutup Kasir",
+    cashierCloseDaily: "Penutupan Kasir Harian",
+    financialAdminReport: "Laporan Keuangan & Administrasi Lengkap",
+    unifiedReport: "Laporan POS Terpadu",
     menuFood: "Menu Makanan",
     reports: "Laporan",
     kitchen: "Dapur",
@@ -2072,3 +2084,4 @@ function applyLang() {
   });
   try { applySettings(); } catch (e) {}
 }
+
