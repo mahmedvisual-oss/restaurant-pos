@@ -1770,6 +1770,11 @@ function showPayment() {
 function setPayMethod(el) {
   if (!el) return;
   payMethod = el.dataset.method;
+  if (payMethod.includes("BCA")) {
+    payMethod = "BCA";
+  } else if (payMethod.includes("Mandiri")) {
+    payMethod = "مانديري";
+  }
   document.querySelectorAll("#pay-methods .pay-method").forEach(b => b.classList.remove("selected"));
   el.classList.add("selected");
   const creditRow = document.getElementById("credit-name-row");
