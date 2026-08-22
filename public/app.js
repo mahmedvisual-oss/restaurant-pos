@@ -1972,10 +1972,21 @@ function printReceipt(o, existingWindow = null) {
 }
 
 async function reprintInvoice(oid) {
+  const printWindow = window.open("", "_blank", "width=420,height=700");
+
+  if (!printWindow) {
+    toast("⚠️ اسمح بالنوافذ المنبثقة لإعادة الطباعة");
+    return;
+  }
+
   try {
     const o = await api("/api/orders/" + oid);
-    printReceipt(o);
+    printReceipt(o, printWindow);
   } catch (e) {
+    try {
+      printWindow.close();
+    } catch (_) {}
+
     toast(e.message);
   }
 }
