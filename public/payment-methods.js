@@ -37,7 +37,6 @@
     if (!box || box.dataset.expanded === "1") return;
     box.innerHTML = [
       '<button type="button" class="pay-method selected" data-method="نقدي" data-i18n="cash" onclick="setPayMethod(this)">💵 نقداً</button>',
-      '<button type="button" class="pay-method" data-method="BCA" data-i18n="bca" onclick="setPayMethod(this)">🏦 BCA</button>',
       '<button type="button" class="pay-method" data-method="آجل" data-i18n="credit" onclick="setPayMethod(this)">📝 آجل</button>',
       '<button type="button" class="pay-method" data-method="كيروس" data-i18n="kiros" onclick="setPayMethod(this)">🧾 كيروس</button>',
       '<div class="payment-method-group"><button type="button" class="pay-method payment-group" onclick="togglePaymentGroup(this)">' + LABELS.credit + ' ▾</button><div class="payment-submethods">' + optionButtons([{ value: PAYMENT_METHODS.credit_bca, label: "🏦 BCA" }, { value: PAYMENT_METHODS.credit_mandiri, label: "💳 Mandiri" }]) + '</div></div>',
