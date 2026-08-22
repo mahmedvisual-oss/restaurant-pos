@@ -3601,9 +3601,9 @@ def api_day_status():
 
 @app.route("/api/day/close", methods=["POST"])
 def api_day_close():
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
     data = request.json or {}
     try:
         counted = round(float(data.get("counted_cash", 0)), 2)
@@ -3632,9 +3632,9 @@ def api_day_close():
 @app.route("/api/day/start", methods=["POST"])
 def api_day_start():
     """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
     today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
