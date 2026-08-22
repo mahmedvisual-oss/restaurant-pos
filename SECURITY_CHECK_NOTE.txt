@@ -1,1 +1,0 @@
-Item 1 security review in progress. Do not treat SQLite fallback as production storage on Vercel.
