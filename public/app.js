@@ -2485,7 +2485,25 @@ function printDepositVoucher(r) {
 </body>
 </html>`;
 
-    hiddenPrint(printHtml);
+    const printFrame = document.createElement("iframe");
+    printFrame.style.cssText =
+      "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;";
+
+    document.body.appendChild(printFrame);
+
+    const printDoc =
+      printFrame.contentDocument || printFrame.contentWindow.document;
+
+    printDoc.open();
+    printDoc.write(printHtml);
+    printDoc.close();
+
+    printFrame.contentWindow.focus();
+    printFrame.contentWindow.print();
+
+    setTimeout(() => {
+      printFrame.remove();
+    }, 5000);
   };
 }
 // ===== سند قبض (تحصيل آجل من العميل) =====

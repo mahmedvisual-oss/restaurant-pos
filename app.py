@@ -216,6 +216,8 @@ except Exception:
     _TS_AVAILABLE = False
 
 CLOUD_DB = bool(TURSO_URL) and _TS_AVAILABLE
+if _ON_VERCEL and not CLOUD_DB:
+    raise RuntimeError("PRODUCTION DATABASE MISCONFIGURED: Turso is required on Vercel; refusing SQLite fallback")
 DB_INTEGRITY = _ts.IntegrityError if CLOUD_DB else sqlite3.IntegrityError
 
 # إعادة استخدام الاتصالات (keep-alive): الـ driver الأصلي يفتح اتصال HTTPS جديد مع كل
@@ -1398,37 +1400,115 @@ def api_order_transfer():
         # دمج الطلب المصدر داخل الطلب الموجود في الطاولة الهدف
         # ==================================================
         if existing and merge:
-
             source_items = _parse_items(order["items"])
             target_items = _parse_items(existing["items"])
 
-            # الهدف أولاً ثم أصناف المصدر
-            merged_items = target_items + source_items
+            # دمج الأصناف المتطابقة فقط:
+            # نفس menu_id + الاسم + السعر + الملاحظة.
+            merged_items = []
 
-            # جمع الخصومات
-            source_discount = float(order["discount"] or 0)
-            target_discount = float(existing["discount"] or 0)
-            merged_discount = round(
-                target_discount + source_discount, 2
+            for item in target_items + source_items:
+                try:
+                    item_name = str(item.get("name", ""))
+                    item_price = round(float(item.get("price", 0)), 2)
+                    item_menu_id = int(item.get("menu_id") or 0)
+                    item_note = str(item.get("note", "") or "")
+
+                    found = None
+
+                    for existing_item in merged_items:
+                        same_item = (
+                            int(existing_item.get("menu_id") or 0) == item_menu_id
+                            and str(existing_item.get("name", "")) == item_name
+                            and round(float(existing_item.get("price", 0)), 2) == item_price
+                            and str(existing_item.get("note", "") or "") == item_note
+                        )
+
+                        if same_item:
+                            found = existing_item
+                            break
+
+                    if found is not None:
+                        found["qty"] = int(found.get("qty", 0)) + int(item.get("qty", 0))
+                    else:
+                        merged_items.append({
+                            "name": item_name,
+                            "qty": int(item.get("qty", 0)),
+                            "price": item_price,
+                            "emoji": str(item.get("emoji", "") or ""),
+                            "menu_id": item_menu_id,
+                            "open": bool(item.get("open", False)),
+                            "note": item_note
+                        })
+
+                except Exception:
+                    # إذا كان الصنف غير صالح، نحتفظ به بدل إسقاطه أثناء الدمج.
+                    merged_items.append(item)
+
+            # إعادة حساب القيم المالية من الأصناف المدمجة.
+            merged_subtotal = round(
+                sum(
+                    float(i.get("price", 0)) * int(i.get("qty", 0))
+                    for i in merged_items
+                ),
+                2
             )
 
-            # جمع عدد الأشخاص
+            merged_tax = round(
+                merged_subtotal * get_tax_rate(),
+                2
+            )
+
+            # جمع الخصومات الحالية للطلبين.
+            source_discount = float(order["discount"] or 0)
+            target_discount = float(existing["discount"] or 0)
+
+            merged_discount = round(
+                target_discount + source_discount,
+                2
+            )
+
+            max_merged_discount = round(
+                merged_subtotal + merged_tax,
+                2
+            )
+
+            if merged_discount > max_merged_discount:
+                merged_discount = max_merged_discount
+
+            merged_total = round(
+                merged_subtotal + merged_tax - merged_discount,
+                2
+            )
+
+            if merged_total < 0:
+                merged_total = 0
+
+            # جمع عدد الأشخاص.
             source_guests = int(order["guests"] or 1)
             target_guests = int(existing["guests"] or 1)
+
             merged_guests = target_guests + source_guests
 
-            # تحديث الطلب الهدف بالأصناف المدمجة
+            # تحديث الطلب الهدف.
+            # paid/payment_method لا يتم تغييرهما أثناء النقل/الدمج.
             c.execute(
                 "UPDATE orders SET "
                 "items=?, "
+                "subtotal=?, "
+                "tax=?, "
                 "discount=?, "
+                "total=?, "
                 "guests=?, "
                 "table_num=?, "
                 "table_section=? "
                 "WHERE id=?",
                 (
                     _serialize_items(merged_items),
+                    merged_subtotal,
+                    merged_tax,
                     merged_discount,
+                    merged_total,
                     merged_guests,
                     num,
                     section,
@@ -1436,7 +1516,7 @@ def api_order_transfer():
                 )
             )
 
-            # إغلاق الطلب المصدر حتى لا يظهر كطلب مستقل
+            # إغلاق الطلب المصدر حتى لا يظهر كطلب مستقل.
             c.execute(
                 "UPDATE orders SET "
                 "status='closed', "
@@ -1446,7 +1526,7 @@ def api_order_transfer():
             )
 
             # إذا كان هناك حجز مرتبط بالمصدر فقط،
-            # ننقله إلى الطلب الرئيسي
+            # ننقله إلى الطلب الرئيسي.
             try:
                 source_reservation = order["reservation_id"]
                 target_reservation = existing["reservation_id"]
@@ -1468,7 +1548,8 @@ def api_order_transfer():
             audit(
                 "order_merge",
                 f"دمج طلب طاولة {from_table} في طاولة {to_table} "
-                f"(المصدر #{order['id']} ← الهدف #{existing['id']})"
+                f"(المصدر #{order['id']} ← الهدف #{existing['id']}) "
+                f"- الإجمالي الجديد {merged_total:.2f}"
             )
 
             return jsonify({
@@ -1476,7 +1557,11 @@ def api_order_transfer():
                 "merged": True,
                 "order_id": existing["id"],
                 "source_order_id": order["id"],
-                "table_num": num
+                "table_num": num,
+                "subtotal": merged_subtotal,
+                "tax": merged_tax,
+                "discount": merged_discount,
+                "total": merged_total
             })
 
         # ==================================================
