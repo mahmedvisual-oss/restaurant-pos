@@ -507,10 +507,10 @@
         <div class="settings-section" style="margin-top:18px" data-i18n="tablesManage">🪑 إدارة الطاولات</div>
 
 <div style="display:flex;gap:6px;margin-bottom:12px">
-  <button class="btn btn-info" onclick="showTableSectionsManager()">
-    ⚙️ إدارة الأقسام
-  </button>
-</div>
+
+  <button class="btn btn-info" onclick="showTableSectionsManager()" data-i18n="manageSections">
+  ⚙️ إدارة الأقسام
+</button>
 
         <div class="settings-grid">
           <div>
@@ -535,7 +535,7 @@
         <div id="tables-manage-list" class="menu-manage-list"></div>
 <div id="table-sections-manager" style="display:none;margin-top:18px">
 
-  <div class="settings-section">
+  <div class="settings-section" data-i18n="tableSectionsManage">
     🗂️ إدارة أقسام الطاولات
   </div>
 
@@ -558,7 +558,7 @@
 
   </div>
 
-  <button class="btn btn-success" onclick="addTableSection()">
+  <button class="btn btn-success" onclick="addTableSection()" data-i18n="addSection">
     ➕ إضافة قسم
   </button>
 
