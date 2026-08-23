@@ -624,66 +624,52 @@ def init_db():
         difference REAL,
         closed_by TEXT
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS promo_codes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT UNIQUE NOT NULL,
-        discount_type TEXT DEFAULT 'percent',
-        discount_value REAL DEFAULT 0,
-        min_order REAL DEFAULT 0,
-        max_uses INTEGER DEFAULT 0,
-        used_count INTEGER DEFAULT 0,
-        active INTEGER DEFAULT 1,
-        expires_at TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS inventory (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        item_name TEXT NOT NULL,
-        quantity REAL DEFAULT 0,
-        unit TEXT DEFAULT 'piece',
-        min_stock REAL DEFAULT 0,
-        cost REAL DEFAULT 0,
-        last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
     c.execute('''CREATE TABLE IF NOT EXISTS customers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
         phone TEXT UNIQUE,
         points INTEGER DEFAULT 0,
-        total_spent REAL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        total_spent REAL DEFAULT 0
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS reservations (
+
+    c.execute('''CREATE TABLE IF NOT EXISTS table_sections (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_name TEXT,
-        phone TEXT,
-        table_num INTEGER,
-        table_section TEXT,
-        table_id INTEGER,
-        guests INTEGER DEFAULT 1,
-        date TEXT,
-        time TEXT,
-        status TEXT DEFAULT 'confirmed',
-        notes TEXT,
-        created_by INTEGER,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        section_id TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '🪑',
+        sort_order INTEGER DEFAULT 0
     )''')
-    try:
-        cols = [r[1] for r in c.execute("PRAGMA table_info(reservations)").fetchall()]
-        if "created_by" not in cols:
-            c.execute("ALTER TABLE reservations ADD COLUMN created_by INTEGER")
-    except Exception:
-        pass
+
     c.execute('''CREATE TABLE IF NOT EXISTS tables (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         num INTEGER NOT NULL,
         section TEXT DEFAULT 'hall',
         UNIQUE(num, section)
     )''')
+
+    # الأقسام الافتراضية
+    default_sections = [
+        ("families", "العائلات", "👨‍👩‍👧", 1),
+        ("vip", "VIP", "⭐", 2),
+        ("hall", "الصالة", "🛋️", 3),
+        ("takeaway", "طلبات خارجية", "🛍️", 4),
+    ]
+
+    for sid, name, icon, order in default_sections:
+        c.execute(
+            """
+            INSERT OR IGNORE INTO table_sections
+            (section_id, name, icon, sort_order)
+            VALUES (?,?,?,?)
+            """,
+            (sid, name, icon, order)
+        )
+
     c.execute('''CREATE TABLE IF NOT EXISTS category_order (
         category TEXT PRIMARY KEY,
         sort_order INTEGER DEFAULT 0
     )''')
+
     defaults = {"restaurant_name": "مطعم الذوق الرفيع", "tax_rate": "0.03", "currency": "Rp", "auto_backup": "1"}
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)", (k, v))
@@ -3861,14 +3847,16 @@ def api_tables_add():
         num = int(data.get("num"))
     except (TypeError, ValueError):
         return jsonify({"error": "رقم الطاولة غير صالح"}), 400
+
     if num < 1 or num > 999:
         return jsonify({"error": "رقم الطاولة بين 1 و 999"}), 400
+
     section = str(data.get("section") or "hall")
-    if section not in ("families", "vip", "hall", "takeaway"):
-        return jsonify({"error": "قسم غير صالح"}), 400
+
     pos_x = float(data.get("pos_x", 0))
     pos_y = float(data.get("pos_y", 0))
     capacity = int(data.get("capacity", 4))
+
     shape = str(data.get("shape") or "round")
     if shape not in ("round", "square", "rectangle"):
         shape = "round"
