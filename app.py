@@ -3952,6 +3952,99 @@ def api_tables_delete(tid):
     conn.close()
     audit("tables", "حذف طاولة رقم " + str(row["num"]))
     return jsonify({"ok": True})
+# ===== إدارة أقسام الطاولات =====
+
+@app.route("/api/table-sections")
+def api_table_sections():
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM table_sections ORDER BY sort_order, id"
+    ).fetchall()
+    conn.close()
+
+    return jsonify([
+        {
+            "id": r["id"],
+            "section_id": r["section_id"],
+            "name": r["name"],
+            "icon": r["icon"]
+        }
+        for r in rows
+    ])
+
+
+@app.route("/api/table-sections", methods=["POST"])
+def api_table_sections_add():
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+
+    data = request.json or {}
+
+    section_id = str(data.get("section_id") or "").strip()
+    name = str(data.get("name") or "").strip()
+    icon = str(data.get("icon") or "🪑").strip()
+
+    if not section_id or not name:
+        return jsonify({"error": "بيانات القسم ناقصة"}), 400
+
+    conn = get_db()
+
+    try:
+        conn.execute(
+            """
+            INSERT INTO table_sections
+            (section_id, name, icon)
+            VALUES (?,?,?)
+            """,
+            (section_id, name, icon)
+        )
+        conn.commit()
+
+    except Exception:
+        conn.close()
+        return jsonify({"error": "القسم موجود مسبقاً"}), 400
+
+    conn.close()
+
+    audit("table_sections", "إضافة قسم " + name)
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/table-sections/<int:sid>", methods=["DELETE"])
+def api_table_sections_delete(sid):
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+
+    conn = get_db()
+
+    row = conn.execute(
+        "SELECT * FROM table_sections WHERE id=?",
+        (sid,)
+    ).fetchone()
+
+    if not row:
+        conn.close()
+        return jsonify({"error": "القسم غير موجود"}), 404
+
+    conn.execute(
+        "DELETE FROM table_sections WHERE id=?",
+        (sid,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    audit("table_sections", "حذف قسم " + row["name"])
+
+    return jsonify({"ok": True})
+
 
 
 @app.route("/api/tables/positions", methods=["PUT"])

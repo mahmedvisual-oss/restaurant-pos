@@ -505,6 +505,13 @@
         <button class="btn btn-success" onclick="addEmployee()" data-i18n="addEmployee">➕ إضافة موظف</button>
         <div id="employees-list" class="menu-manage-list" style="margin-top:12px"></div>
         <div class="settings-section" style="margin-top:18px" data-i18n="tablesManage">🪑 إدارة الطاولات</div>
+
+<div style="display:flex;gap:6px;margin-bottom:12px">
+  <button class="btn btn-info" onclick="showTableSectionsManager()">
+    ⚙️ إدارة الأقسام
+  </button>
+</div>
+
         <div class="settings-grid">
           <div>
             <label class="settings-label" data-i18n="tableNumLabel">رقم الطاولة</label>
@@ -526,6 +533,39 @@
           <button class="btn" id="tbl-cancel-edit" onclick="resetTableForm()" style="display:none" data-i18n="cancelEdit">✕ إلغاء التعديل</button>
         </div>
         <div id="tables-manage-list" class="menu-manage-list"></div>
+<div id="table-sections-manager" style="display:none;margin-top:18px">
+
+  <div class="settings-section">
+    🗂️ إدارة أقسام الطاولات
+  </div>
+
+  <div class="settings-grid">
+
+    <div>
+      <label class="settings-label">معرف القسم</label>
+      <input id="section-id" class="login-input" placeholder="مثال: garden">
+    </div>
+
+    <div>
+      <label class="settings-label">اسم القسم</label>
+      <input id="section-name" class="login-input" placeholder="مثال: الحديقة">
+    </div>
+
+    <div>
+      <label class="settings-label">الأيقونة</label>
+      <input id="section-icon" class="login-input" placeholder="🌳">
+    </div>
+
+  </div>
+
+  <button class="btn btn-success" onclick="addTableSection()">
+    ➕ إضافة قسم
+  </button>
+
+  <div id="table-sections-list" class="menu-manage-list" style="margin-top:12px"></div>
+
+</div>
+
         <div class="settings-section" style="margin-top:18px" data-i18n="menuManage">🍽️ إدارة القائمة</div>
         <button class="btn btn-info" onclick="showMenuManager()" data-i18n="openMenuManager">🍽️ فتح إدارة القائمة</button>
       </div>

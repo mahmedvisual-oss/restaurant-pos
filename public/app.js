@@ -1,4 +1,4 @@
-/* PRINT_POPUP_TRACE */
+﻿/* PRINT_POPUP_TRACE */
 (function () {
   const originalOpen = window.open;
   window.open = function () {
@@ -5225,6 +5225,30 @@ async function deleteTable(id) {
     renderTablesManage();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
+
+async function deleteTable(id) {
+  ...
+}
+
+
+// ===== إدارة أقسام الطاولات =====
+
+function showTableSectionsManager() {
+  ...
+}
+
+async function loadTableSections() {
+  ...
+}
+
+async function addTableSection() {
+  ...
+}
+
+async function deleteTableSection(id) {
+  ...
+}
+
 
 // ===== النسخ الاحتياطي (للمدير) =====
 function showBackup() {
