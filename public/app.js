@@ -4918,7 +4918,7 @@ function showSettings() {
   document.getElementById("settings-error").textContent = "";
   document.getElementById("settings-manager").style.display = user.role === "manager" ? "block" : "none";
   loadSettings();
-  renderEmployees();
+  renderEmployeeManagement();
   renderTablesManage();
   openModal("modal-settings");
 }
@@ -4987,7 +4987,7 @@ function applySettings() {
 }
 
 let currentEmployees = [];
-async function renderEmployees() {
+async function renderEmployeeManagement()  {
   try {
     const emps = await api("/api/employees");
     currentEmployees = emps;
@@ -5075,7 +5075,7 @@ async function saveEmployeeEdit() {
     });
     toast("✅ " + t("toast.employeeUpdated"));
     closeModal("modal-employee");
-    renderEmployees();
+    renderEmployeeManagement();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
 
@@ -5108,7 +5108,7 @@ async function addEmployee() {
     document.getElementById("emp-shift").value = "";
     document.getElementById("emp-dept").value = "";
     toast("✅ " + t("toast.employeeAdded"));
-    renderEmployees();
+    renderEmployeeManagement();
     loadEmployees();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
@@ -5119,7 +5119,7 @@ async function deleteEmployee(id) {
   try {
     await api("/api/employees/" + id, { method: "DELETE" });
     toast("✅ " + t("toast.employeeDeleted"));
-    renderEmployees();
+    renderEmployeeManagement();
     loadEmployees();
   } catch (e) { document.getElementById("settings-error").textContent = e.message; }
 }
