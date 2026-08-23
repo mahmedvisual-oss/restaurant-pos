@@ -1411,6 +1411,86 @@ function showTransferModal() {
     </div>
   `;
 
+  const grouped = {};
+
+  for (const [tid, tb] of Object.entries(tableData)) {
+    if (parseInt(tid) === Number(selectedTable)) continue;
+
+    const section = tableSectionLabel(tb) || "بدون قسم";
+
+    if (!grouped[section]) grouped[section] = [];
+
+    grouped[section].push({ tid, tb });
+  }
+
+  for (const section of Object.keys(grouped)) {
+
+    html += `
+      <div style="margin-top:12px;font-weight:bold">
+        🪑 ${section}
+      </div>
+    `;
+
+    grouped[section]
+      .sort((a, b) => a.tb.num - b.tb.num)
+      .forEach(({tid, tb}) => {
+
+        const isBusy = !!tb.active;
+
+        const tableLabel = tb.num;
+
+        if (isBusy) {
+          html += `
+            <button
+              class="transfer-table-btn"
+              onclick="transferOrder(${tid}, true)"
+              style="border-color:#f59e0b;background:#fff7ed"
+            >
+              <span>
+                طاولة ${tableLabel}
+                <small style="display:block;color:#b45309">
+                  🔗 دمج الطلب
+                </small>
+              </span>
+              <span style="font-size:11px">🔴</span>
+            </button>
+          `;
+        } else {
+          html += `
+            <button
+              class="transfer-table-btn"
+              onclick="transferOrder(${tid}, false)"
+            >
+              <span>طاولة ${tableLabel}</span>
+              <span style="font-size:11px">🟢 نقل</span>
+            </button>
+          `;
+        }
+
+      });
+  }
+
+  document.getElementById("transfer-body").innerHTML = html;
+  openModal("transfer-modal");
+}
+
+  if (!selectedTable) {
+    toast("⚠ لا يوجد طاولة محددة");
+    return;
+  }
+
+  const cur = tableData[selectedTable];
+  const curSection = cur ? tableSectionLabel(cur) : "";
+  const curLabel = cur
+    ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`)
+    : selectedTable;
+
+  let html = `
+    <div style="margin-bottom:12px">
+      نقل/دمج طلب الطاولة <b>${curLabel}</b> إلى:
+    </div>
+  `;
+
   for (const [tid, tb] of Object.entries(tableData)) {
     if (parseInt(tid) === Number(selectedTable)) continue;
 
