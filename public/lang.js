@@ -2039,6 +2039,10 @@ function setLang(l) {
   localStorage.setItem("pos_lang", l);
   document.documentElement.lang = l;
   document.documentElement.dir = (l === "ar") ? "rtl" : "ltr";
+
+  if (typeof applyLang === "function") {
+    applyLang();
+  }
 }
 
 function t(key, params) {
