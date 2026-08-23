@@ -5024,7 +5024,7 @@ async function renderEmployeeManagement()  {
             ${e.shift ? ` | 🕐 ${shiftText(e.shift)}` : ""}
             ${e.department ? ` | 🏢 ${escapeHtml(e.department)}` : ""}
             ${e.salary ? ` | 💰 ${fmtCur(e.salary)}` : ""}
-            ${e.role === "cashier" ? ` | 🏷️ خصم حتى ${e.discount_limit != null ? e.discount_limit : 20}%` : ""}
+            ${e.role === "cashier" ? ` | 🏷️ ${t("employeeDiscLimit")} ${e.discount_limit != null ? e.discount_limit : 20}%` : ""}
           </div>
         </div>
         <div class="mm-actions">
