@@ -5227,28 +5227,99 @@ async function deleteTable(id) {
 }
 
 async function deleteTable(id) {
-  ...
+  if (!user || user.role !== "manager") return;
+  if (!confirm(t("confirmDeleteTable"))) return;
+
+  try {
+    await api("/api/tables/" + id, { method: "DELETE" });
+    toast("🗑️ " + t("toast.tableDeleted"));
+    await loadTables();
+    renderTablesManage();
+  } catch (e) {
+    document.getElementById("settings-error").textContent = e.message;
+  }
 }
 
 
 // ===== إدارة أقسام الطاولات =====
 
 function showTableSectionsManager() {
-  ...
+  const box = document.getElementById("table-sections-manager");
+  if (!box) return;
+
+  box.style.display = box.style.display === "none" ? "" : "none";
+
+  if (box.style.display !== "none") {
+    loadTableSections();
+  }
 }
 
 async function loadTableSections() {
-  ...
+  try {
+    const list = await api("/api/table-sections");
+
+    const cont = document.getElementById("table-sections-list");
+    if (!cont) return;
+
+    cont.innerHTML = list.map(s => `
+      <div class="menu-manage-row">
+        <div class="mi-info">
+          <div>${s.icon || "🪑"} ${s.name}</div>
+          <div class="mi-meta">${s.section_id}</div>
+        </div>
+        <div class="mi-actions">
+          <button class="btn btn-sm btn-danger"
+            onclick="deleteTableSection(${s.id})">
+            🗑️
+          </button>
+        </div>
+      </div>
+    `).join("");
+
+  } catch(e) {
+    console.error(e);
+  }
 }
 
 async function addTableSection() {
-  ...
+
+  const body = {
+    section_id: document.getElementById("section-id").value.trim(),
+    name: document.getElementById("section-name").value.trim(),
+    icon: document.getElementById("section-icon").value.trim()
+  };
+
+  if (!body.section_id || !body.name) {
+    alert("أدخل معرف واسم القسم");
+    return;
+  }
+
+  await api("/api/table-sections", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json"
+    },
+    body:JSON.stringify(body)
+  });
+
+  document.getElementById("section-id").value="";
+  document.getElementById("section-name").value="";
+  document.getElementById("section-icon").value="";
+
+  loadTableSections();
 }
+
 
 async function deleteTableSection(id) {
-  ...
-}
 
+  if (!confirm("حذف القسم؟")) return;
+
+  await api("/api/table-sections/" + id,{
+    method:"DELETE"
+  });
+
+  loadTableSections();
+}
 
 // ===== النسخ الاحتياطي (للمدير) =====
 function showBackup() {
