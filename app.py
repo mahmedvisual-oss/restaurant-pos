@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sqlite3
 import socket
 import hashlib
@@ -3961,9 +3961,13 @@ def api_table_sections():
         return jsonify({"error": "سجل الدخول أولاً"}), 401
 
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM table_sections ORDER BY sort_order, id"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT id, section_id, name, icon FROM table_sections ORDER BY id"
+        ).fetchall()
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 500
     conn.close()
 
     return jsonify([
@@ -5427,3 +5431,4 @@ except Exception:
     import traceback
     traceback.print_exc()
     print("INIT DB NOT READY YET - will retry per request via _ensure_schema")
+
