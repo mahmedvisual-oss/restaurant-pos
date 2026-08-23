@@ -1,4 +1,4 @@
-﻿/* PRINT_POPUP_TRACE */
+/* PRINT_POPUP_TRACE */
 (function () {
   const originalOpen = window.open;
   window.open = function () {
@@ -1474,65 +1474,6 @@ function showTransferModal() {
   openModal("transfer-modal");
 }
 
-  if (!selectedTable) {
-    toast("⚠ لا يوجد طاولة محددة");
-    return;
-  }
-
-  const cur = tableData[selectedTable];
-  const curSection = cur ? tableSectionLabel(cur) : "";
-  const curLabel = cur
-    ? (curSection ? `${cur.num} — ${curSection}` : `${cur.num}`)
-    : selectedTable;
-
-  let html = `
-    <div style="margin-bottom:12px">
-      نقل/دمج طلب الطاولة <b>${curLabel}</b> إلى:
-    </div>
-  `;
-
-  for (const [tid, tb] of Object.entries(tableData)) {
-    if (parseInt(tid) === Number(selectedTable)) continue;
-
-    const sectionName = tableSectionLabel(tb);
-    const tableLabel = sectionName
-      ? `${tb.num} — ${sectionName}`
-      : `${tb.num}`;
-
-    const isBusy = !!tb.active;
-
-    if (isBusy) {
-      html += `
-        <button
-          class="transfer-table-btn"
-          onclick="transferOrder(${tid}, true)"
-          style="border-color:#f59e0b;background:#fff7ed"
-        >
-          <span>
-            طاولة ${tableLabel}
-            <small style="display:block;color:#b45309">
-              🔗 دمج الطلب
-            </small>
-          </span>
-          <span style="font-size:11px">🔴</span>
-        </button>
-      `;
-    } else {
-      html += `
-        <button
-          class="transfer-table-btn"
-          onclick="transferOrder(${tid}, false)"
-        >
-          <span>طاولة ${tableLabel}</span>
-          <span style="font-size:11px">🟢 نقل</span>
-        </button>
-      `;
-    }
-  }
-
-  document.getElementById("transfer-body").innerHTML = html;
-  openModal("transfer-modal");
-}
 
 async function transferOrder(toTable, merge = false) {
   const fromTable = Number(selectedTable);
