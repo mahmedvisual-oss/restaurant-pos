@@ -1,0 +1,170 @@
+name: Complete cancellation refund repair
+
+on:
+  push:
+    branches: [fix/cancellation-refund-235845a]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Replace cancellation approval with atomic guarded flow
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          start = s.index('@app.route("/api/cancel-approve", methods=["POST"])')
+          end = s.index('@app.route("/api/cancel-reject", methods=["POST"])', start)
+          new = r'''@app.route("/api/cancel-approve", methods=["POST"])
+          def api_cancel_approve():
+              u, err, code = require_manager()
+              if err:
+                  return jsonify({"error": err}), code
+              data = request.json or {}
+              req_id = data.get("request_id")
+              if not req_id:
+                  return jsonify({"error": "request_id مطلوب"}), 400
+              conn = get_db()
+              c = conn.cursor()
+              try:
+                  _ensure_schema(conn, c)
+                  # Atomic write lock: one approval can win; concurrent approvals cannot
+                  # both create a refund or restore inventory.
+                  c.execute("BEGIN IMMEDIATE")
+                  row = c.execute("SELECT * FROM cancellation_requests WHERE id=? AND status='pending'", (req_id,)).fetchone()
+                  if not row:
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({"error": "طلب غير موجود أو تمت معالجته"}), 404
+                  order = c.execute("SELECT * FROM orders WHERE id=?", (row["order_id"],)).fetchone()
+                  if not order or order["status"] not in ("active", "sent", "ready", "completed"):
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({"error": "الطلب غير موجود أو تمت معالجته مسبقاً"}), 400
+
+                  # A financial refund is one-per-order. This also protects against
+                  # stale/replayed approval requests that reference an old pending row.
+                  prior_refund = c.execute("SELECT id, receipt_no, total FROM refund_receipts WHERE order_id=? LIMIT 1", (row["order_id"],)).fetchone()
+                  if prior_refund:
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({"error": "تم إصدار سند مردود لهذا الطلب مسبقاً", "refund_receipt_id": prior_refund["id"]}), 409
+
+                  sensitive = bool(order["status"] in ("sent", "ready", "completed"))
+                  if sensitive:
+                      pin = str(data.get("pin") or "")
+                      managers = c.execute("SELECT pin FROM employees WHERE active=1 AND role='manager'").fetchall()
+                      if not any(verify_pin(pin, m["pin"]) for m in managers):
+                          conn.rollback()
+                          conn.close()
+                          return jsonify({"error": "هذا الإلغاء يتطلب PIN المدير"}), 403
+
+                  c.execute("UPDATE cancellation_requests SET status='approved', reviewed_by=?, reviewed_at=datetime('now','localtime') WHERE id=? AND status='pending'",
+                            (u["name"], req_id))
+                  if c.rowcount != 1:
+                      raise RuntimeError("CANCELLATION_REQUEST_ALREADY_PROCESSED")
+                  c.execute("UPDATE orders SET status='cancelled', kitchen_status='ready' WHERE id=? AND status IN ('active','sent','ready','completed')", (row["order_id"],))
+                  if c.rowcount != 1:
+                      raise RuntimeError("ORDER_ALREADY_PROCESSED")
+
+                  refund_receipt = None
+                  if order["status"] == "completed":
+                      items = _parse_items(order["items"])
+                      _restore_inventory(c, items)
+
+                      payment_method = str(order["payment_method"] or "نقدي").strip()
+                      original_total = round(max(float(order["total"] or 0), 0), 2)
+                      original_paid = round(max(min(float(order["paid"] or 0), original_total), 0), 2)
+                      refund_amount = original_paid if payment_method == "آجل" else original_total
+
+                      if refund_amount > 0:
+                          refund_ratio = (refund_amount / original_total) if original_total > 0 else 0
+                          refund_subtotal = round(float(order["subtotal"] or 0) * refund_ratio, 2)
+                          refund_tax = round(float(order["tax"] or 0) * refund_ratio, 2)
+                          refund_discount = round(float(order["discount"] or 0) * refund_ratio, 2)
+                          refund_method_default = "نقدي" if payment_method == "آجل" else payment_method
+                          refund_method = str(data.get("refund_method") or refund_method_default).strip() or refund_method_default
+                          refund_ref = str(data.get("refund_ref") or "").strip() or None
+                          c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+                                    (row["order_id"], order["items"], refund_subtotal, refund_tax, refund_discount,
+                                     refund_amount, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))
+                          rid = c.lastrowid
+                          receipt_no = "SR-%d-%05d" % (_now().year, rid)
+                          c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))
+                          refund_receipt = {
+                              "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],
+                              "table_num": order["table_num"], "items": _parse_items(order["items"]),
+                              "subtotal": refund_subtotal, "tax": refund_tax,
+                              "discount": refund_discount, "total": refund_amount,
+                              "refund_method": refund_method, "refund_ref": refund_ref,
+                              "reason": row["reason"] or "", "requested_by": row["requested_by"],
+                              "approved_by": u["name"], "date": _now_sql(),
+                              "payment_method": payment_method,
+                          }
+
+                  if (order["payment_method"] or "").strip() == "آجل":
+                      c.execute("UPDATE credit_ledger SET status='closed', updated_at=datetime('now','localtime') WHERE order_id=? AND status='open'",
+                                (row["order_id"],))
+
+                  conn.commit()
+              except Exception as e:
+                  try:
+                      conn.rollback()
+                  except Exception:
+                      pass
+                  conn.close()
+                  return jsonify({"error": "فشل تنفيذ الإلغاء بالكامل؛ لم يتم اعتماد أي جزء من العملية", "detail": str(e)}), 500
+              finally:
+                  # commit/rollback branches above close explicitly; avoid double-close errors.
+                  pass
+
+              conn.close()
+              audit("cancel_approve", f"موافقة على إلغاء طلب #{row['order_id']} (طاولة {row['table_num']}) من {u['name']}"
+                    + (" مع PIN" if sensitive else "") + (f" - مردود {refund_receipt['total']:.2f} ({refund_receipt['receipt_no']})" if refund_receipt else ""))
+              return jsonify({"ok": True, "sensitive": sensitive, "refund_receipt": refund_receipt})
+
+
+          '''
+          s = s[:start] + new + s[end:]
+          p.write_text(s, encoding='utf-8')
+          print('CANCELLATION_REPAIR_OK')
+
+      - name: Validate Python syntax
+        run: python -m py_compile app.py
+
+      - name: Verify atomic guard and refund rules
+        shell: python
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('app.py').read_text(encoding='utf-8')
+          checks = [
+            'c.execute("BEGIN IMMEDIATE")',
+            'SELECT id, receipt_no, total FROM refund_receipts WHERE order_id=? LIMIT 1',
+            'c.rowcount != 1',
+            'conn.rollback()',
+            'refund_amount = original_paid if payment_method == "آجل" else original_total',
+            'credit_ledger SET status=\'closed\'',
+          ]
+          missing = [x for x in checks if x not in s]
+          if missing: raise SystemExit('VERIFY_FAILED: ' + repr(missing))
+          print('VERIFY_OK')
+          PY
+
+      - name: Commit repair and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git rm .github/workflows/complete-cancellation-repair.yml
+          git commit -m 'fix: make cancellation refunds atomic and idempotent'
+          git push
