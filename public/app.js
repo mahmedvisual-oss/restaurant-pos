@@ -5279,13 +5279,9 @@ function showTableSectionsManager() {
   const box = document.getElementById("table-sections-manager");
   if (!box) return;
 
-  box.style.display = box.style.display === "none" ? "" : "none";
-
-  if (box.style.display !== "none") {
-    loadTableSections();
-  }
+  box.style.display = "block";
+  loadTableSections();
 }
-
 async function loadTableSections() {
   try {
     const list = await api("/api/table-sections");
@@ -5296,6 +5292,18 @@ async function loadTableSections() {
         name: s.name,
         icon: s.icon || "🪑"
       }));
+
+      const sectionSelect = document.getElementById("tbl-section");
+      if (sectionSelect) {
+        const current = sectionSelect.value;
+        sectionSelect.innerHTML = TABLE_SECTIONS.map(sec =>
+          `<option value="${sec.id}">${sec.icon || "🪑"} ${sec.name || sec.id}</option>`
+        ).join("");
+
+        if (TABLE_SECTIONS.some(sec => sec.id === current)) {
+          sectionSelect.value = current;
+        }
+      }
     }
 
     const cont = document.getElementById("table-sections-list");
