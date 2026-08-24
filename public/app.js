@@ -5290,29 +5290,35 @@ async function loadTableSections() {
   try {
     const list = await api("/api/table-sections");
 
+    if (Array.isArray(list) && list.length) {
+      TABLE_SECTIONS = list.map(s => ({
+        id: s.section_id,
+        name: s.name,
+        icon: s.icon || "🪑"
+      }));
+    }
+
     const cont = document.getElementById("table-sections-list");
-    if (!cont) return;
-
-    cont.innerHTML = list.map(s => `
-      <div class="menu-manage-row">
-        <div class="mi-info">
-          <div>${s.icon || "🪑"} ${s.name}</div>
-          <div class="mi-meta">${s.section_id}</div>
+    if (cont) {
+      cont.innerHTML = (Array.isArray(list) ? list : []).map(s => `
+        <div class="menu-manage-row">
+          <div class="mi-info">
+            <div>${s.icon || "🪑"} ${s.name}</div>
+            <div class="mi-meta">${s.section_id}</div>
+          </div>
+          <div class="mi-actions">
+            <button class="btn btn-sm btn-danger"
+              onclick="deleteTableSection(${s.id})">
+              🗑️
+            </button>
+          </div>
         </div>
-        <div class="mi-actions">
-          <button class="btn btn-sm btn-danger"
-            onclick="deleteTableSection(${s.id})">
-            🗑️
-          </button>
-        </div>
-      </div>
-    `).join("");
-
+      `).join("");
+    }
   } catch(e) {
-    console.error(e);
+    console.warn("table sections load failed", e);
   }
 }
-
 async function addTableSection() {
 
   const body = {
