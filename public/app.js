@@ -1,4 +1,4 @@
-﻿/* PRINT_POPUP_TRACE */
+/* PRINT_POPUP_TRACE */
 (function () {
   const originalOpen = window.open;
   window.open = function () {
@@ -1032,16 +1032,33 @@ function updateSummary() {
 
 // ===== الطاولات =====
 let tableData = {};
-const TABLE_SECTIONS = [
+let TABLE_SECTIONS = [
   { id: "families", icon: "👨‍👩‍👧" },
   { id: "vip", icon: "⭐" },
   { id: "hall", icon: "🛋️" },
   { id: "takeaway", icon: "🛍️" },
 ];
 
+async function loadTableSections() {
+  try {
+    const list = await api("/api/table-sections");
+    if (Array.isArray(list) && list.length) {
+      TABLE_SECTIONS = list.map(s => ({
+        id: s.section_id,
+        icon: s.icon || "🪑"
+      }));
+    }
+  } catch (e) {
+    console.warn("table sections load failed", e);
+  }
+}
+
 async function loadTables() {
+  await loadTableSections();
+
   try {
     tableData = {};
+
     const arr = await api("/api/tables");
     for (const t of arr) tableData[t.id] = t;
   } catch (e) { /* لا يهم */ }
@@ -1054,7 +1071,7 @@ function renderTables() {
   cont.innerHTML = "";
   for (const sec of TABLE_SECTIONS) {
     const list = Object.values(tableData).filter(t => t.section === sec.id).sort((a, b) => a.num - b.num);
-    if (!list.length) continue;
+    // أظهر القسم حتى لو لم توجد به طاولات بعد
     let occupied = 0;
     for (const tb of list) if (tb.active) occupied++;
     let block = `<div class="table-section sec-${sec.id}">
