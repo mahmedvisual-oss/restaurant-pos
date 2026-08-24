@@ -1,0 +1,1 @@
+Continue the cloud-only global UI language leakage scan. Focus on hard-coded Arabic UI strings outside translation dictionaries. Do not alter intentional Arabic translation values in public/lang.js. Replace UI defaults with translation keys and make Indonesian/English render in their selected language.
