@@ -2841,15 +2841,15 @@ function editPromo(id, code, type, value, minOrder, maxUses, expires, active) {
     <div style="width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <input id="edit-promo-code-${id}" class="login-input" value="${code}" style="text-transform:uppercase;font-weight:bold">
       <select id="edit-promo-type-${id}" class="login-input">
-        <option value="percent" ${type === "percent" ? "selected" : ""}>نسبة مئوية %</option>
-        <option value="fixed" ${type === "fixed" ? "selected" : ""}>مبلغ ثابت</option>
+        <option value="percent" ${type === "percent" ? "selected" : ""}>${t("promoPercent")} %</option>
+        <option value="fixed" ${type === "fixed" ? "selected" : ""}>${t("promoFixed")}</option>
       </select>
       <input id="edit-promo-value-${id}" class="login-input" type="number" step="0.5" min="0" value="${value}">
       <input id="edit-promo-min-${id}" class="login-input" type="number" step="1" min="0" value="${minOrder}">
       <input id="edit-promo-max-${id}" class="login-input" type="number" step="1" min="0" value="${maxUses}">
       <input id="edit-promo-expires-${id}" class="login-input" type="date" value="${expires}">
-      <button class="btn btn-sm btn-success" onclick="savePromoEdit(${id})">💾 حفظ</button>
-      <button class="btn btn-sm" onclick="loadPromoList()">✕ إلغاء</button>
+      <button class="btn btn-sm btn-success" onclick="savePromoEdit(${id})">💾 ${t("save")}</button>
+      <button class="btn btn-sm" onclick="loadPromoList()">✕ ${t("cancel")}</button>
     </div>`;
 }
 
@@ -2868,7 +2868,7 @@ async function savePromoEdit(id) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ code, discount_type: type, discount_value: value, min_order: minOrder, max_uses: maxUses, expires_at: expires })
     });
-    toast("✅ تم الحفظ");
+    toast("✅ " + t("rptSaved"));
     loadPromoList();
   } catch (e) { toast(e.message); }
 }
@@ -2880,7 +2880,7 @@ async function togglePromo(id, active) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active })
     });
-    toast("✅ " + (active ? "تم التفعيل" : "تم التعطيل"));
+    toast("✅ " + t(active ? "promoActive" : "promoInactive"));
     loadPromoList();
   } catch (e) { toast(e.message); }
 }
