@@ -1,0 +1,30 @@
+name: Recover index template
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    if: ${{ github.event.head_commit.message != 'chore: recover index template' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Revert accidental template truncation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git revert --no-edit 8ab8d8353486933f3fe68679c404d0949a5a0f97
+          rm -f .github/workflows/recover-index-after-language-fix.yml
+          git add -A
+          git commit -m "chore: recover index template"
+          git push origin main
