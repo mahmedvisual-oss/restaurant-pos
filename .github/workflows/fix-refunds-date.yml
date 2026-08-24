@@ -1,0 +1,35 @@
+name: Fix refunds date qualification
+on:
+  push:
+    branches: [fix/refunds-ambiguous-date]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch app.py
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          old = '    if from_d:\n        where += " AND date(date) >= ?"\n        params.append(from_d)\n    if to_d:\n        where += " AND date(date) <= ?"\n        params.append(to_d)'
+          new = '    if from_d:\n        where += " AND date(rr.date) >= ?"\n        params.append(from_d)\n    if to_d:\n        where += " AND date(rr.date) <= ?"\n        params.append(to_d)'
+          if old not in s:
+              raise SystemExit('REFUND_DATE_TARGET_NOT_FOUND')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Validate
+        run: python -m py_compile app.py
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git rm .github/workflows/fix-refunds-date.yml
+          git commit -m 'fix: qualify refund report date column'
+          git push
