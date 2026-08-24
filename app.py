@@ -1414,6 +1414,16 @@ def api_order_transfer():
             source_items = _parse_items(order["items"])
             target_items = _parse_items(existing["items"])
 
+            # التحقق من أسعار الأصناف المحفوظة قبل الدمج.
+            # الأصناف العادية تأخذ السعر الرسمي من menu_items.
+            # الأصناف المفتوحة فقط تحتفظ بالسعر اليدوي المحفوظ.
+            try:
+                source_items = _normalize_order_items(source_items)
+                target_items = _normalize_order_items(target_items)
+            except (ValueError, TypeError, KeyError) as e:
+                conn.close()
+                return jsonify({"error": str(e)}), 400
+
             # دمج الأصناف المتطابقة فقط:
             # نفس menu_id + الاسم + السعر + الملاحظة.
             merged_items = []
@@ -3739,17 +3749,76 @@ def _sql_lit(v):
     return f"'{s}'"
 
 
-def _serialize_items(items):
-    try:
-        return json.dumps([{"name": str(i["name"]), "qty": int(i["qty"]),
-                            "price": float(i["price"]), "emoji": str(i.get("emoji", "")),
-                            "menu_id": int(i.get("menu_id") or 0),
-                            "open": bool(i.get("open", False)),
-                            "note": str(i.get("note", "") or "")} for i in items],
-                          ensure_ascii=False)
-    except Exception:
-        return json.dumps([])
+def _normalize_order_items(items):
+    """
+    السعر الرسمي للأصناف العادية يؤخذ من menu_items.
+    لا نثق بالسعر المرسل من المتصفح.
+    الصنف المفتوح فقط يسمح له بسعر يدخله المستخدم.
+    """
+    if not isinstance(items, list) or not items:
+        raise ValueError("لا توجد أصناف")
 
+    conn = get_db()
+    try:
+        normalized = []
+
+        for i in items:
+            if not isinstance(i, dict):
+                raise ValueError("بيانات صنف غير صالحة")
+
+            qty = int(i.get("qty", 0))
+            if qty < 1:
+                raise ValueError("كمية الصنف غير صالحة")
+
+            is_open = bool(i.get("open", False))
+
+            if is_open:
+                price = round(float(i.get("price", 0)), 2)
+                if price < 0:
+                    raise ValueError("سعر الصنف غير صالح")
+                menu_id = None
+            else:
+                try:
+                    menu_id = int(i.get("menu_id") or 0)
+                except (TypeError, ValueError):
+                    menu_id = 0
+
+                if menu_id <= 0:
+                    raise ValueError("الصنف غير مرتبط بسعر رسمي")
+
+                row = conn.execute(
+                    "SELECT id, emoji, name, price, active "
+                    "FROM menu_items WHERE id=?",
+                    (menu_id,)
+                ).fetchone()
+
+                if not row:
+                    raise ValueError("الصنف غير موجود في قائمة الأسعار")
+
+                if not row["active"]:
+                    raise ValueError("الصنف غير متاح حالياً")
+
+                # السعر الرسمي من قاعدة البيانات فقط.
+                price = round(float(row["price"]), 2)
+
+            normalized.append({
+                "name": str(i.get("name", "")),
+                "qty": qty,
+                "price": price,
+                "emoji": str(i.get("emoji", "")),
+                "menu_id": menu_id or 0,
+                "open": is_open,
+                "note": str(i.get("note", "") or "")
+            })
+
+        return normalized
+    finally:
+        conn.close()
+
+
+def _serialize_items(items):
+    normalized = _normalize_order_items(items)
+    return json.dumps(normalized, ensure_ascii=False)
 
 def _attach_reservation(c, table_id, oid):
     """يربط الطلب بحجز وصل حاجزه اليوم لنفس الطاولة."""
@@ -4309,6 +4378,13 @@ def _do_pay(u, data):
     order_id = data.get("order_id")
     if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
+    # توحيد الأصناف والتحقق من الأسعار قبل أي حساب مالي.
+    # الأصناف العادية تأخذ السعر من menu_items،
+    # والصنف المفتوح فقط يسمح بسعر يدوي.
+    try:
+        items = _normalize_order_items(items)
+    except (ValueError, TypeError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
     paid = _amount(data, "paid")
     discount = _amount(data, "discount")
     payment_method = str(data.get("payment_method", "نقدي"))
