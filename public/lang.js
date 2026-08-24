@@ -2040,7 +2040,7 @@ const I18N = {
   },
 };
 
-let currentLang = "id";
+let currentLang = localStorage.getItem("pos_lang") || "id";
 
 function setLang(l) {
   if (!I18N[l]) l = "id";
