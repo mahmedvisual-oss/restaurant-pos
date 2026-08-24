@@ -1,4 +1,4 @@
-﻿import os
+import os
 import sqlite3
 import socket
 import hashlib
@@ -342,6 +342,24 @@ def _ensure_schema(conn, c, log=True):
     global _SCHEMA_DONE
     if _SCHEMA_DONE:
         return
+    try:
+        c.execute("""CREATE TABLE IF NOT EXISTS table_sections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_id TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            icon TEXT DEFAULT '🪑',
+            sort_order INTEGER DEFAULT 0
+        )""")
+        for sid, name, icon, order in [
+            ("families", "العائلات", "👨‍👩‍👧", 1),
+            ("vip", "VIP", "⭐", 2),
+            ("hall", "الصالة", "🛋️", 3),
+            ("takeaway", "طلبات خارجية", "🛍️", 4)
+        ]:
+            c.execute("INSERT OR IGNORE INTO table_sections (section_id,name,icon,sort_order) VALUES (?,?,?,?)", (sid,name,icon,order))
+    except Exception as e:
+        if log:
+            print("ENSURE TABLE_SECTIONS ERR:", repr(e))
     try:
         ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
         for col, ddl in (
