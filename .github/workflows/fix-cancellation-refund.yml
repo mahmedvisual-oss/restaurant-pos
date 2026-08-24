@@ -1,0 +1,66 @@
+name: Fix cancellation refund accounting
+
+on:
+  push:
+    branches: [fix/cancellation-refund-235845a]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch cancellation flow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          old_request = '''    if not order_id:\n        conn.close()\n        return jsonify({"error": "لا يوجد طلب نشط لهذه الطاولة"}), 400\n    existing = c.execute("SELECT id FROM cancellation_requests WHERE order_id=? AND status='pending'", (order_id,)).fetchone()'''
+          new_request = '''    if not order_id:\n        conn.close()\n        return jsonify({"error": "لا يوجد طلب نشط لهذه الطاولة"}), 400\n    order_check = c.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()\n    if not order_check or order_check["status"] not in ("active", "sent", "ready", "completed"):\n        conn.close()\n        return jsonify({"error": "لا يمكن طلب إلغاء طلب غير نشط أو تمت معالجته مسبقاً"}), 400\n    existing = c.execute("SELECT id FROM cancellation_requests WHERE order_id=? AND status='pending'", (order_id,)).fetchone()'''
+          if old_request not in s:
+              raise SystemExit('REQUEST_PATCH_TARGET_NOT_FOUND')
+          s = s.replace(old_request, new_request, 1)
+
+          old_refund = '''    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون المُخصوم تلقائياً وأنشئ سند مردودات\n    if order and order["status"] == "completed":\n        try:\n            items = _parse_items(order["items"])\n            _restore_inventory(c, items)\n        except Exception:\n            items = []\n        refund_method = str(data.get("refund_method") or order["payment_method"] or "نقدي")\n        refund_ref = str(data.get("refund_ref") or "").strip() or None\n        c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "\n                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",\n                  (row["order_id"], order["items"], order["subtotal"] or 0, order["tax"] or 0, order["discount"] or 0,\n                   order["total"] or 0, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))\n        rid = c.lastrowid\n        receipt_no = "SR-%d-%05d" % (_now().year, rid)\n        c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))\n        refund_receipt = {\n            "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],\n            "table_num": order["table_num"], "items": _parse_items(order["items"]),\n            "subtotal": order["subtotal"] or 0, "tax": order["tax"] or 0,\n            "discount": order["discount"] or 0, "total": order["total"] or 0,\n            "refund_method": refund_method, "refund_ref": refund_ref,\n            "reason": row["reason"] or "", "requested_by": row["requested_by"],\n            "approved_by": u["name"], "date": _now_sql(),\n            "payment_method": order["payment_method"] or "",\n        }\n'''
+          new_refund = '''    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون مرة واحدة وأنشئ سند مردود بالمبلغ\n    # الذي خرج فعلياً من الصندوق/الحساب. للآجل المدفوع جزئياً نرد المدفوع فقط،\n    # أما الرصيد غير المدفوع فيُغلق من credit_ledger ولا يتحول إلى cash-out.\n    if order and order["status"] == "completed":\n        try:\n            items = _parse_items(order["items"])\n            _restore_inventory(c, items)\n        except Exception:\n            items = []\n\n        payment_method = str(order["payment_method"] or "نقدي").strip()\n        original_total = round(max(float(order["total"] or 0), 0), 2)\n        original_paid = round(max(min(float(order["paid"] or 0), original_total), 0), 2)\n        # في البيع النقدي/التحويل، مبلغ الفاتورة هو المبلغ المستحق رده؛\n        # paid قد يتضمن مبلغاً قدمه العميل ثم أُعيد له كـ change.\n        # في الآجل، النقد الذي يمكن رده هو فقط ما دُفع فعلياً.\n        refund_amount = original_paid if payment_method == "آجل" else original_total\n\n        if refund_amount > 0:\n            refund_ratio = (refund_amount / original_total) if original_total > 0 else 0\n            refund_subtotal = round(float(order["subtotal"] or 0) * refund_ratio, 2)\n            refund_tax = round(float(order["tax"] or 0) * refund_ratio, 2)\n            refund_discount = round(float(order["discount"] or 0) * refund_ratio, 2)\n            refund_method_default = "نقدي" if payment_method == "آجل" else payment_method\n            refund_method = str(data.get("refund_method") or refund_method_default).strip() or refund_method_default\n            refund_ref = str(data.get("refund_ref") or "").strip() or None\n            c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "\n                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",\n                      (row["order_id"], order["items"], refund_subtotal, refund_tax, refund_discount,\n                       refund_amount, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))\n            rid = c.lastrowid\n            receipt_no = "SR-%d-%05d" % (_now().year, rid)\n            c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))\n            refund_receipt = {\n                "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],\n                "table_num": order["table_num"], "items": _parse_items(order["items"]),\n                "subtotal": refund_subtotal, "tax": refund_tax,\n                "discount": refund_discount, "total": refund_amount,\n                "refund_method": refund_method, "refund_ref": refund_ref,\n                "reason": row["reason"] or "", "requested_by": row["requested_by"],\n                "approved_by": u["name"], "date": _now_sql(),\n                "payment_method": payment_method,\n            }\n'''
+          if old_refund not in s:
+              raise SystemExit('REFUND_PATCH_TARGET_NOT_FOUND')
+          s = s.replace(old_refund, new_refund, 1)
+
+          p.write_text(s, encoding='utf-8')
+          print('PATCH_OK')
+
+      - name: Validate Python syntax
+        run: python -m py_compile app.py
+
+      - name: Verify cancellation guard and refund rule
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path('app.py').read_text(encoding='utf-8')
+          checks = [
+              'order_check["status"] not in ("active", "sent", "ready", "completed")',
+              'refund_amount = original_paid if payment_method == "آجل" else original_total',
+              'refund_method_default = "نقدي" if payment_method == "آجل" else payment_method',
+              'refund_amount, refund_method, refund_ref',
+          ]
+          missing = [x for x in checks if x not in s]
+          if missing:
+              raise SystemExit('VERIFY_FAILED: ' + repr(missing))
+          print('VERIFY_OK')
+
+      - name: Commit repair and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git rm .github/workflows/fix-cancellation-refund.yml
+          git commit -m 'fix: correct cancellation refunds and credit cancellations'
+          git push
