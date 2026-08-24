@@ -1187,9 +1187,23 @@ function renderFloorPlan() {
     takeaway: { label: "🛍️ تيك أواي",  x: 420, y: 260, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 440, y: 285 } },
   };
 
-  for (const sec of Object.keys(zoneLayout)) {
+  for (const sec of TABLE_SECTIONS.map(s => s.id)) {
+    if (!sections[sec]) sections[sec] = [];
+    if (!zoneLayout[sec]) {
+      const index = Object.keys(sections).indexOf(sec);
+      const colZone = index % 2;
+      const rowZone = Math.floor(index / 2);
+      zoneLayout[sec] = {
+        label: `${TABLE_SECTIONS.find(x => x.id === sec)?.icon || "🪑"} ${sec}`,
+        x: colZone * 420 + 10,
+        y: rowZone * 205 + 55,
+        cols: 4,
+        gapX: 85,
+        gapY: 95,
+        startOffset: { x: colZone * 420 + 30, y: rowZone * 205 + 80 }
+      };
+    }
     const list = sections[sec];
-    if (!list || !list.length) continue;
     const z = zoneLayout[sec];
     fp.innerHTML += `<div class="floor-zone ${sec}" style="left:${z.x}px;top:${z.y}px;width:${z.cols * z.gapX + 20}px;height:${Math.ceil(list.length / z.cols) * z.gapY + 30}px">
       <div class="floor-zone-label">${z.label}</div>
