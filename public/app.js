@@ -1045,6 +1045,7 @@ async function loadTableSections() {
     if (Array.isArray(list) && list.length) {
       TABLE_SECTIONS = list.map(s => ({
         id: s.section_id,
+        name: s.name,
         icon: s.icon || "🪑"
       }));
     }
@@ -1075,7 +1076,7 @@ function renderTables() {
     let occupied = 0;
     for (const tb of list) if (tb.active) occupied++;
     let block = `<div class="table-section sec-${sec.id}">
-      <div class="table-section-title"><span class="sec-icon">${sec.icon}</span> ${t(sec.id)}
+      <div class="table-section-title"><span class="sec-icon">${sec.icon}</span> ${sec.name || t(sec.id)}
         <span class="sec-count">${occupied}/${list.length}</span>
       </div>
       <div class="table-grid">`;
@@ -5337,7 +5338,9 @@ async function addTableSection() {
   document.getElementById("section-name").value="";
   document.getElementById("section-icon").value="";
 
-  loadTableSections();
+  await loadTableSections();
+  renderTables();
+  updateStats();
 }
 
 
