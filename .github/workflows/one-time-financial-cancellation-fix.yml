@@ -1,0 +1,280 @@
+name: One-time financial cancellation fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-time-financial-cancellation-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch cancellation approval and income report
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          start = s.index('@app.route("/api/cancel-approve", methods=["POST"])')
+          end = s.index('@app.route("/api/cancel-reject", methods=["POST"])', start)
+          new = '''@app.route("/api/cancel-approve", methods=["POST"])
+          def api_cancel_approve():
+              u, err, code = require_manager()
+              if err:
+                  return jsonify({"error": err}), code
+              data = request.json or {}
+              req_id = data.get("request_id")
+              if not req_id:
+                  return jsonify({"error": "request_id مطلوب"}), 400
+
+              conn = get_db()
+              c = conn.cursor()
+              try:
+                  _ensure_schema(conn, c)
+                  c.execute("BEGIN IMMEDIATE")
+
+                  row = c.execute(
+                      "SELECT * FROM cancellation_requests WHERE id=? AND status='pending'",
+                      (req_id,),
+                  ).fetchone()
+                  if not row:
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({"error": "طلب غير موجود أو تمت معالجته"}), 404
+
+                  order = c.execute("SELECT * FROM orders WHERE id=?", (row["order_id"],)).fetchone()
+                  if not order or order["status"] not in ("active", "sent", "ready", "completed"):
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({"error": "الطلب غير موجود أو تمت معالجته مسبقاً"}), 400
+
+                  prior_refund = c.execute(
+                      "SELECT id, receipt_no, total FROM refund_receipts WHERE order_id=? LIMIT 1",
+                      (row["order_id"],),
+                  ).fetchone()
+                  if prior_refund:
+                      conn.rollback()
+                      conn.close()
+                      return jsonify({
+                          "error": "تم إصدار سند مردود لهذا الطلب مسبقاً",
+                          "refund_receipt_id": prior_refund["id"],
+                      }), 409
+
+                  sensitive = order["status"] in ("sent", "ready", "completed")
+                  if sensitive:
+                      pin = str(data.get("pin") or "")
+                      managers = c.execute(
+                          "SELECT pin FROM employees WHERE active=1 AND role='manager'"
+                      ).fetchall()
+                      if not any(verify_pin(pin, m["pin"]) for m in managers):
+                          conn.rollback()
+                          conn.close()
+                          return jsonify({"error": "هذا الإلغاء يتطلب PIN المدير"}), 403
+
+                  c.execute(
+                      "UPDATE cancellation_requests SET status='approved', reviewed_by=?, "
+                      "reviewed_at=datetime('now','localtime') "
+                      "WHERE id=? AND status='pending'",
+                      (u["name"], req_id),
+                  )
+                  if c.rowcount != 1:
+                      raise RuntimeError("CANCELLATION_REQUEST_ALREADY_PROCESSED")
+
+                  c.execute(
+                      "UPDATE orders SET status='cancelled', kitchen_status='ready' "
+                      "WHERE id=? AND status IN ('active','sent','ready','completed')",
+                      (row["order_id"],),
+                  )
+                  if c.rowcount != 1:
+                      raise RuntimeError("ORDER_ALREADY_PROCESSED")
+
+                  refund_receipt = None
+                  if order["status"] == "completed":
+                      items = _parse_items(order["items"])
+                      _restore_inventory(c, items)
+
+                      payment_method = str(order["payment_method"] or "نقدي").strip()
+                      original_total = round(max(float(order["total"] or 0), 0), 2)
+                      original_paid = round(max(min(float(order["paid"] or 0), original_total), 0), 2)
+
+                      # A credit invoice can only refund money that was actually collected.
+                      # Cash/transfer sales refund the invoice total.
+                      refund_amount = original_paid if payment_method == "آجل" else original_total
+
+                      if refund_amount > 0:
+                          ratio = refund_amount / original_total if original_total > 0 else 0
+                          refund_subtotal = round(float(order["subtotal"] or 0) * ratio, 2)
+                          refund_tax = round(float(order["tax"] or 0) * ratio, 2)
+                          refund_discount = round(float(order["discount"] or 0) * ratio, 2)
+                          default_refund_method = "نقدي" if payment_method == "آجل" else payment_method
+                          refund_method = str(data.get("refund_method") or default_refund_method).strip() or default_refund_method
+                          refund_ref = str(data.get("refund_ref") or "").strip() or None
+
+                          c.execute(
+                              "INSERT INTO refund_receipts "
+                              "(order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "
+                              "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+                              (
+                                  row["order_id"], order["items"], refund_subtotal, refund_tax,
+                                  refund_discount, refund_amount, refund_method, refund_ref,
+                                  row["reason"] or "", row["requested_by"], u["name"],
+                              ),
+                          )
+                          rid = c.lastrowid
+                          receipt_no = "SR-%d-%05d" % (_now().year, rid)
+                          c.execute(
+                              "UPDATE refund_receipts SET receipt_no=? WHERE id=?",
+                              (receipt_no, rid),
+                          )
+                          refund_receipt = {
+                              "id": rid,
+                              "receipt_no": receipt_no,
+                              "order_id": row["order_id"],
+                              "table_num": order["table_num"],
+                              "items": items,
+                              "subtotal": refund_subtotal,
+                              "tax": refund_tax,
+                              "discount": refund_discount,
+                              "total": refund_amount,
+                              "refund_method": refund_method,
+                              "refund_ref": refund_ref,
+                              "reason": row["reason"] or "",
+                              "requested_by": row["requested_by"],
+                              "approved_by": u["name"],
+                              "date": _now_sql(),
+                              "payment_method": payment_method,
+                          }
+
+                  # Cancelling a credit invoice removes the outstanding receivable.
+                  # Existing credit payments remain historical collections.
+                  if (order["payment_method"] or "").strip() == "آجل":
+                      c.execute(
+                          "UPDATE credit_ledger SET status='closed', updated_at=datetime('now','localtime') "
+                          "WHERE order_id=? AND status='open'",
+                          (row["order_id"],),
+                      )
+
+                  conn.commit()
+              except Exception as e:
+                  try:
+                      conn.rollback()
+                  except Exception:
+                      pass
+                  conn.close()
+                  return jsonify({
+                      "error": "فشل تنفيذ الإلغاء بالكامل؛ لم يتم اعتماد أي جزء من العملية",
+                      "detail": str(e),
+                  }), 500
+
+              conn.close()
+              audit(
+                  "cancel_approve",
+                  f"موافقة على إلغاء طلب #{row['order_id']} (طاولة {row['table_num']}) من {u['name']}"
+                  + (" مع PIN" if sensitive else "")
+                  + (f" - مردود {refund_receipt['total']:.2f} ({refund_receipt['receipt_no']})" if refund_receipt else ""),
+              )
+              return jsonify({"ok": True, "sensitive": sensitive, "refund_receipt": refund_receipt})
+
+
+          '''
+          s = s[:start] + new + s[end:]
+
+          old_report = '''    # الإلغاءات (مرتجعات) خلال الفترة
+              can_where = "status='cancelled'"
+              can_params = []
+              if from_d:
+                  can_where += " AND date(date) >= ?"
+                  can_params.append(from_d)
+              if to_d:
+                  can_where += " AND date(date) <= ?"
+                  can_params.append(to_d)
+              cancelled = c.execute(f"SELECT * FROM orders WHERE {can_where}", can_params).fetchall()
+              cancelled_total = round(sum(r["total"] or 0 for r in cancelled), 2)
+              cancelled_count = len(cancelled)
+'''
+          new_report = '''    # الإلغاءات وسندات المردودات منفصلان محاسبياً:
+              # الإلغاء يصف قيمة الفاتورة الملغاة، بينما المردود يصف النقد الذي خرج فعلاً.
+              can_where = "status='cancelled'"
+              can_params = []
+              if from_d:
+                  can_where += " AND date(date) >= ?"
+                  can_params.append(from_d)
+              if to_d:
+                  can_where += " AND date(date) <= ?"
+                  can_params.append(to_d)
+              cancelled = c.execute(f"SELECT * FROM orders WHERE {can_where}", can_params).fetchall()
+              cancelled_total = round(sum(r["total"] or 0 for r in cancelled), 2)
+              cancelled_count = len(cancelled)
+
+              refund_where = "1=1"
+              refund_params = []
+              if from_d:
+                  refund_where += " AND date(date) >= ?"
+                  refund_params.append(from_d)
+              if to_d:
+                  refund_where += " AND date(date) <= ?"
+                  refund_params.append(to_d)
+              refunded_total = round(c.execute(
+                  f"SELECT COALESCE(SUM(total),0) FROM refund_receipts WHERE {refund_where}",
+                  refund_params,
+              ).fetchone()[0], 2)
+              refunded_count = int(c.execute(
+                  f"SELECT COUNT(*) FROM refund_receipts WHERE {refund_where}",
+                  refund_params,
+              ).fetchone()[0])
+'''
+          if old_report not in s:
+              raise SystemExit('income cancellation block not found; aborting without changes')
+          s = s.replace(old_report, new_report, 1)
+
+          s = s.replace(
+              '    cash_out = round(expenses_total + cancelled_total, 2)\n',
+              '    cash_out = round(expenses_total + refunded_total, 2)\n',
+              1,
+          )
+
+          s = s.replace(
+              '        "by_method": by_method, "cancelled_total": cancelled_total, "cancelled_count": cancelled_count,\n',
+              '        "by_method": by_method, "cancelled_total": cancelled_total, "cancelled_count": cancelled_count,\n        "refunded_total": refunded_total, "refunded_count": refunded_count,\n',
+              1,
+          )
+
+          p.write_text(s, encoding='utf-8')
+          print('FINANCIAL_CANCELLATION_FIX_APPLIED')
+
+      - name: Validate Python syntax
+        run: python -m py_compile app.py
+
+      - name: Verify repair markers
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path('app.py').read_text(encoding='utf-8')
+          checks = [
+              'c.execute("BEGIN IMMEDIATE")',
+              'SELECT id, receipt_no, total FROM refund_receipts WHERE order_id=? LIMIT 1',
+              'refund_amount = original_paid if payment_method == "آجل" else original_total',
+              'cash_out = round(expenses_total + refunded_total, 2)',
+              '"refunded_total": refunded_total',
+          ]
+          missing = [x for x in checks if x not in s]
+          if missing:
+              raise SystemExit('VERIFY_FAILED: ' + repr(missing))
+          print('VERIFY_OK')
+
+      - name: Commit repair and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git rm .github/workflows/one-time-financial-cancellation-fix.yml
+          git commit -m 'fix: make cancellation refunds atomic and separate refunds from cancellations'
+          git push origin HEAD:main

@@ -1657,6 +1657,10 @@ def api_cancel_request():
     if not order_id:
         conn.close()
         return jsonify({"error": "لا يوجد طلب نشط لهذه الطاولة"}), 400
+    order_check = c.execute("SELECT status FROM orders WHERE id=?", (order_id,)).fetchone()
+    if not order_check or order_check["status"] not in ("active", "sent", "ready", "completed"):
+        conn.close()
+        return jsonify({"error": "لا يمكن طلب إلغاء طلب غير نشط أو تمت معالجته مسبقاً"}), 400
     existing = c.execute("SELECT id FROM cancellation_requests WHERE order_id=? AND status='pending'", (order_id,)).fetchone()
     if existing:
         conn.close()
@@ -1720,32 +1724,49 @@ def api_cancel_approve():
     c.execute("UPDATE orders SET status='cancelled', kitchen_status='ready' WHERE id=?", (row["order_id"],))
     refund_receipt = None
     was_paid = bool(order and order["status"] == "completed")
-    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون المُخصوم تلقائياً وأنشئ سند مردودات
+    # إذا كان الطلب مدفوعاً سابقاً، أعد المخزون مرة واحدة وأنشئ سند مردود بالمبلغ
+    # الذي خرج فعلياً من الصندوق/الحساب. للآجل المدفوع جزئياً نرد المدفوع فقط،
+    # أما الرصيد غير المدفوع فيُغلق من credit_ledger ولا يتحول إلى cash-out.
     if order and order["status"] == "completed":
         try:
             items = _parse_items(order["items"])
             _restore_inventory(c, items)
         except Exception:
             items = []
-        refund_method = str(data.get("refund_method") or order["payment_method"] or "نقدي")
-        refund_ref = str(data.get("refund_ref") or "").strip() or None
-        c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
-                  (row["order_id"], order["items"], order["subtotal"] or 0, order["tax"] or 0, order["discount"] or 0,
-                   order["total"] or 0, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))
-        rid = c.lastrowid
-        receipt_no = "SR-%d-%05d" % (_now().year, rid)
-        c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))
-        refund_receipt = {
-            "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],
-            "table_num": order["table_num"], "items": _parse_items(order["items"]),
-            "subtotal": order["subtotal"] or 0, "tax": order["tax"] or 0,
-            "discount": order["discount"] or 0, "total": order["total"] or 0,
-            "refund_method": refund_method, "refund_ref": refund_ref,
-            "reason": row["reason"] or "", "requested_by": row["requested_by"],
-            "approved_by": u["name"], "date": _now_sql(),
-            "payment_method": order["payment_method"] or "",
-        }
+
+        payment_method = str(order["payment_method"] or "نقدي").strip()
+        original_total = round(max(float(order["total"] or 0), 0), 2)
+        original_paid = round(max(min(float(order["paid"] or 0), original_total), 0), 2)
+        # في البيع النقدي/التحويل، مبلغ الفاتورة هو المبلغ المستحق رده؛
+        # paid قد يتضمن مبلغاً قدمه العميل ثم أُعيد له كـ change.
+        # في الآجل، النقد الذي يمكن رده هو فقط ما دُفع فعلياً.
+        refund_amount = original_paid if payment_method == "آجل" else original_total
+
+        if refund_amount > 0:
+            refund_ratio = (refund_amount / original_total) if original_total > 0 else 0
+            refund_subtotal = round(float(order["subtotal"] or 0) * refund_ratio, 2)
+            refund_tax = round(float(order["tax"] or 0) * refund_ratio, 2)
+            refund_discount = round(float(order["discount"] or 0) * refund_ratio, 2)
+            refund_method_default = "نقدي" if payment_method == "آجل" else payment_method
+            refund_method = str(data.get("refund_method") or refund_method_default).strip() or refund_method_default
+            refund_ref = str(data.get("refund_ref") or "").strip() or None
+            c.execute("INSERT INTO refund_receipts (order_id, items, subtotal, tax, discount, total, refund_method, refund_ref, reason, requested_by, approved_by, date) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now','localtime'))",
+                      (row["order_id"], order["items"], refund_subtotal, refund_tax, refund_discount,
+                       refund_amount, refund_method, refund_ref, row["reason"] or "", row["requested_by"], u["name"]))
+            rid = c.lastrowid
+            receipt_no = "SR-%d-%05d" % (_now().year, rid)
+            c.execute("UPDATE refund_receipts SET receipt_no=? WHERE id=?", (receipt_no, rid))
+            refund_receipt = {
+                "id": rid, "receipt_no": receipt_no, "order_id": row["order_id"],
+                "table_num": order["table_num"], "items": _parse_items(order["items"]),
+                "subtotal": refund_subtotal, "tax": refund_tax,
+                "discount": refund_discount, "total": refund_amount,
+                "refund_method": refund_method, "refund_ref": refund_ref,
+                "reason": row["reason"] or "", "requested_by": row["requested_by"],
+                "approved_by": u["name"], "date": _now_sql(),
+                "payment_method": payment_method,
+            }
     # إلغاء فاتورة آجل: أغلق رصيد الدفتر المرتبط بها
     if order and (order["payment_method"] or "").strip() == "آجل":
         try:
@@ -1785,56 +1806,19 @@ def api_cancel_reject():
 
 @app.route("/api/admin/delete-order/<int:oid>", methods=["POST"])
 def api_admin_delete_order(oid):
-    """أداة صيانة (PIN المدير): حذف نهائي لطلب تجريبي/مكرر مع ما يتعلق به وسجل تدقيق."""
+    """تعطيل الحذف النهائي للطلبات حفاظاً على السجل المالي والتدقيق."""
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
-    data = request.json or {}
-    pin = str(data.get("pin") or "")
-    conn = get_db()
-    c = conn.cursor()
-    managers = c.execute("SELECT pin FROM employees WHERE active=1 AND role='manager'").fetchall()
-    if not any(verify_pin(pin, m["pin"]) for m in managers):
-        conn.close()
-        return jsonify({"error": "يتطلب PIN المدير"}), 403
-    row = c.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not row:
-        conn.close()
-        return jsonify({"error": "طلب غير موجود"}), 404
-    # أعد المخزون المُخصوم إن كان الطلب مدفوعاً
-    if row["status"] == "completed":
-        try:
-            _restore_inventory(c, _parse_items(row["items"]))
-        except Exception:
-            pass
-    # احذف سندات المردودات وطلبات الإلغاء المرتبطة
-    try:
-        c.execute("DELETE FROM refund_receipts WHERE order_id=?", (oid,))
-    except Exception:
-        pass
-    try:
-        c.execute("DELETE FROM cancellation_requests WHERE order_id=?", (oid,))
-    except Exception:
-        pass
-    # احذف أرصدة/تحصيلات الآجل المرتبطة
-    try:
-        ledgers = c.execute("SELECT id FROM credit_ledger WHERE order_id=?", (oid,)).fetchall()
-        for lg in ledgers:
-            c.execute("DELETE FROM credit_payments WHERE ledger_id=?", (lg["id"],))
-        c.execute("DELETE FROM credit_ledger WHERE order_id=?", (oid,))
-    except Exception:
-        pass
-    # احذف سجلات الخصم المرتبطة
-    try:
-        c.execute("DELETE FROM discount_log WHERE order_id=?", (oid,))
-    except Exception:
-        pass
-    c.execute("DELETE FROM orders WHERE id=?", (oid,))
-    conn.commit()
-    audit("admin_delete_order", f"حذف نهائي لطلب #{oid} (طاولة {row['table_num']}) من {u['name']} - صيانة")
-    conn.close()
-    return jsonify({"ok": True})
 
+    audit(
+        "admin_delete_order_blocked",
+        f"محاولة حذف نهائي للطلب #{oid} من {u['name']}"
+    )
+
+    return jsonify({
+        "error": "الحذف النهائي للطلبات معطل حفاظاً على السجل المالي. استخدم الإلغاء/المردود المعتمد."
+    }), 403
 
 @app.route("/api/cancel-count")
 def api_cancel_count():

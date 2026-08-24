@@ -1,0 +1,48 @@
+name: One-time security hardening
+on:
+  push:
+    paths:
+      - .github/workflows/security-hardening-delete-order.yml
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Disable permanent order deletion endpoint
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          pattern = r'@app\.route\("/api/admin/delete-order/<int:oid>", methods=\["POST"\]\)\ndef api_admin_delete_order\(oid\):.*?(?=\n@app\.route\("/api/cancel-count"\))'
+          replacement = '''@app.route("/api/admin/delete-order/<int:oid>", methods=["POST"])
+def api_admin_delete_order(oid):
+    """تعطيل الحذف النهائي للطلبات حفاظاً على السجل المالي والتدقيق."""
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
+    audit("admin_delete_order_blocked", f"محاولة حذف نهائي للطلب #{oid} من {u['name']}")
+    return jsonify({"error": "الحذف النهائي للطلبات معطل حفاظاً على السجل المالي. استخدم الإلغاء/المردود المعتمد."}), 403
+'''
+          s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('Target delete-order endpoint not found exactly once; no change made.')
+          p.write_text(s2, encoding='utf-8')
+      - name: Validate and commit
+        shell: bash
+        run: |
+          python -m py_compile app.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git commit -m 'Disable permanent order deletion for financial integrity'
+          git push origin HEAD:main
+      - name: Remove one-time workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/security-hardening-delete-order.yml
+          git commit -m 'Remove one-time security hardening workflow'
+          git push origin HEAD:main
