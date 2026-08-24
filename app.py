@@ -4542,10 +4542,10 @@ def _report_filtered(c, from_d, to_d, args):
     where = "status='completed'"
     params = []
     if from_d:
-        where += " AND date(date) >= ?"
+        where += " AND date(rr.date) >= ?"
         params.append(from_d)
     if to_d:
-        where += " AND date(date) <= ?"
+        where += " AND date(rr.date) <= ?"
         params.append(to_d)
     rows = c.execute(f"SELECT * FROM orders WHERE {where} ORDER BY date", params).fetchall()
 
