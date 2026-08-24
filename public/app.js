@@ -5726,6 +5726,7 @@ async function init() {
   try {
     const b = await api("/api/bootstrap");
     applyBootstrapData(b);
+    await loadTableSections();
     tableData = {};
     for (const t of (b.tables || [])) tableData[t.id] = t;
     renderTables();
