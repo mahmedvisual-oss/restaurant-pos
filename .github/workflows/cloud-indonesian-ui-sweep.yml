@@ -1,0 +1,139 @@
+name: Cloud Indonesian UI sweep
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  sweep:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix: cloud Indonesian UI sweep') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Repair language-dependent UI text
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          # ------------------------------------------------------------
+          # Main POS UI: never display Arabic database aliases when the
+          # interface language is Indonesian/English.
+          # ------------------------------------------------------------
+          p = Path('public/app.js')
+          s = p.read_text(encoding='utf-8-sig')
+
+          marker = 'function localizedTableSectionName('
+          if marker not in s:
+              anchor = '''function tableSectionLabel(tb) {\n  if (!tb) return "";\n  const raw = tb.section_name ?? tb.sectionName ?? tb.section ?? tb.area_name ?? tb.area ?? tb.group ?? tb.room ?? "";\n  if (!raw) return "";\n  const key = String(raw).trim().toLowerCase();\n  return TABLE_SECTION_NAMES[key] || TABLE_SECTION_NAMES[String(raw).trim()] || String(raw).trim();\n}\n'''
+              helper = '''function tableSectionLabel(tb) {\n  if (!tb) return "";\n  const raw = tb.section_name ?? tb.sectionName ?? tb.section ?? tb.area_name ?? tb.area ?? tb.group ?? tb.room ?? "";\n  if (!raw) return "";\n  const key = String(raw).trim().toLowerCase();\n  return TABLE_SECTION_NAMES[key] || TABLE_SECTION_NAMES[String(raw).trim()] || String(raw).trim();\n}\n\nfunction localizedTableSectionName(sec) {\n  const id = String(sec?.id ?? sec ?? "").trim().toLowerCase();\n  const raw = String(sec?.name ?? "").trim();\n  const aliases = {\n    families: "families", family: "families", "family-room": "families", "family_room": "families",\n    عائلات: "families", العائلات: "families",\n    vip: "vip",\n    hall: "hall", main: "hall", dining: "hall", restaurant: "hall", الصالة: "hall",\n    takeaway: "takeaway", "take-away": "takeaway", "take_away": "takeaway", تيك_أواي: "takeaway",\n  };\n  const rawKey = raw.toLowerCase();\n  const key = aliases[id] || aliases[rawKey] || id;\n  if (typeof t === "function") {\n    const translated = t(key);\n    if (translated && translated !== key) return translated;\n  }\n  return raw || key;\n}\n'''
+              if anchor not in s:
+                  raise SystemExit('tableSectionLabel block not found; refusing unsafe edit')
+              s = s.replace(anchor, helper, 1)
+
+          s = s.replace('${sec.name || t(sec.id)}', '${localizedTableSectionName(sec)}')
+          s = s.replace('title="طاولة ${i} - ${capacity} أشخاص"', 'title="${t("table")} ${i} - ${capacity} ${t("guests")}"')
+          s = s.replace('label: "👨‍👩‍👧 العائلات"', 'label: `👨‍👩‍👧 ${t("families")}`')
+          s = s.replace('label: "🛋️ الصالة"', 'label: `🛋️ ${t("hall")}`')
+          s = s.replace('label: "🛍️ تيك أواي"', 'label: `🛍️ ${t("takeaway")}`')
+          s = s.replace('label: `${TABLE_SECTIONS.find(x => x.id === sec)?.icon || "🪑"} ${sec}`', 'label: `${TABLE_SECTIONS.find(x => x.id === sec)?.icon || "🪑"} ${localizedTableSectionName(TABLE_SECTIONS.find(x => x.id === sec) || {id: sec})}`')
+          s = s.replace('return `${hours}h ${mins % 60}m`;', 'return `${hours}${t("hrAbbr")} ${mins % 60}${t("minAbbr")}`;')
+          s = s.replace('return `${mins}m`;', 'return `${mins}${t("minAbbr")}`;')
+
+          p.write_text(s, encoding='utf-8', newline='\n')
+
+          # ------------------------------------------------------------
+          # Professional report: translate presentation strings while
+          # leaving Arabic business/database values untouched.
+          # ------------------------------------------------------------
+          p = Path('public/professional-reports.js')
+          s = p.read_text(encoding='utf-8-sig')
+
+          if 'function rt(key, ar, en, id)' not in s:
+              needle = '  function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }\n'
+              helper = '''  function rt(key, ar, en, id) {\n    try {\n      const lang = (typeof currentLang !== "undefined" ? currentLang : "id");\n      if (typeof I18N !== "undefined" && I18N[lang] && I18N[lang][key]) return I18N[lang][key];\n    } catch (_) {}\n    return (typeof currentLang !== "undefined" && currentLang === "ar") ? ar : ((typeof currentLang !== "undefined" && currentLang === "en") ? en : id);\n  }\n\n'''
+              if needle not in s:
+                  raise SystemExit('professional report anchor not found')
+              s = s.replace(needle, needle + helper, 1)
+
+          replacements = {
+            '"📑 التقرير المالي الاحترافي"': 'rt("proReportTitle", "📑 التقرير المالي الاحترافي", "📑 Professional Financial Report", "📑 Laporan Keuangan Profesional")',
+            '"تقرير مالي احترافي للطباعة"': 'rt("proReportPrintTitle", "تقرير مالي احترافي للطباعة", "Professional financial report for printing", "Laporan keuangan profesional untuk dicetak")',
+            '"جاري تجهيز التقرير..."': 'rt("proReportLoading", "جاري تجهيز التقرير...", "Preparing report...", "Menyiapkan laporan...")',
+            '"المطعم"': 'rt("restaurantFallback", "المطعم", "Restaurant", "Restoran")',
+            '"الفترة: "': 'rt("proPeriod", "الفترة: ", "Period: ", "Periode: ")',
+            '" إلى "': 'rt("proTo", " إلى ", " to ", " sampai ")',
+            '"تاريخ الإصدار: "': 'rt("proIssuedAt", "تاريخ الإصدار: ", "Issued: ", "Diterbitkan: ")',
+            '"🖨️ طباعة التقرير الاحترافي"': 'rt("proPrint", "🖨️ طباعة التقرير الاحترافي", "🖨️ Print professional report", "🖨️ Cetak laporan profesional")',
+            '"صافي المبيعات"': 'rt("proNetSales", "صافي المبيعات", "Net sales", "Penjualan bersih")',
+            '"عدد الفواتير"': 'rt("proInvoiceCount", "عدد الفواتير", "Invoices", "Jumlah faktur")',
+            '"متوسط الفاتورة"': 'rt("proAvgInvoice", "متوسط الفاتورة", "Average invoice", "Rata-rata faktur")',
+            '"الضريبة"': 'rt("proTax", "الضريبة", "Tax", "Pajak")',
+            '"الخصومات"': 'rt("proDiscounts", "الخصومات", "Discounts", "Diskon")',
+            '"المحصّل على الفواتير"': 'rt("proCollected", "المحصّل على الفواتير", "Collected on invoices", "Terkumpul dari faktur")',
+            '"مبيعات الآجل"': 'rt("proCreditSales", "مبيعات الآجل", "Credit sales", "Penjualan kredit")',
+            '"تحصيل الآجل خلال الفترة"': 'rt("proCreditCollected", "تحصيل الآجل خلال الفترة", "Credit collected in period", "Penagihan kredit periode ini")',
+            '"📌 الملخص التنفيذي"': 'rt("proExecutive", "📌 الملخص التنفيذي", "📌 Executive summary", "📌 Ringkasan eksekutif")',
+            '"المجموع قبل الضريبة"': 'rt("proSubtotal", "المجموع قبل الضريبة", "Subtotal before tax", "Subtotal sebelum pajak")',
+            '"الإجمالي النهائي"': 'rt("proGrandTotal", "الإجمالي النهائي", "Final total", "Total akhir")',
+            '"تحصيل نقدي"': 'rt("proCashCollected", "تحصيل نقدي", "Cash collected", "Penerimaan tunai")',
+            '"تحصيل إلكتروني / بنكي"': 'rt("proElectronicCollected", "تحصيل إلكتروني / بنكي", "Electronic / bank collected", "Penerimaan elektronik / bank")',
+            '"مبيعات آجلة"': 'rt("proCreditSales2", "مبيعات آجلة", "Credit sales", "Penjualan kredit")',
+            '"الرصيد غير المحصّل من الفواتير"': 'rt("proOutstanding", "الرصيد غير المحصّل من الفواتير", "Outstanding invoice balance", "Saldo faktur belum tertagih")',
+            '"💳 تحليل طرق الدفع"': 'rt("proPaymentAnalysis", "💳 تحليل طرق الدفع", "💳 Payment method analysis", "💳 Analisis metode pembayaran")',
+            '"طريقة الدفع"': 'rt("proPaymentMethod", "طريقة الدفع", "Payment method", "Metode pembayaran")',
+            '"العمليات"': 'rt("proOperations", "العمليات", "Transactions", "Transaksi")',
+            '"المبلغ"': 'rt("proAmount", "المبلغ", "Amount", "Jumlah")',
+            '"النسبة"': 'rt("proPercent", "النسبة", "Percentage", "Persentase")',
+            '"الإجمالي"': 'rt("proTotal", "الإجمالي", "Total", "Total")',
+            '"لا توجد عمليات"': 'rt("proNoTransactions", "لا توجد عمليات", "No transactions", "Tidak ada transaksi")',
+            '"👥 أداء الكاشير / الموظفين"': 'rt("proEmployeePerformance", "👥 أداء الكاشير / الموظفين", "👥 Cashier / employee performance", "👥 Kinerja kasir / karyawan")',
+            '"الموظف"': 'rt("proEmployee", "الموظف", "Employee", "Karyawan")',
+            '"الفواتير"': 'rt("proInvoices", "الفواتير", "Invoices", "Faktur")',
+            '"المبيعات"': 'rt("proSales", "المبيعات", "Sales", "Penjualan")',
+            '"لا توجد بيانات"': 'rt("proNoData", "لا توجد بيانات", "No data", "Tidak ada data")',
+            '"🍽️ الأصناف الأكثر مبيعًا"': 'rt("proTopItems", "🍽️ الأصناف الأكثر مبيعًا", "🍽️ Best-selling items", "🍽️ Item terlaris")',
+            '"الصنف"': 'rt("proItem", "الصنف", "Item", "Item")',
+            '"الكمية"': 'rt("proQty", "الكمية", "Quantity", "Jumlah")',
+            '"الإيراد"': 'rt("proRevenue", "الإيراد", "Revenue", "Pendapatan")',
+            '"📅 المبيعات اليومية"': 'rt("proDailySales", "📅 المبيعات اليومية", "📅 Daily sales", "📅 Penjualan harian")',
+            '"التاريخ"': 'rt("proDate", "التاريخ", "Date", "Tanggal")',
+            '"متوسط الفاتورة"': 'rt("proAvgInvoice", "متوسط الفاتورة", "Average invoice", "Rata-rata faktur")',
+            '"متوسط"': 'rt("proAverage", "متوسط", "Average", "Rata-rata")',
+            '"⚠️ التقرير يوضح الإيرادات والتحصيل والذمم. لا يُعرض صافي الربح الحقيقي إلا عند اكتمال ربط تكلفة البضاعة والمصروفات بالمبيعات."': 'rt("proNote", "⚠️ التقرير يوضح الإيرادات والتحصيل والذمم. لا يُعرض صافي الربح الحقيقي إلا عند اكتمال ربط تكلفة البضاعة والمصروفات بالمبيعات.", "⚠️ This report shows revenue, collections, and receivables. True net profit is not shown until inventory cost and expenses are linked to sales.", "⚠️ Laporan ini menampilkan pendapatan, penerimaan, dan piutang. Laba bersih sebenarnya belum ditampilkan sampai biaya persediaan dan beban terhubung dengan penjualan.")',
+            '"التقرير المالي الاحترافي"': 'rt("proReportTitle", "التقرير المالي الاحترافي", "Professional Financial Report", "Laporan Keuangan Profesional")',
+            '"تم إصدار التقرير بواسطة نظام نقاط البيع"': 'rt("proIssuedBy", "تم إصدار التقرير بواسطة نظام نقاط البيع", "Report issued by the POS system", "Laporan diterbitkan oleh sistem POS")',
+          }
+          for old, new in replacements.items():
+              s = s.replace(old, new)
+
+          # The broad replacements above can touch an already translated call.
+          # Normalize the known nested forms back to one valid expression.
+          s = s.replace('rt("proReportTitle", "📑 ' + 'rt("proReportTitle",', 'rt("proReportTitle", "📑 التقرير المالي الاحترافي",')
+          s = s.replace('rt("proAvgInvoice", "متوسط الفاتورة", "Average invoice", "Rata-rata faktur")', 'rt("proAvgInvoice", "متوسط الفاتورة", "Average invoice", "Rata-rata faktur")')
+
+          p.write_text(s, encoding='utf-8', newline='\n')
+
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          node --check public/app.js
+          node --check public/professional-reports.js
+
+      - name: Commit cloud repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/app.js public/professional-reports.js
+          if git diff --cached --quiet; then
+            echo "No additional cloud language changes required."
+            exit 0
+          fi
+          git commit -m "fix: cloud Indonesian UI sweep"
+          git push origin main
