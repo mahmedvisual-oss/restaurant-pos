@@ -2511,8 +2511,14 @@ def api_credit_settle():
         receipt_no = "QC-%d-%05d" % (_now().year, voucher_id)
         c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, voucher_id))
 
-        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
-                  (new_paid, status, lid))
+        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') "
+                  "WHERE id=? AND status='open' "
+                  "AND ROUND(COALESCE(total,0)-COALESCE(paid,0),2) >= ?",
+                  (new_paid, status, lid, amount))
+        if c.rowcount != 1:
+            conn.rollback()
+            conn.close()
+            return jsonify({"error": "تم تسجيل تحصيل آخر لهذا الرصيد؛ أعد تحميل الحساب وحاول مرة أخرى"}), 409
         c.execute(
             "INSERT INTO credit_payments (ledger_id, amount, method, employee, date, transfer_ref, transfer_name, receipt_no, deposit_voucher_id) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
@@ -3186,6 +3192,8 @@ def _dump_remote_to_file(dst_path):
 
 
 def make_backup(prefix="backup"):
+    if _ON_VERCEL and not _blob_token():
+        raise RuntimeError("DURABLE BACKUP MISCONFIGURED: BLOB_READ_WRITE_TOKEN is required on Vercel")
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
     except Exception:
@@ -3431,6 +3439,8 @@ def api_backup_list():
     u, err, code = require_manager()
     if err:
         return jsonify({"error": err}), code
+    if _ON_VERCEL and not _blob_token():
+        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503
     if _blob_token():
         return jsonify({"backups": _blob_list()})
     try:
@@ -3461,6 +3471,8 @@ def api_backup_download_one(name):
     safe = _safe_backup_name(name)
     if not safe:
         return jsonify({"error": "اسم ملف غير صالح"}), 400
+    if _ON_VERCEL and not _blob_token():
+        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503
     if _blob_token():
         tmp = os.path.join(tempfile.gettempdir(), f"dl_{safe}")
         if not _blob_download(safe, tmp):
@@ -3486,6 +3498,8 @@ def api_backup_restore_one(name):
     safe = _safe_backup_name(name)
     if not safe:
         return jsonify({"error": "اسم ملف غير صالح"}), 400
+    if _ON_VERCEL and not _blob_token():
+        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503
     if _blob_token():
         p = os.path.join(tempfile.gettempdir(), f"restore_{safe}")
         if not _blob_download(safe, p):
@@ -3529,6 +3543,8 @@ def api_backup_cron():
     """يستدعيها Vercel Cron: ينشئ نسخة مجدولة على Blob (يومي/أسبوعي حسب الإعدادات)."""
     if request.headers.get("x-vercel-cron") is None and not require_user():
         return jsonify({"error": "غير مصرح"}), 403
+    if _ON_VERCEL and not _blob_token():
+        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503
     try:
         if get_setting("auto_backup", "1") != "1":
             return jsonify({"ok": True, "skipped": "auto_backup off"})
@@ -3606,9 +3622,9 @@ def api_day_status():
 
 @app.route("/api/day/close", methods=["POST"])
 def api_day_close():
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
     data = request.json or {}
     try:
         counted = round(float(data.get("counted_cash", 0)), 2)
@@ -3637,9 +3653,9 @@ def api_day_close():
 @app.route("/api/day/start", methods=["POST"])
 def api_day_start():
     """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
     today = _now().strftime("%Y-%m-%d")
     conn = get_db()
     c = conn.cursor()
@@ -5145,10 +5161,10 @@ def api_refunds():
     where = "1=1"
     params = []
     if from_d:
-        where += " AND date(date) >= ?"
+        where += " AND date(rr.date) >= ?"
         params.append(from_d)
     if to_d:
-        where += " AND date(date) <= ?"
+        where += " AND date(rr.date) <= ?"
         params.append(to_d)
     rows = c.execute(f"SELECT rr.*, o.table_num AS o_table FROM refund_receipts rr "
                      f"LEFT JOIN orders o ON rr.order_id=o.id WHERE {where} ORDER BY rr.id DESC", params).fetchall()
@@ -5166,9 +5182,9 @@ def api_refunds():
 @app.route("/api/deposit-voucher", methods=["POST"])
 def api_deposit_voucher_create():
     """إنشاء سند قبض وربطه تلقائياً بذمم العميل المفتوحة من الأقدم إلى الأحدث."""
-    u = require_user()
-    if not u:
-        return jsonify({"error": "سجل الدخول أولاً"}), 401
+    u, err, code = require_manager()
+    if err:
+        return jsonify({"error": err}), code
 
     data = request.json or {}
     customer_name = str(data.get("customer_name") or "").strip()

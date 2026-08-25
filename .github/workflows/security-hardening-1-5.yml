@@ -1,0 +1,49 @@
+name: Apply security hardening 1-5
+on:
+  push:
+    branches: [security-hardening-1-5]
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch app.py safely
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app.py')
+          s=p.read_text(encoding='utf-8')
+          changes=[]
+          def r(old,new,label):
+              global s
+              n=s.count(old)
+              if n!=1: raise SystemExit(f'ABORT {label}: expected 1 match, found {n}')
+              s=s.replace(old,new); changes.append(label)
+          r('CLOUD_DB = bool(TURSO_URL) and _TS_AVAILABLE\nDB_INTEGRITY = _ts.IntegrityError if CLOUD_DB else sqlite3.IntegrityError\n','CLOUD_DB = bool(TURSO_URL) and _TS_AVAILABLE\nif _ON_VERCEL and not CLOUD_DB:\n    raise RuntimeError("PRODUCTION DATABASE MISCONFIGURED: Turso is required on Vercel; refusing SQLite fallback")\nDB_INTEGRITY = _ts.IntegrityError if CLOUD_DB else sqlite3.IntegrityError\n','1-production-db-fail-closed')
+          r('def make_backup(prefix="backup"):\n    try:\n        os.makedirs(BACKUP_DIR, exist_ok=True)\n    except Exception:\n        pass\n','def make_backup(prefix="backup"):\n    if _ON_VERCEL and not _blob_token():\n        raise RuntimeError("DURABLE BACKUP MISCONFIGURED: BLOB_READ_WRITE_TOKEN is required on Vercel")\n    try:\n        os.makedirs(BACKUP_DIR, exist_ok=True)\n    except Exception:\n        pass\n','5-make-backup-fail-closed')
+          r('    if _blob_token():\n        return jsonify({"backups": _blob_list()})\n    try:\n        os.makedirs(BACKUP_DIR, exist_ok=True)\n','    if _ON_VERCEL and not _blob_token():\n        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503\n    if _blob_token():\n        return jsonify({"backups": _blob_list()})\n    try:\n        os.makedirs(BACKUP_DIR, exist_ok=True)\n','5-backup-list-fail-closed')
+          r('    if _blob_token():\n        tmp = os.path.join(tempfile.gettempdir(), f"dl_{safe}")\n','    if _ON_VERCEL and not _blob_token():\n        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503\n    if _blob_token():\n        tmp = os.path.join(tempfile.gettempdir(), f"dl_{safe}")\n','5-backup-download-fail-closed')
+          r('    if _blob_token():\n        p = os.path.join(tempfile.gettempdir(), f"restore_{safe}")\n','    if _ON_VERCEL and not _blob_token():\n        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503\n    if _blob_token():\n        p = os.path.join(tempfile.gettempdir(), f"restore_{safe}")\n','5-backup-restore-fail-closed')
+          r('    if request.headers.get("x-vercel-cron") is None and not require_user():\n        return jsonify({"error": "غير مصرح"}), 403\n    try:\n','    if request.headers.get("x-vercel-cron") is None and not require_user():\n        return jsonify({"error": "غير مصرح"}), 403\n    if _ON_VERCEL and not _blob_token():\n        return jsonify({"error": "النسخ الاحتياطي الدائم غير مهيأ على الخادم"}), 503\n    try:\n','5-cron-requires-durable-storage')
+          r('    if from_d:\n        where += " AND date(date) >= ?"\n        params.append(from_d)\n    if to_d:\n        where += " AND date(date) <= ?"\n        params.append(to_d)\n    rows = c.execute(f"SELECT rr.*, o.table_num AS o_table FROM refund_receipts rr "\n                     f"LEFT JOIN orders o ON rr.order_id=o.id WHERE {where} ORDER BY rr.id DESC", params).fetchall()\n','    if from_d:\n        where += " AND date(rr.date) >= ?"\n        params.append(from_d)\n    if to_d:\n        where += " AND date(rr.date) <= ?"\n        params.append(to_d)\n    rows = c.execute(f"SELECT rr.*, o.table_num AS o_table FROM refund_receipts rr "\n                     f"LEFT JOIN orders o ON rr.order_id=o.id WHERE {where} ORDER BY rr.id DESC", params).fetchall()\n','4-refunds-qualified-date')
+          r('def api_day_close():\n    u = require_user()\n    if not u:\n        return jsonify({"error": "سجل الدخول أولاً"}), 401\n','def api_day_close():\n    u, err, code = require_manager()\n    if err:\n        return jsonify({"error": err}), code\n','2-day-close-manager')
+          r('def api_day_start():\n    """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""\n    u = require_user()\n    if not u:\n        return jsonify({"error": "سجل الدخول أولاً"}), 401\n','def api_day_start():\n    """بداية اليوم: يفتح حساب اليوم الحالي (يحذف أي إغلاق سابق لليوم)."""\n    u, err, code = require_manager()\n    if err:\n        return jsonify({"error": err}), code\n','2-day-start-manager')
+          r('def api_deposit_voucher_create():\n    """إنشاء سند قبض وربطه تلقائياً بذمم العميل المفتوحة من الأقدم إلى الأحدث."""\n    u = require_user()\n    if not u:\n        return jsonify({"error": "سجل الدخول أولاً"}), 401\n','def api_deposit_voucher_create():\n    """إنشاء سند قبض وربطه تلقائياً بذمم العميل المفتوحة من الأقدم إلى الأحدث."""\n    u, err, code = require_manager()\n    if err:\n        return jsonify({"error": err}), code\n','2-deposit-voucher-manager')
+          r('        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime(\'now\',\'localtime\') WHERE id=?",\n                  (new_paid, status, lid))\n','        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime(\'now\',\'localtime\') "\n                  "WHERE id=? AND status=\'open\' "\n                  "AND ROUND(COALESCE(total,0)-COALESCE(paid,0),2) >= ?",\n                  (new_paid, status, lid, amount))\n        if c.rowcount != 1:\n            conn.rollback()\n            conn.close()\n            return jsonify({"error": "تم تسجيل تحصيل آخر لهذا الرصيد؛ أعد تحميل الحساب وحاول مرة أخرى"}), 409\n','3-credit-settle-atomic')
+          p.write_text(s,encoding='utf-8')
+          print('APPLIED:', ', '.join(changes))
+          PY
+      - name: Validate Python
+        run: python -m py_compile app.py
+      - name: Commit hardening changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py
+          git diff --cached --check
+          git commit -m 'security: harden production database, finance, refunds and backups' || exit 0
+          git push
