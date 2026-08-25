@@ -6,6 +6,9 @@
       "maxDuration": 60
     }
   },
+  "rewrites": [
+    { "source": "/", "destination": "/api/index" }
+  ],
   "crons": [
     {
       "path": "/api/backup/cron",
