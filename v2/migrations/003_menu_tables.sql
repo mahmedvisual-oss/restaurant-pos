@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS restaurant_tables (
     UNIQUE(section_id, table_number)
 );
 
-CREATE TABLE IF NOT EXISTS menu_categories (
+CREATE TABLE IF NOT EXISTS menu_categories_v2 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
@@ -45,16 +45,17 @@ CREATE TABLE IF NOT EXISTS menu_items_v2 (
     description_key TEXT,
     price_minor INTEGER NOT NULL DEFAULT 0,
     cost_minor INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     emoji TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (category_id) REFERENCES menu_categories(id),
+    FOREIGN KEY (category_id) REFERENCES menu_categories_v2(id),
     CHECK(price_minor >= 0),
     CHECK(cost_minor >= 0)
 );
 
-CREATE TABLE IF NOT EXISTS modifier_groups (
+CREATE TABLE IF NOT EXISTS modifier_groups_v2 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
@@ -67,24 +68,24 @@ CREATE TABLE IF NOT EXISTS modifier_groups (
     CHECK(max_select >= min_select)
 );
 
-CREATE TABLE IF NOT EXISTS modifiers (
+CREATE TABLE IF NOT EXISTS modifiers_v2 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL,
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
     price_delta_minor INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY (group_id) REFERENCES modifier_groups(id)
+    FOREIGN KEY (group_id) REFERENCES modifier_groups_v2(id)
 );
 
-CREATE TABLE IF NOT EXISTS menu_item_modifier_groups (
+CREATE TABLE IF NOT EXISTS menu_item_modifier_groups_v2 (
     menu_item_id INTEGER NOT NULL,
     modifier_group_id INTEGER NOT NULL,
     PRIMARY KEY (menu_item_id, modifier_group_id),
     FOREIGN KEY (menu_item_id) REFERENCES menu_items_v2(id),
-    FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups(id)
+    FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups_v2(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tables_section ON restaurant_tables(section_id, table_number);
-CREATE INDEX IF NOT EXISTS idx_menu_category ON menu_items_v2(category_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_modifiers_group ON modifiers(group_id);
+CREATE INDEX IF NOT EXISTS idx_menu_category_v2 ON menu_items_v2(category_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_modifiers_group_v2 ON modifiers_v2(group_id);
