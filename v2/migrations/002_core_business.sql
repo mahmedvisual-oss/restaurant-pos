@@ -1,5 +1,5 @@
--- V2 core business schema
--- All monetary values are integer minor units (IDR rupiah has no fractional unit).
+-- V2 core business schema.
+-- All monetary values are integer IDR minor units (rupiah).
 
 CREATE TABLE IF NOT EXISTS roles (
     id INTEGER PRIMARY KEY,
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
@@ -38,15 +38,17 @@ CREATE TABLE IF NOT EXISTS restaurant_settings (
 );
 
 CREATE TABLE IF NOT EXISTS menu_categories (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS menu_items (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER REFERENCES menu_categories(id),
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
@@ -57,15 +59,17 @@ CREATE TABLE IF NOT EXISTS menu_items (
 );
 
 CREATE TABLE IF NOT EXISTS dining_sections (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name_key TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS dining_tables (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     section_id INTEGER NOT NULL REFERENCES dining_sections(id),
     table_number INTEGER NOT NULL CHECK (table_number > 0),
     capacity INTEGER NOT NULL DEFAULT 4 CHECK (capacity > 0),
@@ -74,7 +78,7 @@ CREATE TABLE IF NOT EXISTS dining_tables (
 );
 
 CREATE TABLE IF NOT EXISTS customers (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     phone TEXT,
@@ -84,22 +88,18 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_number TEXT NOT NULL UNIQUE,
     table_id INTEGER REFERENCES dining_tables(id),
     customer_id INTEGER REFERENCES customers(id),
     status TEXT NOT NULL CHECK (status IN ('open','sent','ready','served','completed','cancelled')),
-    subtotal INTEGER NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
-    tax INTEGER NOT NULL DEFAULT 0 CHECK (tax >= 0),
-    discount INTEGER NOT NULL DEFAULT 0 CHECK (discount >= 0),
-    total INTEGER NOT NULL DEFAULT 0 CHECK (total >= 0),
     opened_by INTEGER NOT NULL REFERENCES users(id),
     opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS order_items (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL REFERENCES orders(id),
     menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
     quantity INTEGER NOT NULL CHECK (quantity > 0),
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 
 CREATE TABLE IF NOT EXISTS payments (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id INTEGER NOT NULL REFERENCES orders(id),
     receipt_number TEXT NOT NULL UNIQUE,
     method TEXT NOT NULL CHECK (method IN ('cash','card','transfer','other')),
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 CREATE TABLE IF NOT EXISTS audit_events (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     actor_user_id INTEGER REFERENCES users(id),
     action_code TEXT NOT NULL,
     entity_type TEXT NOT NULL,
