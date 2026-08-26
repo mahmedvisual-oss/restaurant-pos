@@ -1,0 +1,22 @@
+name: Verify refunds date fix
+on:
+  push:
+    branches: [fix/refunds-ambiguous-date]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python syntax
+        run: python -m py_compile app.py
+      - name: Verify qualified refund date
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('app.py').read_text(encoding='utf-8')
+          if 'ORDER BY rr.date DESC' not in s:
+              raise SystemExit('refund date qualification missing')
+          print('REFUND_DATE_FIX_OK')
+          PY
