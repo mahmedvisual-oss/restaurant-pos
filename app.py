@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sqlite3
 import socket
 import hashlib
@@ -4195,7 +4195,12 @@ def api_order_save():
     if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     discount = _amount(data, "discount")
-    guests = int(data.get("guests", 1) or 1)
+    try:
+        guests = int(data.get("guests", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "عدد الأشخاص غير صالح"}), 400
+    if guests < 1:
+        return jsonify({"error": "عدد الأشخاص يجب أن يكون 1 على الأقل"}), 400
     items_str = _serialize_items(items)
     now = _now_sql()
     conn = get_db()
@@ -4230,7 +4235,12 @@ def api_order_send():
     if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     discount = _amount(data, "discount")
-    guests = int(data.get("guests", 1) or 1)
+    try:
+        guests = int(data.get("guests", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "عدد الأشخاص غير صالح"}), 400
+    if guests < 1:
+        return jsonify({"error": "عدد الأشخاص يجب أن يكون 1 على الأقل"}), 400
     items_str = _serialize_items(items)
     now = _now_sql()
     conn = get_db()
@@ -4392,9 +4402,15 @@ def _do_pay(u, data):
     except (ValueError, TypeError, KeyError) as e:
         return jsonify({"error": str(e)}), 400
     paid = _amount(data, "paid")
-    discount = _amount(data, "discount")
+    manual_discount = _amount(data, "manual_discount")
+    promo_code = str(data.get("promo_code") or "").strip().upper()
     payment_method = str(data.get("payment_method", "نقدي"))
-    guests = int(data.get("guests", 1) or 1)
+    try:
+        guests = int(data.get("guests", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "عدد الأشخاص غير صالح"}), 400
+    if guests < 1:
+        return jsonify({"error": "عدد الأشخاص يجب أن يكون 1 على الأقل"}), 400
     credit_name = str(data.get("credit_name") or "").strip() or None
     transfer_ref = str(data.get("transfer_ref") or "").strip()
     if transfer_ref in ("", "0", "None", "null"):
@@ -4405,14 +4421,15 @@ def _do_pay(u, data):
     subtotal = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
     tax = round(subtotal * get_tax_rate(), 2)
     max_discount = round(subtotal + tax, 2)
-    if discount > max_discount:
-        discount = max_discount
+
+    # الخصم اليدوي فقط يخضع لحد الموظف.
+    if manual_discount < 0:
+        manual_discount = 0
+    if manual_discount > max_discount:
+        manual_discount = max_discount
+
     emp_limit_pct = 100.0
-    manual_discount = discount
-    try:
-        manual_discount = round(float(data.get("manual_discount") or 0), 2)
-    except (TypeError, ValueError):
-        pass
+
     if u.get("role") != "manager" and manual_discount > 0:
         emp_limit_pct = float(u.get("discount_limit") or 20)
         if "discount_limit" not in u:
@@ -4427,11 +4444,11 @@ def _do_pay(u, data):
         emp_limit_amt = round(max_discount * emp_limit_pct / 100.0, 2)
         if manual_discount > emp_limit_amt:
             return jsonify({"error": f"تجاوزت حد الخصم المسموح لك ({emp_limit_pct:.0f}% = {emp_limit_amt:.2f}). المدير فقط يمكنه خصم أكثر"}), 400
-    total = round(subtotal + tax - discount, 2)
-    if total < 0:
-        total = 0
-    if paid < total and payment_method != "آجل":
-        return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+
+    # سيتم التحقق من Promo بعد إنشاء اتصال قاعدة البيانات c.
+    # الخصم النهائي سيحسب على الخادم وليس من قيمة discount القادمة من المتصفح.
+    promo_discount = 0.0
+    promo_row = None
     items_str = _serialize_items(items)
     now_str = _now_sql()
     due_str = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -4447,6 +4464,51 @@ def _do_pay(u, data):
     is_new = bool(data.get("new_order"))
     num, section = _table_ref(c, table_id)
     oid = _open_order_id(c, table_id, order_id, is_new)
+
+    # التحقق النهائي من الكود الترويجي على الخادم.
+    if promo_code:
+        promo_row = c.execute(
+            "SELECT id, code, discount_type, discount_value, min_order, max_uses, used_count, active, expires_at "
+            "FROM promo_codes WHERE code=? AND active=1",
+            (promo_code,)
+        ).fetchone()
+
+        if not promo_row:
+            conn.close()
+            return jsonify({"error": "كود الخصم غير صالح"}), 400
+
+        max_uses = int(promo_row["max_uses"] or 0)
+        used_count = int(promo_row["used_count"] or 0)
+        if max_uses > 0 and used_count >= max_uses:
+            conn.close()
+            return jsonify({"error": "تم استنفاد استخدامات كود الخصم"}), 400
+
+        if promo_row["expires_at"] and promo_row["expires_at"] < _now().strftime("%Y-%m-%d"):
+            conn.close()
+            return jsonify({"error": "انتهت صلاحية كود الخصم"}), 400
+
+        min_order = float(promo_row["min_order"] or 0)
+        if subtotal < min_order:
+            conn.close()
+            return jsonify({"error": f"الحد الأدنى للطلب {min_order:.2f}"}), 400
+
+        if promo_row["discount_type"] == "fixed":
+            promo_discount = float(promo_row["discount_value"] or 0)
+        else:
+            promo_discount = subtotal * float(promo_row["discount_value"] or 0) / 100.0
+
+        promo_discount = round(max(0.0, min(promo_discount, max_discount)), 2)
+
+    # الخصم النهائي يحسب بالكامل على الخادم.
+    discount = round(manual_discount + promo_discount, 2)
+    if discount > max_discount:
+        discount = max_discount
+
+    total = round(subtotal + tax - discount, 2)
+    if total < 0:
+        total = 0
+    if paid < total and payment_method != "آجل":
+        return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
 
     # 1) INSERT/UPDATE orders → oid
     if oid:
@@ -4546,6 +4608,12 @@ def _do_pay(u, data):
     S.append(
         f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
     )
+
+    # 3f) احتساب استخدام كود الخصم داخل نفس عملية الحفظ.
+    if promo_row:
+        S.append(
+            f"UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 WHERE id={_sql_lit(promo_row['id'])};"
+        )
 
     # تنفيذ السكربت المجمّع (رحلة HTTP واحدة عبر pipeline)
     if S:
