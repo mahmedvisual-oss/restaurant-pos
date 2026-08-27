@@ -1,0 +1,190 @@
+name: One-time promo security fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/one-time-promo-security-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch server-side promo validation and discount authorization
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+          fn = s.index('def _do_pay(u, data):')
+          start = s.index('    paid = _amount(data, "paid")', fn)
+          end = s.index('    items_str = _serialize_items(items)', start)
+          new = '''    paid = _amount(data, "paid")
+          payment_method = str(data.get("payment_method", "نقدي"))
+          guests = int(data.get("guests", 1) or 1)
+          credit_name = str(data.get("credit_name") or "").strip() or None
+          transfer_ref = str(data.get("transfer_ref") or "").strip()
+          if transfer_ref in ("", "0", "None", "null"):
+              transfer_ref = None
+          transfer_name = str(data.get("transfer_name") or "").strip() or None
+          if payment_method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
+              return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
+
+          subtotal = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
+          tax = round(subtotal * get_tax_rate(), 2)
+          max_discount = round(subtotal + tax, 2)
+
+          # IMPORTANT: never trust the client-supplied total discount.
+          # The server accepts only the separately declared manual discount and
+          # recomputes any promo discount from the authoritative promo row.
+          try:
+              manual_discount = round(float(data.get("manual_discount") or 0), 2)
+          except (TypeError, ValueError):
+              return jsonify({"error": "قيمة الخصم اليدوي غير صالحة"}), 400
+          if manual_discount < 0:
+              return jsonify({"error": "قيمة الخصم اليدوي غير صالحة"}), 400
+
+          promo_code = str(data.get("promo_code") or "").strip().upper()
+          promo_discount = 0.0
+          promo_row = None
+
+          conn = get_db()
+          c = conn.cursor()
+          _ensure_schema(conn, c)
+
+          emp_limit_pct = 100.0
+          if u.get("role") != "manager" and manual_discount > 0:
+              emp_limit_pct = float(u.get("discount_limit") or 20)
+              if "discount_limit" not in u:
+                  try:
+                      rmax = c.execute(
+                          "SELECT discount_limit FROM employees WHERE id=? AND active=1",
+                          (u["id"],),
+                      ).fetchone()
+                      if rmax and rmax["discount_limit"] is not None:
+                          emp_limit_pct = float(rmax["discount_limit"] or 20)
+                  except Exception:
+                      pass
+              emp_limit_amt = round(max_discount * emp_limit_pct / 100.0, 2)
+              if manual_discount > emp_limit_amt:
+                  conn.close()
+                  return jsonify({"error": f"تجاوزت حد الخصم المسموح لك ({emp_limit_pct:.0f}% = {emp_limit_amt:.2f}). المدير فقط يمكنه خصم أكثر"}), 400
+
+          # Promo validation is repeated here at payment time. /api/promo/verify
+          # is only a preview endpoint and is never an authorization to discount.
+          if promo_code:
+              promo_row = c.execute(
+                  "SELECT * FROM promo_codes WHERE code=? AND active=1",
+                  (promo_code,),
+              ).fetchone()
+              if not promo_row:
+                  conn.close()
+                  return jsonify({"error": "كود غير صالح"}), 400
+              if promo_row["max_uses"] > 0 and promo_row["used_count"] >= promo_row["max_uses"]:
+                  conn.close()
+                  return jsonify({"error": "تم استخدام هذا الكود بالكامل"}), 400
+              if promo_row["expires_at"] and promo_row["expires_at"] < _now().strftime("%Y-%m-%d"):
+                  conn.close()
+                  return jsonify({"error": "انتهت صلاحية الكود"}), 400
+              if subtotal < promo_row["min_order"]:
+                  conn.close()
+                  return jsonify({"error": f"الحد الأدنى للطلب {promo_row['min_order']}"}), 400
+              promo_discount = (
+                  float(promo_row["discount_value"])
+                  if promo_row["discount_type"] == "fixed"
+                  else subtotal * float(promo_row["discount_value"]) / 100.0
+              )
+              promo_discount = round(min(max(promo_discount, 0), subtotal), 2)
+
+          discount = round(min(manual_discount + promo_discount, max_discount), 2)
+          total = round(subtotal + tax - discount, 2)
+          if total < 0:
+              total = 0
+          if paid < total and payment_method != "آجل":
+              conn.close()
+              return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+'''
+          s = s[:start] + new + s[end:]
+
+          old_conn = '''    conn = get_db()
+          c = conn.cursor()
+          _ensure_schema(conn, c)
+          is_new = bool(data.get("new_order"))
+'''
+          if old_conn not in s:
+              raise SystemExit('PAY_CONN_BLOCK_NOT_FOUND')
+          s = s.replace(old_conn, '    is_new = bool(data.get("new_order"))\n', 1)
+
+          marker = '''    # 3b) سجل الخصومات
+          if discount > 0:
+'''
+          replacement = '''    # 3b) سجل الخصومات
+          if discount > 0:
+'''
+          if marker not in s:
+              raise SystemExit('DISCOUNT_LOG_MARKER_NOT_FOUND')
+
+          promo_script = '''    # 3b-promo) Consume the promo only as part of the final payment write.
+          # The conditional UPDATE prevents normal reuse after max_uses is reached.
+          if promo_code:
+              S.append(
+                  f"UPDATE promo_codes SET used_count=used_count+1 "
+                  f"WHERE code={_sql_lit(promo_code)} AND active=1 "
+                  f"AND (max_uses=0 OR used_count<max_uses);"
+              )
+              promo_details = f"استخدام كود خصم {promo_code} في الطلب #{oid} - خصم {promo_discount:.2f}"
+              S.append(
+                  f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'promo_use',{_sql_lit(promo_details)});"
+              )
+'''
+          s = s.replace(marker, promo_script + '\n' + marker, 1)
+
+          # Keep the client request compatible while making promo_code authoritative.
+          pjs = Path('public/app.js')
+          js = pjs.read_text(encoding='utf-8')
+          old = 'discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod,'
+          new_js = 'discount: discount + promoDiscount, manual_discount: discount, promo_code: promoCode, payment_method: payMethod,'
+          if old not in js:
+              raise SystemExit('PAYMENT_JSON_MARKER_NOT_FOUND')
+          js = js.replace(old, new_js, 1)
+          pjs.write_text(js, encoding='utf-8')
+          p.write_text(s, encoding='utf-8')
+          print('PROMO_SECURITY_PATCH_APPLIED')
+
+      - name: Validate Python and verify security markers
+        shell: python
+        run: |
+          from pathlib import Path
+          import py_compile
+          py_compile.compile('app.py', doraise=True)
+          s = Path('app.py').read_text(encoding='utf-8')
+          js = Path('public/app.js').read_text(encoding='utf-8')
+          checks = [
+              'promo_code = str(data.get("promo_code") or "").strip().upper()',
+              'The server accepts only the separately declared manual discount',
+              'promo_discount = (',
+              'UPDATE promo_codes SET used_count=used_count+1',
+              "'promo_use'",
+          ]
+          missing = [x for x in checks if x not in s]
+          if missing:
+              raise SystemExit('APP_VERIFY_FAILED: ' + repr(missing))
+          if 'promo_code: promoCode' not in js:
+              raise SystemExit('JS_VERIFY_FAILED: promo_code is not sent to payment API')
+          print('PY_COMPILE_OK')
+          print('PROMO_SECURITY_VERIFY_OK')
+
+      - name: Commit repair and remove one-time workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app.py public/app.js
+          git rm .github/workflows/one-time-promo-security-fix.yml
+          git commit -m 'fix: enforce promo discounts server-side and count promo usage'
+          git push origin HEAD:main
