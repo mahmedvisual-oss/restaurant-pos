@@ -3003,7 +3003,12 @@ def api_reservation_create():
     table_id = data.get("table_id")
     date = str(data.get("date", "")).strip()
     time = str(data.get("time", "")).strip()
-    guests = int(data.get("guests", 1))
+    try:
+        guests = int(data.get("guests", 1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "عدد الأشخاص غير صالح"}), 400
+    if guests < 1:
+        return jsonify({"error": "عدد الأشخاص يجب أن يكون 1 على الأقل"}), 400
     notes = str(data.get("notes", "")).strip()
     if not customer_name or not date or not time or not table_id:
         return jsonify({"error": "البيانات ناقصة"}), 400
