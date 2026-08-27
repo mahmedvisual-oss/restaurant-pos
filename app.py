@@ -3008,18 +3008,20 @@ def api_reservation_create():
     if not customer_name or not date or not time or not table_id:
         return jsonify({"error": "البيانات ناقصة"}), 400
     conn = get_db()
+    num, section = _table_ref(conn.cursor(), table_id)
+    if num is None:
+        conn.close()
+        return jsonify({"error": "الطاولة غير موجودة"}), 400
     conflict = conn.execute("SELECT id FROM reservations WHERE table_id=? AND date=? AND time=? AND status != 'cancelled'", (table_id, date, time)).fetchone()
     if conflict:
         conn.close()
         return jsonify({"error": "الطاولة محجوزة في هذا الوقت"}), 400
-    num, section = _table_ref(conn.cursor(), table_id)
     conn.execute("INSERT INTO reservations (customer_name, phone, table_id, table_num, table_section, date, time, guests, notes, created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
                  (customer_name, phone, table_id, num, section, date, time, guests, notes, u["id"]))
     conn.commit()
     conn.close()
     audit("reservation_create", f"حجز طاولة {num} ({section}): {customer_name}")
     return jsonify({"ok": True})
-
 
 @app.route("/api/reservation/<int:rid>", methods=["PUT"])
 def api_reservation_update(rid):
