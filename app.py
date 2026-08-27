@@ -435,6 +435,21 @@ def _ensure_schema(conn, c, log=True):
         if log:
             print("ENSURE LOGIN_ATTEMPTS ERR:", repr(e))
     try:
+        c.execute('''CREATE TABLE IF NOT EXISTS reservations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_name TEXT,
+            phone TEXT,
+            table_num INTEGER,
+            table_section TEXT,
+            table_id INTEGER,
+            guests INTEGER DEFAULT 1,
+            date TEXT,
+            time TEXT,
+            status TEXT DEFAULT 'confirmed',
+            notes TEXT,
+            created_by INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
         rcols = [r[1] for r in c.execute("PRAGMA table_info(reservations)").fetchall()]
         if "created_by" not in rcols:
             c.execute("ALTER TABLE reservations ADD COLUMN created_by INTEGER")
