@@ -4492,11 +4492,6 @@ def _do_pay(u, data):
             f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
             f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
         )
-        if ledger_paid > 0:
-            S.append(
-                f"INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-                f"VALUES (last_insert_rowid(),{ledger_paid},'آجل',{emp_name},{_sql_lit(now_str)});"
-            )
         credit_cname = (credit_name or "").strip() or "عميل آجل"
         audit_details = f"فتح رصيد آجل للعميل {credit_cname} - متبقي {round(total - ledger_paid, 2):.2f}"
         S.append(
