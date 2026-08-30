@@ -1,0 +1,53 @@
+name: Remove report logos
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remove-report-logos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove logos from report print templates only
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          targets = [Path('public/app.js'), Path('public/professional-reports.js')]
+          patterns = [
+              r'\n\s*<img src="/logo\\.png" alt="logo" style="width:30px;height:30px;object-fit:contain">',
+              r'\n\s*<img src="/logo\\.png" alt="logo" style="width:32px;height:32px;display:block;margin:0 auto 4px;object-fit:contain">',
+              r'\n\s*<img src="/logo\\.png" alt="logo" style="width:40px;height:40px;display:block;margin:0 auto 4px;object-fit:contain">',
+          ]
+          for path in targets:
+              text = path.read_text(encoding='utf-8-sig')
+              original = text
+              for pattern in patterns:
+                  text = re.sub(pattern, '', text)
+              if path.name == 'professional-reports.js':
+                  text = re.sub(r'<img\s+src=["\']/logo\\.png["\'][^>]*>', '', text)
+              if text != original:
+                  path.write_text(text, encoding='utf-8', newline='')
+
+      - name: Verify report logo removal
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          for name in ('public/app.js', 'public/professional-reports.js'):
+              text = Path(name).read_text(encoding='utf-8-sig')
+              if re.search(r'<img\s+src=["\']/logo\\.png["\'][^>]*>', text):
+                  raise SystemExit(f'LOGO REMAINS IN {name}')
+          print('REPORT LOGO CHECK: PASS')
+
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/app.js public/professional-reports.js
+          git commit -m 'Remove logos from printed reports'
+          git push origin HEAD:main
