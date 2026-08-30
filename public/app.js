@@ -30,7 +30,7 @@ const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
 let CURRENCY = "ر.س";
-let RESTAURANT_NAME = "مطعم الذوق الرفيع";
+let RESTAURANT_NAME = "مطعم محمد أحمد";
 let promoDiscount = 0;
 let promoCode = "";
 const SIZE_LEVELS = ["sm", "md", "lg", "xl"];

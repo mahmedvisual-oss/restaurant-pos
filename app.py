@@ -703,7 +703,7 @@ def init_db():
         sort_order INTEGER DEFAULT 0
     )''')
 
-    defaults = {"restaurant_name": "مطعم الذوق الرفيع", "tax_rate": "0.03", "currency": "Rp", "auto_backup": "1"}
+    defaults = {"restaurant_name": "مطعم محمد أحمد", "tax_rate": "0.03", "currency": "Rp", "auto_backup": "1"}
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)", (k, v))
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)")]
@@ -1166,7 +1166,7 @@ def audit(action, details=""):
 # ===== الواجهة =====
 @app.route("/")
 def index():
-    return render_template("index.html", restaurant_name=get_setting("restaurant_name", "مطعم الذوق الرفيع"))
+    return render_template("index.html", restaurant_name=get_setting("restaurant_name", "مطعم محمد أحمد"))
 
 
 @app.route("/api/menu")
@@ -1997,7 +1997,7 @@ def api_settings():
     if not u:
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     return jsonify({
-        "restaurant_name": get_setting("restaurant_name", "مطعم الذوق الرفيع"),
+        "restaurant_name": get_setting("restaurant_name", "مطعم محمد أحمد"),
         "tax_rate": get_tax_rate(),
         "currency": get_setting("currency", "ر.س"),
         "auto_backup": get_setting("auto_backup", "1") == "1",
@@ -2095,7 +2095,7 @@ def _bootstrap_static(conn):
     except (TypeError, ValueError):
         tax_rate = 0.03
     settings = {
-        "restaurant_name": raw_settings.get("restaurant_name", "مطعم الذوق الرفيع"),
+        "restaurant_name": raw_settings.get("restaurant_name", "مطعم محمد أحمد"),
         "tax_rate": tax_rate,
         "currency": raw_settings.get("currency", "ر.س"),
         "auto_backup": raw_settings.get("auto_backup", "1") == "1",
@@ -5177,7 +5177,7 @@ def api_credit_reminder():
         conn.close()
         return jsonify({"error": "الرصيد غير موجود"}), 404
     due = round((row["total"] or 0) - (row["paid"] or 0), 2)
-    auto_msg = message or f"مرحباً {row['customer_name']}، تذكير: متبقي آجل {due:.2f} ريال (استحقاق: {row['due_date'] or '-'}) — مطعم {get_setting('restaurant_name', 'مطعم الذوق الرفيع')}"
+    auto_msg = message or f"مرحباً {row['customer_name']}، تذكير: متبقي آجل {due:.2f} ريال (استحقاق: {row['due_date'] or '-'}) — مطعم {get_setting('restaurant_name', 'مطعم محمد أحمد')}"
     c.execute("INSERT INTO credit_reminders (ledger_id, method, message, sent_by, status) VALUES (?,?,?,?,?)",
               (lid, method, auto_msg, u["name"], "sent"))
     conn.commit()
@@ -5583,7 +5583,7 @@ if __name__ == "__main__":
     except Exception:
         local_ip = "127.0.0.1"
     port = int(os.environ.get("PORT", 5002))
-    print("مطعم الذوق الرفيع - POS Web")
+    print("مطعم محمد أحمد - POS Web")
     print(f"  Phone:  http://{local_ip}:{port}")
     print(f"  PC:     http://localhost:{port}")
     print("  مدير: 9999  |  كاشير: 1111")
