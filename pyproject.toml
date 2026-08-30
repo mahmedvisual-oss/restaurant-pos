@@ -1,0 +1,14 @@
+[project]
+name = "restaurant-pos"
+version = "0.1.0"
+description = "Restaurant POS"
+requires-python = ">=3.11"
+dependencies = [
+  "flask>=3.0.0",
+  "turso_serverless>=0.1.0",
+  "requests>=2.31.0",
+  "gunicorn>=21.2.0",
+]
+
+[tool.vercel]
+entrypoint = "api.index:app"
