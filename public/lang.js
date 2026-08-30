@@ -2,6 +2,8 @@
 const I18N = {
   ar: {
     appSubtitle: "نظام نقاط البيع الاحترافي",
+    print: "طباعة",
+  refundVoucher: "سند مردودات",
     cashierClose: "إغلاق الكاشير",
     cashierCloseDaily: "إغلاق الكاشير اليومي",
     financialAdminReport: "التقرير المالي والإداري الشامل",
@@ -685,6 +687,8 @@ const I18N = {
 
   en: {
     appSubtitle: "Professional POS System",
+    print: "Print",
+  refundVoucher: "Refund Receipt",
     cashierClose: "Cashier Close",
     cashierCloseDaily: "Daily Cashier Closing",
     financialAdminReport: "Complete Financial & Administrative Report",
@@ -1367,6 +1371,8 @@ const I18N = {
 
   id: {
     appSubtitle: "Sistem POS Profesional",
+    print: "Cetak",
+  refundVoucher: "Kwitansi Pengembalian",
     cashierClose: "Tutup Kasir",
     cashierCloseDaily: "Penutupan Kasir Harian",
     financialAdminReport: "Laporan Keuangan & Administrasi Lengkap",

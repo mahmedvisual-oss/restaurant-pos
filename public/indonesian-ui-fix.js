@@ -1,6 +1,5 @@
-/* Indonesian UI leakage guard.
- * Keeps Arabic as the source language/backend value, but translates visible UI
- * text when the active language is Indonesian. It is intentionally presentation-only.
+﻿/* Indonesian UI leakage guard — presentation only.
+ * Does not modify backend values, database values, menu data, or business logic.
  */
 (function () {
   "use strict";
@@ -50,7 +49,6 @@
     "الإيراد": "Pendapatan",
     "المبيعات اليومية": "Penjualan harian",
     "التاريخ": "Tanggal",
-    "متوسط الفاتورة": "Rata-rata faktur",
     "تم إصدار التقرير بواسطة نظام نقاط البيع": "Laporan diterbitkan oleh sistem POS",
     "المطعم": "Restoran",
     "متاحة": "Tersedia",
@@ -76,86 +74,211 @@
     "إغلاق اليوم": "Tutup Hari",
     "إغلاق": "Tutup",
     "إلغاء": "Batal",
-    "تأكيد": "Konfirmasi"
+    "تأكيد": "Konfirmasi",
+
+    "All": "Semua",
+    "Available": "Tersedia",
+    "Occupied": "Terisi",
+    "Reserved": "Dipesan",
+    "Current Invoice": "Tagihan Saat Ini",
+    "No table selected": "Belum ada meja dipilih",
+    "Number of guests:": "Jumlah tamu:",
+    "Apply": "Terapkan",
+    "Cart is empty": "Keranjang kosong",
+    "Select a table then add items": "Pilih meja lalu tambahkan item",
+    "Invoice Summary": "Ringkasan Tagihan",
+    "Subtotal": "Subtotal",
+    "Tax": "Pajak",
+    "Total": "Total",
+    "Open Food": "Makanan Terbuka",
+    "Open Other": "Lainnya",
+    "Pay": "Bayar",
+    "Discount": "Diskon",
+    "Save Order": "Simpan Pesanan",
+    "Send to Kitchen": "Kirim ke Dapur",
+    "Clear All": "Hapus Semua",
+    "Transfer Order": "Pindahkan Pesanan",
+    "Split": "Pisah",
+    "Cancel Order": "Batalkan Pesanan",
+    "Tables": "Meja",
+    "Food Menu": "Menu Makanan",
+    "Reports": "Laporan",
+    "Receipt Voucher": "Bukti Struk",
+    "Kitchen": "Dapur",
+    "Table Reservations": "Reservasi Meja",
+    "Customer Database": "Database Pelanggan",
+    "Close Day": "Tutup Hari",
+    "Manage Menu": "Kelola Menu",
+    "Manager Tools": "Alat Manajer",
+    "Settings": "Pengaturan",
+    "Logout": "Keluar",
+    "Professional POS System": "Sistem POS Profesional",
+    "No Items": "Tidak ada item",
+    "No records": "Tidak ada catatan",
+    "Available": "Tersedia",
+    "Occupied": "Terisi",
+    "Reserved": "Dipesan"
   };
 
-  let lastLang = null;
+  let observer = null;
   let scheduled = false;
+  let lastLang = null;
 
   function activeLang() {
-    try { return typeof currentLang !== "undefined" ? currentLang : "id"; } catch (_) { return "id"; }
+    try {
+      return typeof currentLang !== "undefined" ? currentLang : "id";
+    } catch (_) {
+      return "id";
+    }
   }
 
   function reverseI18n(lang) {
     const out = Object.create(null);
+
     try {
       const ar = I18N && I18N.ar;
       const target = I18N && I18N[lang];
+
       if (!ar || !target) return out;
-      Object.keys(ar).forEach(k => {
-        const a = ar[k];
-        const v = target[k];
-        if (typeof a === "string" && typeof v === "string" && a && v) out[a] = v;
+
+      Object.keys(ar).forEach(key => {
+        const source = ar[key];
+        const translated = target[key];
+
+        if (
+          typeof source === "string" &&
+          typeof translated === "string" &&
+          source &&
+          translated &&
+          source !== translated
+        ) {
+          out[source] = translated;
+        }
       });
     } catch (_) {}
+
     return out;
   }
 
-  function translateText(text, map) {
-    if (!text || !/[\u0600-\u06FF]/.test(text)) return text;
-    const trimmed = text.trim();
-    if (EXTRA[trimmed]) return text.replace(trimmed, EXTRA[trimmed]);
-    if (map[trimmed]) return text.replace(trimmed, map[trimmed]);
+  function replaceFromMap(text, map) {
+    if (!text || !/[\u0600-\u06FF]|[A-Za-z]/.test(text)) {
+      return text;
+    }
 
-    let result = text;
-    const keys = Object.keys(EXTRA).sort((a, b) => b.length - a.length);
-    for (const k of keys) if (result.includes(k)) result = result.split(k).join(EXTRA[k]);
-    if (result !== text) return result;
+    let result = String(text);
 
-    const i18nKeys = Object.keys(map).sort((a, b) => b.length - a.length);
-    for (const k of i18nKeys) if (result.includes(k)) result = result.split(k).join(map[k]);
+    const keys = Object.keys(EXTRA)
+      .concat(Object.keys(map))
+      .sort((a, b) => b.length - a.length);
+
+    for (const key of keys) {
+      const value = Object.prototype.hasOwnProperty.call(EXTRA, key)
+        ? EXTRA[key]
+        : map[key];
+
+      if (typeof value === "string" && value && result.includes(key)) {
+        result = result.split(key).join(value);
+      }
+    }
+
     return result;
   }
 
   function scan(root) {
     if (!root || activeLang() !== "id") return;
+
     const map = reverseI18n("id");
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT
+    );
+
     const nodes = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode);
-    nodes.forEach(n => {
-      if (!n.parentElement || /SCRIPT|STYLE|TEXTAREA/.test(n.parentElement.tagName)) return;
-      const next = translateText(n.nodeValue, map);
-      if (next !== n.nodeValue) n.nodeValue = next;
+
+    while (walker.nextNode()) {
+      nodes.push(walker.currentNode);
+    }
+
+    nodes.forEach(node => {
+      const parent = node.parentElement;
+
+      if (!parent) return;
+
+      if (/SCRIPT|STYLE|TEXTAREA|NOSCRIPT/.test(parent.tagName)) {
+        return;
+      }
+
+      const next = replaceFromMap(node.nodeValue, map);
+
+      if (next !== node.nodeValue) {
+        node.nodeValue = next;
+      }
     });
 
-    root.querySelectorAll?.("input[placeholder],textarea[placeholder],[title],[aria-label]").forEach(el => {
+    root.querySelectorAll?.(
+      "input[placeholder], textarea[placeholder], [title], [aria-label]"
+    ).forEach(el => {
       ["placeholder", "title", "aria-label"].forEach(attr => {
         if (!el.hasAttribute(attr)) return;
-        const old = el.getAttribute(attr);
-        const next = translateText(old, map);
-        if (next !== old) el.setAttribute(attr, next);
+
+        const oldValue = el.getAttribute(attr);
+        const newValue = replaceFromMap(oldValue, map);
+
+        if (newValue !== oldValue) {
+          el.setAttribute(attr, newValue);
+        }
       });
     });
   }
 
   function schedule() {
     if (scheduled) return;
+
     scheduled = true;
-    requestAnimationFrame(() => { scheduled = false; scan(document.body); });
+
+    requestAnimationFrame(() => {
+      scheduled = false;
+
+      if (activeLang() === "id") {
+        scan(document.body);
+      }
+    });
   }
 
   function start() {
-    if (activeLang() !== "id") return;
-    scan(document.body);
-    const obs = new MutationObserver(schedule);
-    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+    if (!document.body) return;
+
+    lastLang = activeLang();
+
+    if (lastLang === "id") {
+      scan(document.body);
+    }
+
+    observer = new MutationObserver(schedule);
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+
     setInterval(() => {
       const lang = activeLang();
-      if (lang !== lastLang) { lastLang = lang; scan(document.body); }
+
+      if (lang !== lastLang) {
+        lastLang = lang;
+
+        if (lang === "id") {
+          scan(document.body);
+        }
+      }
     }, 500);
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
 })();
