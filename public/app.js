@@ -1,4 +1,4 @@
-/* PRINT_POPUP_TRACE */
+﻿/* PRINT_POPUP_TRACE */
 (function () {
   const originalOpen = window.open;
   window.open = function () {
@@ -1902,7 +1902,7 @@ async function confirmPayment() {
     const res = await api("/api/order/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, promo_code: promoCode, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     closeModal("pay-modal");
     toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
@@ -5988,3 +5988,4 @@ window.addEventListener('resize', function() {
     switchPanel('menu');
   }
 });
+

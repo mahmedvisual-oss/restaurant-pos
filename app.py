@@ -4574,13 +4574,8 @@ def _do_pay(u, data):
         overpaid = paid > total
         S.append(
             f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
-            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
+            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'{("settled" if ledger_paid >= total else "open")}' ,{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
         )
-        if ledger_paid > 0:
-            S.append(
-                f"INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-                f"VALUES (last_insert_rowid(),{ledger_paid},'آجل',{emp_name},{_sql_lit(now_str)});"
-            )
         credit_cname = (credit_name or "").strip() or "عميل آجل"
         audit_details = f"فتح رصيد آجل للعميل {credit_cname} - متبقي {round(total - ledger_paid, 2):.2f}"
         S.append(
@@ -4943,40 +4938,6 @@ def api_reports_ar():
     conn = get_db()
     c = conn.cursor()
     today = _now().strftime("%Y-%m-%d")
-
-    # backfill فوري: أي طلب آجل لم يُسجل بعد في credit_ledger يُضاف الآن (كله رصيد مفتوح)
-    try:
-        c.execute("""
-    UPDATE credit_ledger
-    SET status = CASE
-        WHEN COALESCE(paid, 0) >= COALESCE(total, 0) THEN 'settled'
-        ELSE 'open'
-    END
-    WHERE order_id IN (
-        SELECT id FROM orders WHERE payment_method='آجل'
-    )
-""")
-        c.execute("SELECT id, table_num, total, paid, credit_name, date FROM orders "
-                  "WHERE payment_method='آجل' AND id NOT IN (SELECT order_id FROM credit_ledger WHERE order_id IS NOT NULL)")
-        _backfilled = 0
-        for ro in c.fetchall():
-            cname = (ro["credit_name"] or "").strip() or "عميل آجل"
-            closed_paid = min(ro["paid"] or 0, ro["total"] or 0)  # لا دين سالب أبداً
-            due = (_now() + timedelta(days=30)).strftime("%Y-%m-%d")
-            c.execute("INSERT INTO credit_ledger (customer_name, order_id, table_num, total, paid, status, created_at, due_date) "
-                      "VALUES (?,?,?,?,?,?,?,?)",
-                      (cname, ro["id"], ro["table_num"], ro["total"], closed_paid, "open",
-                       ro["date"] or _now_sql(), due))
-            lid = c.lastrowid
-            if closed_paid > 0:
-                c.execute("INSERT INTO credit_payments (ledger_id, amount, method, employee, date) "
-                          "VALUES (?,?,?,?,?)", (lid, closed_paid, "آجل", "مدير",
-                                                 ro["date"] or _now_sql()))
-            _backfilled += 1
-        if _backfilled:
-            conn.commit()
-    except Exception as e:
-        print("AR BACKFILL ERR:", repr(e))
 
     rows = c.execute("SELECT * FROM credit_ledger ORDER BY id DESC").fetchall()
     paymap = {}
