@@ -1,12 +1,7 @@
 /* Universal UI language guard — presentation only.
- *
- * Purpose:
- * - Keep visible UI text in the language selected by the user.
- * - Cover hard-coded Arabic/English UI strings that bypass data-i18n/t().
- * - Re-scan dynamically rendered UI without touching backend/database data.
- *
- * This file MUST NOT translate business values such as prices, totals,
- * customer names, menu item names, or API payloads.
+ * Keeps visible interface text in the selected language.
+ * Business values (prices, totals, customer names, menu item names, API data)
+ * are never modified by this file.
  */
 (function () {
   "use strict";
@@ -15,6 +10,14 @@
     "العائلات": { ar: "العائلات", en: "Families", id: "Keluarga" },
     "الصالة": { ar: "الصالة", en: "Main Hall", id: "Ruang Utama" },
     "تيك أواي": { ar: "تيك أواي", en: "Takeaway", id: "Bawa Pulang" },
+    "العائلات": { ar: "العائلات", en: "Families", id: "Keluarga" },
+    "VIP": { ar: "VIP", en: "VIP", id: "VIP" },
+
+    "مشروبات": { ar: "مشروبات", en: "Beverages", id: "Minuman" },
+    "أطباق رئيسية": { ar: "أطباق رئيسية", en: "Main Dishes", id: "Hidangan Utama" },
+    "مقبلات": { ar: "مقبلات", en: "Appetizers", id: "Makanan Pembuka" },
+    "حلويات": { ar: "حلويات", en: "Desserts", id: "Makanan Penutup" },
+
     "المدير": { ar: "المدير", en: "Manager", id: "Manajer" },
     "التقارير": { ar: "التقارير", en: "Reports", id: "Laporan" },
     "طاولة": { ar: "طاولة", en: "Table", id: "Meja" },
@@ -93,25 +96,18 @@
 
   let scheduled = false;
   let lastLang = null;
-  let observer = null;
 
   function activeLang() {
-    try {
-      return (typeof currentLang !== "undefined" && currentLang) ? currentLang : "id";
-    } catch (_) {
-      return "id";
-    }
+    try { return (typeof currentLang !== "undefined" && currentLang) ? currentLang : "id"; }
+    catch (_) { return "id"; }
   }
 
   function flattenI18n(source, out) {
     if (!source || typeof source !== "object") return;
     Object.keys(source).forEach(key => {
       const value = source[key];
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        flattenI18n(value, out);
-      } else if (typeof value === "string" && value) {
-        out.push([key, value]);
-      }
+      if (value && typeof value === "object" && !Array.isArray(value)) flattenI18n(value, out);
+      else if (typeof value === "string" && value) out.push([key, value]);
     });
   }
 
@@ -123,29 +119,27 @@
     const sources = [];
     ["ar", "en", "id"].forEach(sourceLang => {
       const source = I18N && I18N[sourceLang];
-      if (!source) return;
-      flattenI18n(source, sources);
+      if (source) flattenI18n(source, sources);
     });
 
-    const targetValues = Object.create(null);
     const targetPairs = [];
     flattenI18n(target, targetPairs);
+    const targetValues = Object.create(null);
     targetPairs.forEach(([key, value]) => { targetValues[key] = value; });
 
     sources.forEach(([key, from]) => {
       const to = targetValues[key];
-      if (typeof from === "string" && typeof to === "string" && from && to && from !== to) {
-        map[from] = to;
-      }
+      if (from && to && from !== to) map[from] = to;
     });
 
     Object.keys(STATIC).forEach(source => {
       const row = STATIC[source];
-      if (row && row[lang] && row[lang] !== source) map[source] = row[lang];
+      if (!row || !row[lang]) return;
+      if (row[lang] !== source) map[source] = row[lang];
       ["ar", "en", "id"].forEach(sourceLang => {
-        if (sourceLang !== lang && row[sourceLang] && row[lang] && row[sourceLang] !== row[lang]) {
-          map[row[sourceLang]] = row[lang];
-        }
+        const from = row[sourceLang];
+        const to = row[lang];
+        if (sourceLang !== lang && from && to && from !== to) map[from] = to;
       });
     });
 
@@ -155,20 +149,16 @@
   function replaceText(text, map) {
     if (!text || !/[\u0600-\u06FF]|[A-Za-z]/.test(text)) return text;
     let result = String(text);
-    Object.keys(map)
-      .filter(Boolean)
-      .sort((a, b) => b.length - a.length)
-      .forEach(key => {
-        const value = map[key];
-        if (value && result.includes(key)) result = result.split(key).join(value);
-      });
+    Object.keys(map).sort((a, b) => b.length - a.length).forEach(key => {
+      const value = map[key];
+      if (value && result.includes(key)) result = result.split(key).join(value);
+    });
     return result;
   }
 
   function scan(root) {
     if (!root) return;
     const map = buildMap(activeLang());
-
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
@@ -197,30 +187,21 @@
   function schedule() {
     if (scheduled) return;
     scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
-      scan(document.body);
-    });
+    requestAnimationFrame(() => { scheduled = false; scan(document.body); });
   }
 
   function start() {
     if (!document.body) return;
     lastLang = activeLang();
     scan(document.body);
-    observer = new MutationObserver(schedule);
+    const observer = new MutationObserver(schedule);
     observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["placeholder", "title", "aria-label"] });
     setInterval(() => {
       const lang = activeLang();
-      if (lang !== lastLang) {
-        lastLang = lang;
-        scan(document.body);
-      }
+      if (lang !== lastLang) { lastLang = lang; scan(document.body); }
     }, 250);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", start, { once: true });
-  } else {
-    start();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+  else start();
 })();
