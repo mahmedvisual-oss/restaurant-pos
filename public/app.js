@@ -2090,7 +2090,6 @@ function printRefundReceipt(r) {
          box-shadow:0 10px 40px rgba(0,0,0,.3);
          font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
 
-           style="width:30px;height:30px;margin:4px 0">
 
       <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
 
@@ -2341,7 +2340,6 @@ function printDepositVoucher(r) {
          box-shadow:0 10px 40px rgba(0,0,0,.3);
          font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
 
-           style="width:30px;height:30px;margin:4px 0">
 
       <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
 
