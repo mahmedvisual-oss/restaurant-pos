@@ -1978,7 +1978,6 @@ function printReceipt(o, existingWindow = null) {
     .barcode{margin-top:10px;font-family:monospace;font-size:10px;letter-spacing:2px}
     .summary-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:8px;margin:6px 0}
   </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
     <h3>${name}</h3>
     <div class="muted">${t("appSubtitle")}</div>
     <div class="dash"></div>
@@ -2091,7 +2090,6 @@ function printRefundReceipt(r) {
          box-shadow:0 10px 40px rgba(0,0,0,.3);
          font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
 
-      <img src="/logo.png" alt="logo"
            style="width:30px;height:30px;margin:4px 0">
 
       <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
@@ -2343,7 +2341,6 @@ function printDepositVoucher(r) {
          box-shadow:0 10px 40px rgba(0,0,0,.3);
          font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
 
-      <img src="/logo.png" alt="logo"
            style="width:30px;height:30px;margin:4px 0">
 
       <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
@@ -2586,7 +2583,6 @@ function printCreditReceipt(r) {
          dir="${dir}"
          style="background:#fff;color:#000;width:340px;max-width:95vw;padding:18px;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:'Segoe UI',Tahoma,sans-serif;text-align:center">
 
-      <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
       <h3 style="margin:4px 0">${escapeHtml(name)}</h3>
       <div class="muted">${t("appSubtitle")}</div>
       <div class="badge" style="background:#2563eb;color:#fff;display:inline-block;padding:3px 12px;border-radius:4px;font-size:14px;font-weight:bold;margin:4px 0">
@@ -3435,7 +3431,6 @@ function printKitchenTicket(w, oid, table, guests) {
     .big{font-size:30px;font-weight:bold}
     table{width:100%;border-collapse:collapse}td{padding:2px 0}
   </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:26px;height:26px;margin:2px 0">
     <h2>🧑‍🍳 ${t("kitchenOrder")}</h2>
     <div class="muted">${RESTAURANT_NAME}</div>
     <div class="dash"></div>
@@ -4227,7 +4222,6 @@ async function printARReport() {
     th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
     @media print{body{margin:10px}}
   </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:32px;height:32px;display:block;margin:0 auto 4px;object-fit:contain">
     <h2 style="text-align:center">${RESTAURANT_NAME} — ${t("rptARTitle")}</h2>
     <div class="muted" style="text-align:center">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
     ${clone.innerHTML}
@@ -4250,7 +4244,6 @@ async function printAPReport() {
     th{background:#f0f0f0;font-weight:bold}.tot{font-weight:bold;background:#f9f9f9}
     @media print{body{margin:10px}}
   </style></head><body>
-    <img src="/logo.png" alt="logo" style="width:32px;height:32px;display:block;margin:0 auto 4px;object-fit:contain">
     <h2 style="text-align:center">${RESTAURANT_NAME} — ${t("rptAPTitle")}</h2>
     <div class="muted" style="text-align:center">${t("rptAsOf")} ${new Date().toLocaleDateString()}</div>
     ${clone.innerHTML}
@@ -4894,7 +4887,6 @@ async function printReports() {
       ${compactCss}
     </style>
   </head><body>
-    <img src="/logo.png" alt="logo" style="width:40px;height:40px;display:block;margin:0 auto 4px;object-fit:contain">
     <h1>${RESTAURANT_NAME}</h1>
     <div class="print-date">${t("rptPrintTitle")} — ${new Date().toLocaleString()}</div>
     ${period ? `<div class="print-meta"><span>${t("rptPeriod")}: ${period}</span>${label ? `<span>${t("rptFilters")}: ${escapeHtml(label)}</span>` : ""}</div>` : label ? `<div class="print-meta"><span>${t("rptFilters")}: ${escapeHtml(label)}</span></div>` : ""}
@@ -5603,7 +5595,6 @@ function dayPrint() {
   const dir = document.documentElement.dir;
   const html = `<!DOCTYPE html><html dir="${dir}"><head><meta charset="utf-8"><title>${t("dayReport")}</title></head>
     <body style="font-family:'Segoe UI',Tahoma,sans-serif;width:300px;margin:0 auto;text-align:center;font-size:13px">
-      <img src="/logo.png" alt="logo" style="width:30px;height:30px;object-fit:contain">
       <div style="font-size:18px;font-weight:bold">${RESTAURANT_NAME}</div>
       <div style="color:#555">📆 ${t("dayCloseReport")}<br><b>${d.date}</b></div>
       <div style="border-top:2px solid #000;border-bottom:2px solid #000;padding:6px 0;margin-top:8px">
