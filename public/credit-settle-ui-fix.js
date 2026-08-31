@@ -78,7 +78,6 @@
             .summary{background:#eff6ff;border:1px solid #93c5fd;border-radius:4px;padding:8px;margin:7px 0}.amount{font-size:20px;font-weight:bold;color:#2563eb}
             @media print{body{margin:0}}
           </style></head><body>
-            <img src="/logo.png" alt="logo" style="width:30px;height:30px;margin:4px 0">
             <h3>${esc(name)}</h3><div class="muted">${esc(t("appSubtitle"))}</div>
             <div class="badge">💵 ${esc(t("creditVoucher"))}</div>
             <div class="muted">${esc(t("dvReceiptNo"))}: <b>${esc(receipt.receipt_no)}</b></div>
