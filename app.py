@@ -72,11 +72,7 @@ def _canon_method(m):
     return METHOD_SYNONYMS.get(m, m)
 
 def _report_method(m):
-    m = _canon_method(m)
-    return {
-        "BCA": "تحويل بنكي - BCA",
-        "مانديري": "تحويل بنكي - Mandiri",
-    }.get(m, m)
+    return _canon_method(m)
 
 app = Flask(__name__, static_folder="public", static_url_path="")
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -4742,10 +4738,10 @@ def api_reports_advanced():
     total_discount = 0.0
     # خريطة تكلفة الأصناف الفعلية: menu_id -> (cost, qty_per)
     cost_map = {}
+    cogs = 0.0
     for (mid, inv_id, qp) in c.execute("SELECT mi.menu_id, mi.qty_per, inv.cost FROM menu_inventory mi JOIN inventory inv ON inv.id=mi.inventory_id"):
         existing = cost_map.setdefault(mid, 0.0)
         cost_map[mid] = existing + float(qp or 0) * float(inv.cost or 0)
-    cogs = 0.0
     for r in rows:
         method = _report_method(r["payment_method"] or "نقدي")
         m = by_method.setdefault(method, {"total": 0.0, "count": 0})
