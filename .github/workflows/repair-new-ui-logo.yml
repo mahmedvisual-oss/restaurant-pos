@@ -17,15 +17,14 @@ jobs:
       - name: Restore safe CSS and remove UI logo markup
         shell: bash
         run: |
-          git show fee77bcb0bc04f0db889e3cb9c011820db3e8f36:public/style2.css > public/style2.css
+          git show 5ba0b3310f770dcaad9d99c10ad646c010d473cc:public/style2.css > public/style2.css
           python - <<'PY'
           from pathlib import Path
           p = Path('templates/index.html')
           s = p.read_text(encoding='utf-8-sig')
           s = s.replace('<div class="logo">', '<div class="brand-name">')
-          s = s.replace('    <img src="/logo.png" class="login-emoji login-img" alt="logo">\n', '')
-          s = s.replace('    <img src="/logo.png" class="login-img" alt="logo">\n', '')
-          s = s.replace('    <img src="/logo.png" class="login-emoji" alt="logo">\n', '')
+          import re
+          s = re.sub(r'^[ \t]*<img[^>]*src=["\']/logo\.png["\'][^>]*>\r?\n', '', s, flags=re.MULTILINE | re.IGNORECASE)
           p.write_text(s, encoding='utf-8')
           PY
           rm -f .github/workflows/repair-new-ui-logo.yml
