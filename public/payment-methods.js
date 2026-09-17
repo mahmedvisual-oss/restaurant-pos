@@ -95,4 +95,13 @@ const LABELS = {
     s.async = false;
     document.head.appendChild(s);
   }
+
+  // Load the non-recursive UI language runtime after app.js has initialized.
+  if (!document.querySelector('script[data-pos-ui-language="1"]')) {
+    const s = document.createElement("script");
+    s.src = "/ui-language-runtime.js?v=1";
+    s.dataset.posUiLanguage = "1";
+    s.async = false;
+    document.head.appendChild(s);
+  }
 })();
