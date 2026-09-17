@@ -2,6 +2,11 @@
 (function () {
   "use strict";
 
+  /* Mobile navigation is a core page dependency, not a payment dependency. */
+  if (!document.querySelector('script[data-mobile-runtime="1"]')) {
+    document.write('<script src="/mobile-runtime.js?v=1" data-mobile-runtime="1"><\/script>');
+  }
+
   const PAYMENT_METHODS = {
     credit_bca: "بطاقة ائتمان - BCA",
     credit_mandiri: "بطاقة ائتمان - Mandiri",
