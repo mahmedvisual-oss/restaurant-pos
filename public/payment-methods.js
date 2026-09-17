@@ -4,7 +4,11 @@
 
   /* Mobile navigation is a core page dependency, not a payment dependency. */
   if (!document.querySelector('script[data-mobile-runtime="1"]')) {
-    document.write('<script src="/mobile-runtime.js?v=1" data-mobile-runtime="1"><\/script>');
+    const mobileRuntime = document.createElement("script");
+    mobileRuntime.src = "/mobile-runtime.js?v=1";
+    mobileRuntime.dataset.mobileRuntime = "1";
+    mobileRuntime.async = false;
+    document.head.appendChild(mobileRuntime);
   }
 
   const PAYMENT_METHODS = {
