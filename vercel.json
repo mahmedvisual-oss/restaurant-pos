@@ -1,53 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["sin1"],
-  "functions": {
-    "api/index.py": {
-      "maxDuration": 60
-    }
-  },
-  "crons": [
-    {
-      "path": "/api/backup/cron",
-      "schedule": "30 2 * * *"
-    }
-  ],
+  "functions": {"api/index.py": {"maxDuration": 60}},
+  "crons": [{"path": "/api/backup/cron", "schedule": "30 2 * * *"}],
   "headers": [
-    {
-      "source": "/style2.css",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/lang.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/app.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/kitchen.css",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/kitchen.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/mobile-invoice.css",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/payment-methods.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/logo-free-print.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    },
-    {
-      "source": "/mobile-boot.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache, must-revalidate" }]
-    }
+    {"source": "/style2.css", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/lang.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/app.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/kitchen.css", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/kitchen.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/mobile-invoice.css", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/payment-methods.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/logo-free-print.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]},
+    {"source": "/mobile-runtime.js", "headers": [{"key": "Cache-Control", "value": "no-cache, must-revalidate"}]}
   ]
 }
