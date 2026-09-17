@@ -111,10 +111,10 @@
     document.head.appendChild(s);
   }
 
-  if (!document.querySelector('script[data-mobile-boot="1"]')) {
+  if (!document.querySelector('script[data-mobile-runtime="1"]')) {
     const s = document.createElement("script");
-    s.src = "/mobile-boot.js?v=1";
-    s.dataset.mobileBoot = "1";
+    s.src = "/mobile-runtime.js?v=1";
+    s.dataset.mobileRuntime = "1";
     s.async = false;
     document.head.appendChild(s);
   }
