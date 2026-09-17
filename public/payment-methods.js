@@ -104,4 +104,64 @@ const LABELS = {
     s.async = false;
     document.head.appendChild(s);
   }
+
+  // Mobile language switcher: keep language selection available on small screens.
+  function installMobileLanguageSwitcher() {
+    const nav = document.getElementById("mobile-nav");
+    if (!nav || nav.querySelector("#mobile-language-btn")) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "mobile-language-btn";
+    btn.className = "mobile-nav-btn";
+    btn.setAttribute("aria-label", "Language");
+    btn.innerHTML = "🌐<span>Language</span>";
+    btn.onclick = function () {
+      const menu = document.getElementById("mobile-language-menu");
+      if (menu) menu.classList.toggle("show");
+    };
+    nav.appendChild(btn);
+
+    const menu = document.createElement("div");
+    menu.id = "mobile-language-menu";
+    menu.innerHTML = [
+      '<button type="button" data-lang="id">🇮🇩 Bahasa Indonesia</button>',
+      '<button type="button" data-lang="en">🇬🇧 English</button>',
+      '<button type="button" data-lang="ar">🇸🇦 العربية</button>'
+    ].join("");
+    menu.addEventListener("click", function (event) {
+      const choice = event.target.closest("button[data-lang]");
+      if (!choice || typeof window.setLang !== "function") return;
+      window.setLang(choice.dataset.lang);
+      menu.classList.remove("show");
+    });
+    document.body.appendChild(menu);
+
+    const mobileLangStyle = document.createElement("style");
+    mobileLangStyle.textContent = `
+      #mobile-language-menu { display:none; position:fixed; left:10px; right:10px; bottom:76px; z-index:10000; padding:8px; border:1px solid var(--border,#444); border-radius:14px; background:var(--card,#222); box-shadow:0 8px 30px rgba(0,0,0,.35); }
+      #mobile-language-menu.show { display:grid; gap:6px; }
+      #mobile-language-menu button { width:100%; min-height:44px; border:1px solid var(--border,#444); border-radius:10px; background:var(--input,#333); color:var(--text,#fff); font:inherit; cursor:pointer; }
+      @media (min-width:769px) { #mobile-language-btn, #mobile-language-menu { display:none !important; } }
+    `;
+    document.head.appendChild(mobileLangStyle);
+
+    const syncLabel = function () {
+      const current = window.currentLang || document.documentElement.lang || "id";
+      const labels = { id: "Bahasa", en: "English", ar: "العربية" };
+      const span = btn.querySelector("span");
+      if (span) span.textContent = labels[current] || "Language";
+    };
+    syncLabel();
+    document.addEventListener("click", function (event) {
+      if (!menu.contains(event.target) && event.target !== btn && !btn.contains(event.target)) menu.classList.remove("show");
+    });
+    window.setTimeout(syncLabel, 250);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", installMobileLanguageSwitcher);
+  } else {
+    installMobileLanguageSwitcher();
+  }
 })();
