@@ -2,14 +2,53 @@
 (function () {
   "use strict";
 
-  /* Mobile navigation is a core page dependency, not a payment dependency. */
-  if (!document.querySelector('script[data-mobile-runtime="1"]')) {
-    const mobileRuntime = document.createElement("script");
-    mobileRuntime.src = "/mobile-runtime.js?v=1";
-    mobileRuntime.dataset.mobileRuntime = "1";
-    mobileRuntime.async = false;
-    document.head.appendChild(mobileRuntime);
-  }
+  /* Mobile navigation boot is kept inline here so it cannot block page startup on another asset. */
+  (function bootMobileNavigation() {
+    const PANEL_KEY = "pos_mobile_panel";
+    const VALID = new Set(["menu", "cart", "tables"]);
+
+    function isSmallScreen() {
+      return window.matchMedia("(max-width: 768px)").matches;
+    }
+
+    function sync(panel) {
+      const small = isSmallScreen();
+      const target = VALID.has(panel) ? panel : "menu";
+      document.querySelectorAll(".main > .col[data-panel]").forEach(function (el) {
+        const active = !small || el.dataset.panel === target;
+        el.classList.toggle("mobile-panel-active", active);
+        el.style.display = active ? "" : "none";
+      });
+      document.querySelectorAll("#mobile-nav [data-panel-btn]").forEach(function (btn) {
+        btn.classList.toggle("active", small && btn.dataset.panelBtn === target);
+      });
+    }
+
+    function switchPanel(panel) {
+      const target = VALID.has(panel) ? panel : "menu";
+      try { localStorage.setItem(PANEL_KEY, target); } catch (e) {}
+      sync(target);
+    }
+
+    window.switchPanel = switchPanel;
+
+    function boot() {
+      let saved = "menu";
+      try {
+        const candidate = localStorage.getItem(PANEL_KEY);
+        if (VALID.has(candidate)) saved = candidate;
+      } catch (e) {}
+      sync(saved);
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot, { once: true });
+    } else {
+      boot();
+    }
+
+    window.addEventListener("resize", boot);
+  })();
 
   const PAYMENT_METHODS = {
     credit_bca: "بطاقة ائتمان - BCA",
