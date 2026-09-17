@@ -12,10 +12,23 @@
   };
 
   const SECTION_KEYS = {
-    families: "families", family: "families", "family-room": "families", "family_room": "families",
-    عائلات: "families", العائلات: "families", vip: "vip", hall: "hall", main: "hall", dining: "hall",
-    restaurant: "hall", الصالة: "hall", takeaway: "takeaway", "take-away": "takeaway", "take_away": "takeaway",
-    تيك_أواي: "takeaway", "تيك أواي": "takeaway"
+    families: "families",
+    family: "families",
+    "family-room": "families",
+    "family_room": "families",
+    عائلات: "families",
+    العائلات: "families",
+    vip: "vip",
+    hall: "hall",
+    main: "hall",
+    dining: "hall",
+    restaurant: "hall",
+    الصالة: "hall",
+    takeaway: "takeaway",
+    "take-away": "takeaway",
+    "take_away": "takeaway",
+    تيك_أواي: "takeaway",
+    "تيك أواي": "takeaway"
   };
 
   const SECTION_LABELS = {
@@ -25,7 +38,9 @@
     takeaway: { ar: "تيك أواي", en: "Takeaway", id: "Bawa Pulang" }
   };
 
-  function lang() { return window.currentLang || document.documentElement.lang || "id"; }
+  function lang() {
+    return window.currentLang || document.documentElement.lang || "id";
+  }
 
   function localizedCategory(value) {
     const raw = String(value == null ? "" : value).trim();
@@ -47,15 +62,19 @@
   function refreshCategoryLabels() {
     document.querySelectorAll("#cats .cat-btn").forEach(function (el) {
       const onclick = el.getAttribute("onclick") || "";
-      const m = onclick.match(/selectCat\(['\"]([^'\"]*)['\"]\)/);
-      if (!m || m[1] === "__ALL__") return;
-      el.textContent = localizedCategory(m[1]);
+      const m = onclick.match(/selectCat\s*\(\s*['\"]([^'\"]*)['\"]\s*\)/);
+      if (m && m[1] !== "__ALL__") {
+        el.textContent = localizedCategory(m[1]);
+        return;
+      }
+      const raw = el.dataset.category || el.getAttribute("data-category") || "";
+      if (raw && raw !== "__ALL__") el.textContent = localizedCategory(raw);
     });
 
     document.querySelectorAll("#menu-list .acc-group").forEach(function (group) {
-      const cat = group.getAttribute("data-cat") || "";
+      const cat = group.getAttribute("data-cat") || group.dataset.cat || "";
       const label = group.querySelector(".acc-cat");
-      if (label) label.textContent = localizedCategory(cat);
+      if (label && cat) label.textContent = localizedCategory(cat);
     });
   }
 
@@ -76,7 +95,9 @@
     });
 
     document.querySelectorAll("#floor-plan .floor-zone").forEach(function (zone) {
-      const key = Array.from(zone.classList).find(function (x) { return SECTION_KEYS[x] || SECTION_LABELS[x]; });
+      const key = Array.from(zone.classList).find(function (x) {
+        return SECTION_KEYS[x] || SECTION_LABELS[x];
+      });
       if (!key) return;
       const label = zone.querySelector(".floor-zone-label");
       if (label) {
@@ -89,7 +110,7 @@
   function refreshTableReportLabels() {
     document.querySelectorAll("#report-content tr.report-drill").forEach(function (row) {
       const onclick = row.getAttribute("onclick") || "";
-      const m = onclick.match(/applyReportDrill\(['\"]section['\"],\s*['\"]([^'\"]+)['\"]\)/);
+      const m = onclick.match(/applyReportDrill\('section',\s*'([^']+)'\)/);
       if (!m) return;
       const cell = row.querySelector("td");
       if (!cell) return;
@@ -98,35 +119,41 @@
     });
   }
 
-  function wrap(name, refresh) {
-    const original = window[name];
-    if (typeof original !== "function" || original.__uiLanguageWrapped) return false;
-    const wrapped = function () {
-      const result = original.apply(this, arguments);
-      try { refresh(); } catch (_) {}
-      return result;
-    };
-    wrapped.__uiLanguageWrapped = true;
-    window[name] = wrapped;
-    return true;
-  }
+  const wrappers = [
+    ["renderCats", refreshCategoryLabels],
+    ["renderMenu", refreshCategoryLabels],
+    ["renderTables", refreshTableSectionLabels],
+    ["renderFloorPlan", refreshTableSectionLabels],
+    ["renderTablesReport", refreshTableReportLabels]
+  ];
 
-  function install() {
-    wrap("renderCats", refreshCategoryLabels);
-    wrap("renderMenu", refreshCategoryLabels);
-    wrap("renderTables", refreshTableSectionLabels);
-    wrap("renderFloorPlan", refreshTableSectionLabels);
-    wrap("renderTablesReport", refreshTableReportLabels);
+  function installWrappers() {
+    let pending = false;
+    wrappers.forEach(function (entry) {
+      const name = entry[0];
+      const refresh = entry[1];
+      const original = window[name];
+      if (typeof original !== "function" || original.__uiLanguageWrapped) {
+        if (typeof original !== "function") pending = true;
+        return;
+      }
+      const wrapped = function () {
+        const result = original.apply(this, arguments);
+        try { refresh(); } catch (_) {}
+        return result;
+      };
+      wrapped.__uiLanguageWrapped = true;
+      window[name] = wrapped;
+    });
+
     refreshCategoryLabels();
     refreshTableSectionLabels();
     refreshTableReportLabels();
+
+    if (pending) window.setTimeout(installWrappers, 100);
   }
 
   window.localizedCategoryLabel = localizedCategory;
   window.localizedTableSectionLabel = localizedSection;
-
-  install();
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
-  setTimeout(install, 0);
-  setTimeout(install, 250);
+  installWrappers();
 })();
