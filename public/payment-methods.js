@@ -17,16 +17,16 @@
     bank_other: "تحويل بنكي - بنك آخر"
   };
 
- function paymentLabel(key, fallback) {
+  function paymentLabel(key, fallback) {
     return (typeof t === "function") ? t(key) : fallback;
-}
+  }
 
-const LABELS = {
+  const LABELS = {
     credit: "💳 " + (typeof t === "function" ? t("creditCard") : "بطاقة ائتمان"),
     debit: "🏧 " + (typeof t === "function" ? t("debitCard") : "بطاقة خصم"),
     wallet: "📱 " + (typeof t === "function" ? t("wallet") : "محفظة إلكترونية"),
     bank: "💸 " + (typeof t === "function" ? t("bankTransfer") : "تحويل بنكي")
-};
+  };
 
   Object.assign(window.__POS_PAYMENT_METHODS__ || (window.__POS_PAYMENT_METHODS__ = {}), PAYMENT_METHODS);
 
@@ -101,6 +101,15 @@ const LABELS = {
     const s = document.createElement("script");
     s.src = "/ui-language-runtime.js?v=1";
     s.dataset.posUiLanguage = "1";
+    s.async = false;
+    document.head.appendChild(s);
+  }
+
+  // Remove legacy /logo.png from every generated print document.
+  if (!document.querySelector('script[data-logo-free-print="1"]')) {
+    const s = document.createElement("script");
+    s.src = "/logo-free-print.js?v=1";
+    s.dataset.logoFreePrint = "1";
     s.async = false;
     document.head.appendChild(s);
   }
