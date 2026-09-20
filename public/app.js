@@ -29,7 +29,7 @@ function escapeHtml(s) {
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
 const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-let CURRENCY = "ر.س";
+let CURRENCY = "Rp";
 let RESTAURANT_NAME = "مطعم محمد أحمد";
 let promoDiscount = 0;
 let promoCode = "";
@@ -1971,7 +1971,7 @@ function printReceipt(o, existingWindow = null) {
     const mods = (i.modifiers && i.modifiers.length)
       ? `<div style="font-size:11px;color:#666;padding-left:8px">${i.modifiers.map(m => `+ ${m.name}${m.price > 0 ? " (" + fmtCur(m.price) + ")" : ""}`).join("<br>")}</div>`
       : "";
-    return `<tr><td class="right">${i.emoji || ""} ${i.name} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
+    return `<tr><td class="right">${i.emoji || ""} ${escapeHtml(i.name || "")} ×${i.qty}${mods}${i.note ? `<div style="font-size:11px;color:#666;padding-left:8px">📝 ${escapeHtml(i.note)}</div>` : ""}</td><td class="left">${fmtCur(i.subtotal)}</td></tr>`;
   }).join("");
 
   const dir = document.documentElement.dir;
@@ -3426,7 +3426,7 @@ async function sendToKitchen() {
 function printKitchenTicket(w, oid, table, guests) {
   const rows = cart.map(i =>
     `<tr>
-      <td style="text-align:right;font-size:19px;padding:4px 0">${i.emoji || ""} ${i.name}${i.note ? `<br><span style="font-size:14px;color:#666">📝 ${escapeHtml(i.note)}</span>` : ""}</td>
+      <td style="text-align:right;font-size:19px;padding:4px 0">${i.emoji || ""} ${escapeHtml(i.name || "")}${i.note ? `<br><span style="font-size:14px;color:#666">📝 ${escapeHtml(i.note)}</span>` : ""}</td>
       <td style="text-align:center;font-weight:bold;font-size:22px">x${i.qty}</td>
     </tr>`).join("");
   const now = new Date().toLocaleString(currentLang);
