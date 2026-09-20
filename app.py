@@ -1786,8 +1786,19 @@ def api_cancel_approve():
         try:
             items = _parse_items(order["items"])
             _restore_inventory(c, items)
-        except Exception:
-            items = []
+        except Exception as e:
+            # فشل إعادة المخزون يجب أن يُفشل الإلغاء بالكامل.
+            # لا نُنشئ مردوداً ولا نُغلق ذمة ولا نعتمد طلب الإلغاء جزئياً.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+            print("CANCEL INVENTORY RESTORE ERR:", repr(e))
+            return jsonify({"error": "تعذر إعادة المخزون؛ تم إلغاء العملية بالكامل ولم يتم اعتماد الإلغاء"}), 500
 
         payment_method = str(order["payment_method"] or "نقدي").strip()
         original_total = round(max(float(order["total"] or 0), 0), 2)
