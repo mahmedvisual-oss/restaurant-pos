@@ -4699,6 +4699,12 @@ def _do_pay(u, data):
         if paid < total and payment_method != "آجل":
             return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
 
+        # بدء معاملة دفع صريحة بعد اكتمال كل قراءات/تحققات ما قبل الدفع.
+        # لا نستخدم executescript هنا: يجب أن تبقى جميع الكتابات (الفاتورة،
+        # العميل/الآجل، المخزون، الخصم، promo، وسجل التدقيق) داخل نفس transaction
+        # حتى تكون العملية all-or-nothing على SQLite وTurso.
+        c.execute("BEGIN")
+
         # 1) INSERT/UPDATE orders → oid
         if oid:
             c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
@@ -4800,8 +4806,9 @@ def _do_pay(u, data):
             f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
         )
 
-        # 3f) حجز استخدام الكود بشكل ذري قبل تنفيذ باقي الكتابات.
-        # الشرط used_count < max_uses يمنع تجاوز الحد عند طلبين متزامنين.
+        # 3f) حجز استخدام الكود بشكل ذري داخل نفس transaction.
+        # الشرط used_count < max_uses يمنع تجاوز الحد عند طلبين متزامنين،
+        # وإذا فشلت أي خطوة لاحقة فـ rollback يعيد used_count أيضاً.
         if promo_row:
             promo_claim = c.execute(
                 "UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 "
@@ -4809,18 +4816,23 @@ def _do_pay(u, data):
                 (promo_row["id"],)
             )
             if promo_claim.rowcount != 1:
+                conn.rollback()
                 return jsonify({"error": "تم استنفاد استخدامات كود الخصم"}), 400
 
-        # تنفيذ السكربت المجمّع (رحلة HTTP واحدة عبر pipeline)
-        if S:
-            script = "\n".join(S)
-            c.executescript(script)
+        # تنفيذ كل الكتابات داخل نفس transaction.
+        # نستخدم execute لكل عبارة بدلاً من executescript حتى لا يعتمد
+        # السلوك الذري على semantics خاصة بـ executescript في أي driver.
+        for statement in S:
+            c.execute(statement)
 
-        # 4) جلب بيانات الفاتورة النهائية (رحلة واحدة)
+        # 4) جلب بيانات الفاتورة قبل COMMIT؛ إذا فشل البناء نعمل rollback.
         payload = _order_payload(c, oid)
         if not payload:
             print(f"ORDER SAVE LOST: oid={oid} table={num}")
             raise RuntimeError("connection lost during save: stream not found")
+
+        # اعتماد الفاتورة وكل آثارها المالية/المخزنية دفعة واحدة.
+        conn.commit()
         return jsonify(payload)
 
 
