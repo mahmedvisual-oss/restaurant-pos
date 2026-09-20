@@ -4480,7 +4480,9 @@ def api_kitchen_clear():
         return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
-    c.execute("UPDATE orders SET kitchen_status='ready', status=CASE WHEN status IN ('sent','ready') THEN 'closed' ELSE status END "
+    # تنظيف الشاشة لا يعني إغلاق الفاتورة أو تغيير حالتها المالية.
+    # نضع حالة المطبخ على cleared فقط؛ الطلب يبقى sent/ready في نظام POS.
+    c.execute("UPDATE orders SET kitchen_status='cleared' "
               "WHERE kitchen_status='sent' OR (kitchen_status='ready' AND status IN ('sent','ready'))")
     cleared = c.rowcount
     conn.commit()
@@ -4506,19 +4508,24 @@ def _deduct_inventory(c, items):
 
 
 def _restore_inventory(c, items):
-    """إرجاع المخزون المُخصوم عند إلغاء طلب مدفوع."""
-    try:
-        for it in items:
-            mid = int(it.get("menu_id") or 0)
-            qty_sold = int(it.get("qty") or 0)
-            if not mid or qty_sold <= 0:
-                continue
-            links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
-            for link in links:
-                restore = link["qty_per"] * qty_sold
-                c.execute("UPDATE inventory SET quantity = quantity + ? WHERE id=?", (restore, link["inventory_id"]))
-    except Exception as e:
-        print("RESTORE INVENTORY ERR:", repr(e))
+    """إرجاع المخزون المُخصوم عند إلغاء طلب مدفوع.
+    أخطاء القراءة/الكتابة تُرفع حتى تتمكن عملية الإلغاء من عمل rollback كامل.
+    """
+    for it in items:
+        mid = int(it.get("menu_id") or 0)
+        qty_sold = int(it.get("qty") or 0)
+        if not mid or qty_sold <= 0:
+            continue
+        links = c.execute(
+            "SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?",
+            (mid,)
+        ).fetchall()
+        for link in links:
+            restore = link["qty_per"] * qty_sold
+            c.execute(
+                "UPDATE inventory SET quantity = quantity + ? WHERE id=?",
+                (restore, link["inventory_id"])
+            )
 
 
 def _is_stream_error(e):
