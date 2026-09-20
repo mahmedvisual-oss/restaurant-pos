@@ -4668,6 +4668,20 @@ def _do_pay(u, data):
 
         is_new = bool(data.get("new_order"))
         num, section = _table_ref(c, table_id)
+
+        # إذا أعاد العميل إرسال دفعة لفاتورة محددة بعد اعتمادها بالفعل،
+        # لا ننشئ فاتورة ثانية ولا نخصم المخزون مرة أخرى.
+        if order_id and not is_new:
+            completed_target = c.execute(
+                "SELECT id FROM orders WHERE id=? AND table_id=? AND status='completed'",
+                (order_id, table_id)
+            ).fetchone()
+            if completed_target:
+                payload_existing = _order_payload(c, completed_target["id"])
+                if payload_existing:
+                    return jsonify(payload_existing)
+                return jsonify({"error": "الفاتورة مكتملة بالفعل"}), 409
+
         oid = _open_order_id(c, table_id, order_id, is_new)
 
         # التحقق النهائي من الكود الترويجي على الخادم.
