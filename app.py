@@ -4676,10 +4676,9 @@ def _do_pay(u, data):
                 c.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (cname_raw, cph))
                 cust = {"id": c.lastrowid}
             cid_lit = str(int(cust["id"]))
-        except Exception:
-            cid_lit = "NULL"
+        except Exception as e:
+            raise RuntimeError(f"تعذر ربط عميل الآجل: {e}")
         ledger_paid = min(paid, total)
-        overpaid = paid > total
         S.append(
             f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
             f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'open',{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
@@ -4690,11 +4689,6 @@ def _do_pay(u, data):
         S.append(
             f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_open',{_sql_lit(audit_details)});"
         )
-        if overpaid:
-            overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
-            S.append(
-                f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
-            )
     # 3d) خصم المخزون تلقائياً عند البيع
     for it in items:
         mid = int(it.get("menu_id") or 0)
