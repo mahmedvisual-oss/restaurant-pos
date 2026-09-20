@@ -3630,9 +3630,36 @@ def _day_summary(c, day):
         bm["count"] += 1
         if opened is None or (r["date"] or "") < opened:
             opened = r["date"] or ""
+
+    # Cash drawer reconciliation includes real cash collections and cash outflows,
+    # not only cash sales. Bank/card/wallet payments do not belong in the drawer.
+    cash_collections = round(c.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM credit_payments "
+        "WHERE date(date)=? AND COALESCE(method,'نقدي') IN ('نقدي','نقداً')",
+        (day,)
+    ).fetchone()[0] or 0, 2)
+    cash_supplier_payments = round(c.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM supplier_payments "
+        "WHERE date(date)=? AND COALESCE(method,'نقدي') IN ('نقدي','نقداً')",
+        (day,)
+    ).fetchone()[0] or 0, 2)
+    cash_expenses = round(c.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM expenses WHERE date(date)=?",
+        (day,)
+    ).fetchone()[0] or 0, 2)
+    cash_sales = round(by_method.get("نقدي", {}).get("total", 0), 2)
+    expected_cash = round(cash_sales + cash_collections - cash_supplier_payments - cash_expenses, 2)
+
+    active_open = c.execute(
+        "SELECT COUNT(*) FROM orders WHERE status IN ('active','sent','ready') AND date(date)=?",
+        (day,)
+    ).fetchone()[0]
+
     return {
         "total_sales": total, "order_count": len(rows), "tax_total": tax,
-        "expected_cash": round(by_method.get("نقدي", {}).get("total", 0), 2),
+        "cash_sales": cash_sales, "cash_collections": cash_collections,
+        "cash_supplier_payments": cash_supplier_payments, "cash_expenses": cash_expenses,
+        "expected_cash": expected_cash, "active_open": int(active_open or 0),
         "by_method": [{"method": k, "total": v["total"], "count": v["count"]} for k, v in sorted(by_method.items())],
         "opened_at": opened,
     }
@@ -3684,6 +3711,9 @@ def api_day_close():
         conn.close()
         return jsonify({"error": "اليوم مغلق بالفعل"}), 409
     s = _day_summary(c, today)
+    if s["active_open"] > 0:
+        conn.close()
+        return jsonify({"error": f"لا يمكن إغلاق اليوم: يوجد {s['active_open']} طلب مفتوح/مرسل/جاهز. أكمل الطلبات أو عالجها أولاً."}), 409
     difference = round(counted - s["expected_cash"], 2)
     c.execute("INSERT INTO day_closures (date, opened_at, closed_at, total_sales, order_count, tax_total, by_method, expected_cash, counted_cash, difference, closed_by) "
               "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
