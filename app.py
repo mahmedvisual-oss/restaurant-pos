@@ -1562,6 +1562,23 @@ def api_order_transfer():
 
             merged_guests = target_guests + source_guests
 
+            # الحفاظ على حالة المطبخ عند الدمج: لا يجوز أن تختفي أصناف
+            # طلب أُرسل للمطبخ فقط لأن الطلب الهدف كان ما زال active.
+            kitchen_priority = {"": 0, None: 0, "active": 0, "sent": 1, "ready": 2}
+            target_kitchen = str(existing["kitchen_status"] or "").strip()
+            source_kitchen = str(order["kitchen_status"] or "").strip()
+            merged_kitchen_status = (
+                "ready" if "ready" in (target_kitchen, source_kitchen)
+                else "sent" if "sent" in (target_kitchen, source_kitchen)
+                else None
+            )
+            if merged_kitchen_status == "ready":
+                merged_status = "ready"
+            elif merged_kitchen_status == "sent":
+                merged_status = "sent"
+            else:
+                merged_status = "active"
+
             # تحديث الطلب الهدف.
             # paid/payment_method لا يتم تغييرهما أثناء النقل/الدمج.
             c.execute(
@@ -1572,6 +1589,8 @@ def api_order_transfer():
                 "discount=?, "
                 "total=?, "
                 "guests=?, "
+                "status=?, "
+                "kitchen_status=?, "
                 "table_num=?, "
                 "table_section=? "
                 "WHERE id=?",
@@ -1582,6 +1601,8 @@ def api_order_transfer():
                     merged_discount,
                     merged_total,
                     merged_guests,
+                    merged_status,
+                    merged_kitchen_status,
                     num,
                     section,
                     existing["id"]
