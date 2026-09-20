@@ -2766,8 +2766,6 @@ def api_expenses_add():
     if err:
         return jsonify({"error": err}), code
     data = request.json or {}
-    if _day_closed(c):
-        return _day_closed_response(conn)
     description = str(data.get("description", "")).strip()
     amount = _amount(data, "amount", 0)
     category = str(data.get("category") or "عام").strip() or "عام"
@@ -2795,7 +2793,10 @@ def api_expenses_del(eid):
     if err:
         return jsonify({"error": err}), code
     conn = get_db()
-    conn.execute("DELETE FROM expenses WHERE id=?", (eid,))
+    c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
+    c.execute("DELETE FROM expenses WHERE id=?", (eid,))
     conn.commit()
     conn.close()
     audit("expense_delete", f"حذف مصروف #{eid}")
