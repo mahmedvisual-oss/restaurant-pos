@@ -1824,11 +1824,16 @@ def api_cancel_approve():
             }
     # إلغاء فاتورة آجل: أغلق رصيد الدفتر المرتبط بها
     if order and (order["payment_method"] or "").strip() == "آجل":
+        # إلغاء فاتورة الآجل يلغي الرصيد غير المحصل فقط؛ أي تحصيل سابق يبقى
+        # سجلاً نقدياً مستقلاً ولا يُحذف من credit_payments.
         try:
-            c.execute("UPDATE credit_ledger SET status='closed', updated_at=datetime('now','localtime') WHERE order_id=? AND status='open'",
-                      (row["order_id"],))
-        except Exception:
-            pass
+            c.execute(
+                "UPDATE credit_ledger SET status='closed', paid=MIN(COALESCE(paid,0),COALESCE(total,0)), "
+                "updated_at=datetime('now','localtime') WHERE order_id=? AND status='open'",
+                (row["order_id"],)
+            )
+        except Exception as e:
+            raise RuntimeError(f"تعذر إغلاق رصيد الآجل عند الإلغاء: {e}")
     conn.commit()
     conn.close()
     audit("cancel_approve", f"موافقة على إلغاء طلب #{row['order_id']} (طاولة {row['table_num']}) من {u['name']}"
