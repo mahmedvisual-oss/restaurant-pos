@@ -4734,13 +4734,12 @@ def _do_pay(u, data):
         inv_links = []
         if menu_ids:
             placeholders = ",".join("?" * len(menu_ids))
-            try:
-                inv_links = c.execute(
-                    f"SELECT menu_id, inventory_id, qty_per FROM menu_inventory WHERE menu_id IN ({placeholders})",
-                    menu_ids
-                ).fetchall()
-            except Exception:
-                inv_links = []
+            # فشل قراءة روابط المخزون لا يعني عدم وجود مخزون؛
+            # يجب إيقاف الدفع حتى لا نعتمد بيعاً دون تسجيل استهلاك المخزون.
+            inv_links = c.execute(
+                f"SELECT menu_id, inventory_id, qty_per FROM menu_inventory WHERE menu_id IN ({placeholders})",
+                menu_ids
+            ).fetchall()
 
         # 3) بناء السكربت المجمّع (كل الكتابات المتبقية في رحلة HTTP واحدة)
         S = []
