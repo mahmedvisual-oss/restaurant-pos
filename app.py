@@ -4760,6 +4760,16 @@ def _do_pay(u, data):
             )
         # 3c) نظام الآجل: credit_ledger + credit_payments
         if payment_method == "آجل":
+            # لا نسمح بإنشاء ذمة ثانية لنفس الفاتورة إذا أعيد إرسال الدفع
+            # بمعرّف طلب مختلف بعد أن بدأ الدفع سابقاً.
+            existing_ledger = c.execute(
+                "SELECT id FROM credit_ledger WHERE order_id=? LIMIT 1",
+                (oid,)
+            ).fetchone()
+            if existing_ledger:
+                conn.rollback()
+                return jsonify({"error": "الفاتورة مرتبطة بذمة آجل بالفعل ولا يمكن إنشاء ذمة ثانية لها"}), 409
+
             cname = _sql_lit((credit_name or "").strip() or "عميل آجل")
             # ربط/إنشاء عميل تلقائياً في قاعدة بيانات العملاء
             cid_lit = "NULL"
