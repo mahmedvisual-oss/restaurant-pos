@@ -4638,6 +4638,18 @@ def _do_pay(u, data):
         if _day_closed(c):
             return _day_closed_response(conn)
         _ensure_schema(conn, c)
+
+        # Idempotency: إعادة إرسال نفس طلب الدفع تعيد الفاتورة الموجودة.
+        if payment_request_id:
+            existing = c.execute(
+                "SELECT id FROM orders WHERE payment_request_id=? AND status='completed' LIMIT 1",
+                (payment_request_id,)
+            ).fetchone()
+            if existing:
+                payload_existing = _order_payload(c, existing["id"])
+                if payload_existing:
+                    return jsonify(payload_existing)
+
         is_new = bool(data.get("new_order"))
         num, section = _table_ref(c, table_id)
         oid = _open_order_id(c, table_id, order_id, is_new)
@@ -4694,10 +4706,23 @@ def _do_pay(u, data):
                       (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
                        now_str, credit_name, transfer_ref, transfer_name, num, section, payment_request_id or None, oid))
         else:
-            c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name, payment_request_id) "
-                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
-                       "completed", guests, now_str, credit_name, transfer_ref, transfer_name, payment_request_id or None))
+            try:
+                c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name, payment_request_id) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
+                           "completed", guests, now_str, credit_name, transfer_ref, transfer_name, payment_request_id or None))
+            except Exception as e:
+                if payment_request_id and ("UNIQUE" in str(e).upper() or "CONSTRAINT" in str(e).upper()):
+                    conn.rollback()
+                    existing = conn.execute(
+                        "SELECT id FROM orders WHERE payment_request_id=? AND status='completed' LIMIT 1",
+                        (payment_request_id,)
+                    ).fetchone()
+                    if existing:
+                        payload_existing = _order_payload(conn.cursor(), existing["id"])
+                        if payload_existing:
+                            return jsonify(payload_existing)
+                raise
             oid = c.lastrowid
 
         # 2) قراءة روابط المخزون مرة واحدة (رحلة HTTP واحدة بدلاً من loops)
