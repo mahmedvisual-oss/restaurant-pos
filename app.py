@@ -4492,19 +4492,24 @@ def api_kitchen_clear():
 
 
 def _deduct_inventory(c, items):
-    """خصم كميات المخزون تلقائياً عند بيع أصناف مرتبطة بمخزون."""
-    try:
-        for it in items:
-            mid = int(it.get("menu_id") or 0)
-            qty_sold = int(it.get("qty") or 0)
-            if not mid or qty_sold <= 0:
-                continue
-            links = c.execute("SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?", (mid,)).fetchall()
-            for link in links:
-                consume = link["qty_per"] * qty_sold
-                c.execute("UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id=?", (consume, link["inventory_id"]))
-    except Exception as e:
-        print("DEDUCT INVENTORY ERR:", repr(e))
+    """خصم كميات المخزون تلقائياً عند البيع.
+    أخطاء القراءة/الكتابة تُرفع حتى لا يُعتمد الدفع دون خصم المخزون.
+    """
+    for it in items:
+        mid = int(it.get("menu_id") or 0)
+        qty_sold = int(it.get("qty") or 0)
+        if not mid or qty_sold <= 0:
+            continue
+        links = c.execute(
+            "SELECT inventory_id, qty_per FROM menu_inventory WHERE menu_id=?",
+            (mid,)
+        ).fetchall()
+        for link in links:
+            consume = link["qty_per"] * qty_sold
+            c.execute(
+                "UPDATE inventory SET quantity = MAX(0, quantity - ?) WHERE id=?",
+                (consume, link["inventory_id"])
+            )
 
 
 def _restore_inventory(c, items):
