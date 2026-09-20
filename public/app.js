@@ -5986,3 +5986,9 @@ window.addEventListener('resize', function() {
     switchPanel('menu');
   }
 });
+
+// MOBILE_INITIAL_PANEL_V1
+// On phones the CSS hides inactive panels; explicitly activate the menu on first load.
+if (window.innerWidth <= 768) {
+  switchPanel('menu');
+}
