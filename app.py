@@ -4515,6 +4515,8 @@ def _do_pay(u, data):
     if guests < 1:
         return jsonify({"error": "عدد الأشخاص يجب أن يكون 1 على الأقل"}), 400
     credit_name = str(data.get("credit_name") or "").strip() or None
+    if payment_method == "آجل" and not credit_name:
+        return jsonify({"error": "اسم عميل الآجل مطلوب"}), 400
     transfer_ref = str(data.get("transfer_ref") or "").strip()
     if transfer_ref in ("", "0", "None", "null"):
         transfer_ref = None
