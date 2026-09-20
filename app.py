@@ -5701,7 +5701,7 @@ def api_reports_income():
     to_d = (request.args.get("to") or "").strip()
     conn = get_db()
     c = conn.cursor()
-    where = "status!='cancelled'"
+    where = "status='completed'"
     params = []
     if from_d:
         where += " AND date(date) >= ?"
