@@ -36,6 +36,17 @@
     box-sizing: border-box !important;
   }
 }
+<style id="mobile-runtime-fix-v1">
+@media (max-width: 768px) {
+  html, body { width:100%; max-width:100%; overflow:hidden !important; }
+  .topbar { width:100%; max-width:100%; box-sizing:border-box; }
+  .top-actions { max-width:100vw; -webkit-overflow-scrolling:touch; }
+  .main { width:100vw !important; max-width:100vw !important; }
+  #mobile-nav { padding-bottom:max(8px, env(safe-area-inset-bottom)); }
+  #mobile-nav .mobile-nav-btn { min-width:52px; min-height:52px; touch-action:manipulation; }
+  button, input, select { touch-action:manipulation; }
+}
+</style>
 </style>
 </head>
 <body>
