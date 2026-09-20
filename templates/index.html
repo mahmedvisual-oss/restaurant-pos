@@ -6,6 +6,37 @@
 <title>POS</title>
           <link rel="stylesheet" href="/style2.css?v={{ asset_ver('style2.css') }}">
   <link rel="stylesheet" href="/mobile-invoice.css?v={{ asset_ver('mobile-invoice.css') }}">
+<style id="mobile-login-fix-v1">
+@media (max-width: 768px) {
+  #login-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    padding: 16px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow-y: auto !important;
+    z-index: 30000 !important;
+  }
+  #login-overlay .login-card {
+    width: min(420px, 100%) !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 32px) !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+  }
+  #login-overlay .login-input,
+  #login-overlay .login-select,
+  #login-overlay button {
+    min-height: 46px !important;
+    box-sizing: border-box !important;
+  }
+}
+</style>
 </head>
 <body>
 
