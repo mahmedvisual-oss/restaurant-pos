@@ -4591,7 +4591,7 @@ def _do_pay(u, data):
     conn = get_db()
     try:
         payment_request_id = str(data.get("payment_request_id") or "").strip()
-            c = conn.cursor()
+        c = conn.cursor()
         if _day_closed(c):
             return _day_closed_response(conn)
         _ensure_schema(conn, c)
