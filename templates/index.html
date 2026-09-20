@@ -114,10 +114,12 @@
   <div class="login-card">
     <div class="login-title" id="login-title">{{ restaurant_name }}</div>
     <div class="login-sub" data-i18n="appSubtitle">نظام نقاط البيع الاحترافي</div>
-    <select id="login-employee" class="login-select"></select>
-    <input id="login-pin" type="password" class="login-input" data-i18n="enterPin" placeholder="🔒 أدخل PIN" inputmode="numeric" maxlength="6">
-    <div id="login-error" class="login-error"></div>
-    <button class="btn btn-success btn-block" onclick="doLogin()" data-i18n="login">🔓 تسجيل الدخول</button>
+    <form id="login-form" onsubmit="event.preventDefault(); doLogin();">
+      <select id="login-employee" class="login-select"></select>
+      <input id="login-pin" type="password" class="login-input" data-i18n="enterPin" placeholder="🔒 أدخل PIN" inputmode="numeric" maxlength="6" autocomplete="current-password">
+      <div id="login-error" class="login-error"></div>
+      <button type="submit" class="btn btn-success btn-block" data-i18n="login">🔓 تسجيل الدخول</button>
+    </form>
   </div>
 </div>
 
