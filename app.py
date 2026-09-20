@@ -1349,6 +1349,9 @@ def api_menu_reset_default():
 # ===== التعديلات (Modifiers) =====
 @app.route("/api/modifiers/<int:menu_id>")
 def api_modifiers(menu_id):
+    u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     c = conn.cursor()
     groups = c.execute("""
@@ -1884,9 +1887,19 @@ def api_cancel_count():
 def api_employees():
     if _throttled("employees:" + _client_ip()):
         return jsonify({"error": "محاولات كثيرة، حاول لاحقاً"}), 429
+    # شاشة الدخول تحتاج فقط بيانات تعريف الموظف؛ لا تكشف بيانات الموارد البشرية.
+    u = require_user()
     conn = get_db()
     c = conn.cursor()
-    rows = c.execute("SELECT id, name, role, phone, salary, hire_date, shift, department, status, discount_limit FROM employees WHERE active=1 ORDER BY id").fetchall()
+    if u:
+        rows = c.execute(
+            "SELECT id, name, role, phone, salary, hire_date, shift, department, status, discount_limit "
+            "FROM employees WHERE active=1 ORDER BY id"
+        ).fetchall()
+    else:
+        rows = c.execute(
+            "SELECT id, name, role FROM employees WHERE active=1 ORDER BY id"
+        ).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -2141,6 +2154,8 @@ def api_bootstrap():
     """بيانات الإقلاع موحّدة في طلب واحد: استعلام مباشر واحد للطاولات فقط
     + كاش قصير TTL للبيانات شبه الثابتة (بدلاً من ~8 رحلات متتابعة)."""
     u = require_user()
+    if not u:
+        return jsonify({"error": "سجل الدخول أولاً"}), 401
     conn = get_db()
     try:
         c = conn.cursor()
