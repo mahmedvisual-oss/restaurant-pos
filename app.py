@@ -4727,11 +4727,16 @@ def _do_pay(u, data):
             f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
         )
 
-        # 3f) احتساب استخدام كود الخصم داخل نفس عملية الحفظ.
+        # 3f) حجز استخدام الكود بشكل ذري قبل تنفيذ باقي الكتابات.
+        # الشرط used_count < max_uses يمنع تجاوز الحد عند طلبين متزامنين.
         if promo_row:
-            S.append(
-                f"UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 WHERE id={_sql_lit(promo_row['id'])};"
+            promo_claim = c.execute(
+                "UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 "
+                "WHERE id=? AND active=1 AND (COALESCE(max_uses,0)=0 OR COALESCE(used_count,0) < max_uses)",
+                (promo_row["id"],)
             )
+            if promo_claim.rowcount != 1:
+                return jsonify({"error": "تم استنفاد استخدامات كود الخصم"}), 400
 
         # تنفيذ السكربت المجمّع (رحلة HTTP واحدة عبر pipeline)
         if S:
