@@ -370,6 +370,7 @@ def _ensure_schema(conn, c, log=True):
             ("table_section", "ALTER TABLE orders ADD COLUMN table_section TEXT"),
             ("table_id", "ALTER TABLE orders ADD COLUMN table_id INTEGER"),
             ("reservation_id", "ALTER TABLE orders ADD COLUMN reservation_id INTEGER"),
+            ("payment_request_id", "ALTER TABLE orders ADD COLUMN payment_request_id TEXT"),
         ):
             if col not in ocols:
                 c.execute(ddl)
@@ -378,6 +379,11 @@ def _ensure_schema(conn, c, log=True):
     except Exception as e:
         if log:
             print("ENSURE ORDERS ERR:", repr(e))
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_request_id ON orders(payment_request_id)")
+    except Exception as e:
+        if log:
+            print("ENSURE PAYMENT REQUEST INDEX ERR:", repr(e))
     try:
         c.execute("SELECT 1 FROM refund_receipts LIMIT 1").fetchone()
     except Exception:
@@ -4289,6 +4295,20 @@ def api_order_save():
     table_id = data.get("table_id")
     items = data.get("items", [])
     order_id = data.get("order_id")
+    payment_request_id = str(data.get("payment_request_id") or "").strip()
+    if payment_request_id:
+        try:
+            conn0 = get_db()
+            existing = conn0.execute("SELECT id FROM orders WHERE payment_request_id=? AND status='completed' LIMIT 1", (payment_request_id,)).fetchone()
+            conn0.close()
+            if existing:
+                conn1 = get_db()
+                payload0 = _order_payload(conn1.cursor(), existing["id"])
+                conn1.close()
+                if payload0:
+                    return jsonify(payload0)
+        except Exception:
+            pass
     if not table_id or not items:
         return jsonify({"error": "اختر طاولة وأضف أصنافاً"}), 400
     discount = _amount(data, "discount")
@@ -4621,14 +4641,14 @@ def _do_pay(u, data):
         # 1) INSERT/UPDATE orders → oid
         if oid:
             c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
-                      "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=?, table_num=?, table_section=? WHERE id=?",
+                      "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=?, table_num=?, table_section=?, payment_request_id=? WHERE id=?",
                       (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
-                       now_str, credit_name, transfer_ref, transfer_name, num, section, oid))
+                       now_str, credit_name, transfer_ref, transfer_name, num, section, payment_request_id or None, oid))
         else:
-            c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
-                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name, payment_request_id) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
-                       "completed", guests, now_str, credit_name, transfer_ref, transfer_name))
+                       "completed", guests, now_str, credit_name, transfer_ref, transfer_name, payment_request_id or None))
             oid = c.lastrowid
 
         # 2) قراءة روابط المخزون مرة واحدة (رحلة HTTP واحدة بدلاً من loops)
