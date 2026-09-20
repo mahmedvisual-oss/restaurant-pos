@@ -2521,7 +2521,13 @@ def api_credit_settle():
     data = request.json or {}
     lid = data.get("ledger_id")
     amount = _amount(data, "amount", 0)
-    method = str(data.get("method") or "نقدي")
+    method = _canon_method(str(data.get("method") or "نقدي").strip() or "نقدي")
+    if method not in ALLOWED_PAYMENT_METHODS:
+        return jsonify({"error": "طريقة التحصيل غير معتمدة"}), 400
+    transfer_ref = str(data.get("transfer_ref") or "").strip() or None
+    transfer_name = str(data.get("transfer_name") or "").strip() or None
+    if method in TRANSFER_PAYMENT_METHODS and not transfer_ref:
+        return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
     if not lid:
         return jsonify({"error": "معرف الرصيد مطلوب"}), 400
     conn = get_db()
@@ -2552,8 +2558,7 @@ def api_credit_settle():
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (None, row["customer_name"] or "", row["phone"] or "", now_sql[:10],
              f"تحصيل آجل #{lid}", amount, method,
-             str(data.get("transfer_ref") or "").strip() or None,
-             str(data.get("transfer_name") or "").strip() or None,
+             transfer_ref, transfer_name,
              u["name"], now_sql))
         voucher_id = c.lastrowid
         receipt_no = "QC-%d-%05d" % (_now().year, voucher_id)
@@ -2668,6 +2673,11 @@ def api_supplier_add():
         return jsonify({"error": "اسم المورد مطلوب"}), 400
     total = _amount(data, "total", 0)
     paid = _amount(data, "paid", 0)
+    method = _canon_method(str(data.get("method") or "نقدي").strip() or "نقدي")
+    if total < 0 or paid < 0 or paid > total:
+        return jsonify({"error": "مبلغ المورد/المدفوع غير صالح"}), 400
+    if method not in ALLOWED_PAYMENT_METHODS:
+        return jsonify({"error": "طريقة الدفع غير معتمدة"}), 400
     phone = (data.get("phone") or "").strip()
     description = (data.get("description") or "").strip()
     due_date = (data.get("due_date") or "").strip() or None
@@ -2680,7 +2690,7 @@ def api_supplier_add():
     if paid > 0:
         c.execute("INSERT INTO supplier_payments (ledger_id, amount, method, employee, date) "
                   "VALUES (?,?,?,?, datetime('now','localtime'))",
-                  (lid, paid, data.get("method") or "نقدي", u["name"]))
+                  (lid, paid, method, u["name"]))
     conn.commit()
     conn.close()
     audit("supplier_open", f"فتح رصيد مورد {name} - {total:.2f}")
@@ -2694,7 +2704,9 @@ def api_supplier_pay(lid):
         return jsonify({"error": err}), code
     data = request.json or {}
     amount = _amount(data, "amount", 0)
-    method = str(data.get("method") or "نقدي")
+    method = _canon_method(str(data.get("method") or "نقدي").strip() or "نقدي")
+    if method not in ALLOWED_PAYMENT_METHODS:
+        return jsonify({"error": "طريقة الدفع غير معتمدة"}), 400
     conn = get_db()
     c = conn.cursor()
     if _day_closed(c):
@@ -5337,7 +5349,9 @@ def api_deposit_voucher_create():
     party_date = str(data.get("party_date") or "").strip()
     description = str(data.get("description") or "").strip()
     amount = _amount(data, "amount", 0)
-    method = str(data.get("method") or "نقدي")
+    method = _canon_method(str(data.get("method") or "نقدي").strip() or "نقدي")
+    if method not in ALLOWED_PAYMENT_METHODS:
+        return jsonify({"error": "طريقة التحصيل غير معتمدة"}), 400
     transfer_ref = str(data.get("transfer_ref") or "").strip() or None
     transfer_name = str(data.get("transfer_name") or "").strip() or None
 
