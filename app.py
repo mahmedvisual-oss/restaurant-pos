@@ -2602,11 +2602,29 @@ def api_credit_settle():
     if amount > remaining_before + 0.001:
         conn.close()
         return jsonify({"error": f"المبلغ أكبر من المتبقي ({remaining_before:.2f})"}), 400
-    new_paid = round((row["paid"] or 0) + amount, 2)
-    remaining = round((row["total"] or 0) - new_paid, 2)
-    status = "settled" if remaining <= 0.001 else "open"
+    # تحديث الذمة بشرط ذري يمنع أن تتجاوز التحصيلات المتزامنة الرصيد المتبقي.
+    # لا نعتمد على قيمة paid التي قرأناها فقط، لأن طلبين متزامنين قد يقرآن
+    # نفس الرصيد قبل أن يكتب أي منهما.
     now_sql = _now_sql()
     try:
+        c.execute(
+            "UPDATE credit_ledger SET paid=ROUND(COALESCE(paid,0)+?,2), "
+            "status=CASE WHEN ROUND(COALESCE(paid,0)+?,2) >= COALESCE(total,0)-0.001 "
+            "THEN 'settled' ELSE 'open' END, updated_at=datetime('now','localtime') "
+            "WHERE id=? AND status='open' "
+            "AND ROUND(COALESCE(paid,0)+?,2) <= COALESCE(total,0)+0.001",
+            (amount, amount, lid, amount)
+        )
+        if c.rowcount != 1:
+            conn.rollback()
+            conn.close()
+            return jsonify({"error": "تعذر اعتماد التحصيل؛ تغيّر الرصيد المتبقي، أعد المحاولة"}), 409
+
+        updated = c.execute("SELECT paid, total, status FROM credit_ledger WHERE id=?", (lid,)).fetchone()
+        new_paid = round(float(updated["paid"] or 0), 2)
+        remaining = round(max(float(updated["total"] or 0) - new_paid, 0), 2)
+        status = updated["status"]
+
         # A customer collection is a real receipt: create the deposit voucher
         # and the credit payment together so neither record can exist alone.
         c.execute(
@@ -2621,8 +2639,6 @@ def api_credit_settle():
         receipt_no = "QC-%d-%05d" % (_now().year, voucher_id)
         c.execute("UPDATE deposit_vouchers SET receipt_no=? WHERE id=?", (receipt_no, voucher_id))
 
-        c.execute("UPDATE credit_ledger SET paid=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
-                  (new_paid, status, lid))
         c.execute(
             "INSERT INTO credit_payments (ledger_id, amount, method, employee, date, transfer_ref, transfer_name, receipt_no, deposit_voucher_id) "
             "VALUES (?,?,?,?,?,?,?,?,?)",
