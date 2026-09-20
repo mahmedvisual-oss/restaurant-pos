@@ -1564,7 +1564,6 @@ def api_order_transfer():
 
             # الحفاظ على حالة المطبخ عند الدمج: لا يجوز أن تختفي أصناف
             # طلب أُرسل للمطبخ فقط لأن الطلب الهدف كان ما زال active.
-            kitchen_priority = {"": 0, None: 0, "active": 0, "sent": 1, "ready": 2}
             target_kitchen = str(existing["kitchen_status"] or "").strip()
             source_kitchen = str(order["kitchen_status"] or "").strip()
             merged_kitchen_status = (
