@@ -5648,19 +5648,34 @@ def api_reports_income():
         ar_params.append(to_d)
     ar_new = round(c.execute(f"SELECT COALESCE(SUM(total-paid),0) FROM credit_ledger WHERE {ar_where}", ar_params).fetchone()[0], 2)
 
-    # التدفقات النقدية الصافية
+    # التدفقات النقدية: تحصيل فاتورة البيع + تحصيل الذمم - المصروفات - المبالغ
+    # التي رُدت فعلياً. لا نضيف تحصيل الآجل إلى إيراد المبيعات مرة ثانية.
+    refund_where = "1=1"
+    refund_params = []
+    if from_d:
+        refund_where += " AND date(date) >= ?"
+        refund_params.append(from_d)
+    if to_d:
+        refund_where += " AND date(date) <= ?"
+        refund_params.append(to_d)
+    refund_total = round(c.execute(
+        f"SELECT COALESCE(SUM(total),0) FROM refund_receipts WHERE {refund_where}",
+        refund_params
+    ).fetchone()[0], 2)
     cash_in = round(cash_received + credit_collected, 2)
-    cash_out = round(expenses_total + cancelled_total, 2)
+    cash_out = round(expenses_total + refund_total, 2)
     net_cash_flow = round(cash_in - cash_out, 2)
-    # صافي الدخل الإجمالي
-    net_income = round(total_sales - total_tax - total_discount + credit_collected - expenses_total - cancelled_total, 2)
+
+    # صافي دخل الفترة = المبيعات المكتملة قبل الضريبة - المصروفات.
+    # تحصيل الآجل تدفق نقدي وليس إيراد مبيعات جديداً.
+    net_income = round(total_sales - total_tax - expenses_total, 2)
 
     conn.close()
     return jsonify({
         "total_sales": total_sales, "total_discount": total_discount, "total_tax": total_tax,
         "cash_received": cash_received, "credit_collected": credit_collected,
         "by_method": by_method, "cancelled_total": cancelled_total, "cancelled_count": cancelled_count,
-        "expenses_total": expenses_total, "ar_new": ar_new,
+        "expenses_total": expenses_total, "ar_new": ar_new, "refund_total": refund_total,
         "cash_in": cash_in, "cash_out": cash_out, "net_cash_flow": net_cash_flow,
         "net_income": net_income,
     })
