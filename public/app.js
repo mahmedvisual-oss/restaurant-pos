@@ -1882,6 +1882,8 @@ function calcChange() {
 
 async function confirmPayment() {
   if (!user) return;
+  if (window._paymentInFlight) return;
+  window._paymentInFlight = true;
   const sub = cart.reduce((s, i) => s + i.subtotal, 0);
   const total = sub + sub * TAX_RATE - discount - promoDiscount;
   const paid = parseFloat(document.getElementById("paid").value) || 0;
@@ -1899,10 +1901,13 @@ async function confirmPayment() {
   const guests = parseInt(document.getElementById("guests").value) || 1;
   const creditName = payMethod === "آجل" ? (document.getElementById("credit-name").value || "").trim() : null;
   try {
+    const paymentRequestId = (crypto && typeof crypto.randomUUID === "function")
+      ? crypto.randomUUID()
+      : "pay-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     const res = await api("/api/order/pay", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
+      body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId), payment_request_id: paymentRequestId })
     });
     closeModal("pay-modal");
     toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
@@ -1955,6 +1960,8 @@ async function confirmPayment() {
     loadTables();
   } catch (e) {
     toast(e.message);
+  } finally {
+    window._paymentInFlight = false;
   }
 }
 
