@@ -1034,6 +1034,31 @@ def get_tax_rate():
         return 0.03
 
 
+ALLOWED_PAYMENT_METHODS = {
+    "نقدي", "نقداً", "آجل", "كيروس",
+    "BCA", "مانديري",
+    "بطاقة ائتمان - BCA", "بطاقة ائتمان - Mandiri",
+    "بطاقة خصم - BCA", "بطاقة خصم - Mandiri",
+    "محفظة - GoPay", "محفظة - OVO", "محفظة - DANA",
+    "محفظة - ShopeePay", "محفظة - LinkAja",
+    "تحويل بنكي - BCA", "تحويل بنكي - Mandiri", "تحويل بنكي - بنك آخر",
+}
+TRANSFER_PAYMENT_METHODS = {
+    "BCA", "مانديري", "كيروس",
+    "تحويل بنكي - BCA", "تحويل بنكي - Mandiri", "تحويل بنكي - بنك آخر",
+}
+
+def _day_closed(c, day=None):
+    day = day or _now().strftime("%Y-%m-%d")
+    return bool(c.execute("SELECT id FROM day_closures WHERE date=?", (day,)).fetchone())
+
+def _day_closed_response(conn):
+    try:
+        conn.close()
+    except Exception:
+        pass
+    return jsonify({"error": "اليوم مغلق. أعد فتح اليوم بواسطة المدير قبل تنفيذ عمليات جديدة."}), 409
+
 def require_manager():
     u = require_user()
     if not u:
@@ -1391,6 +1416,8 @@ def api_order_transfer():
     conn = get_db()
     c = conn.cursor()
 
+    if _day_closed(c):
+        return _day_closed_response(conn)
     try:
         # الطلب النشط في الطاولة المصدر
         order = c.execute(
@@ -1665,6 +1692,8 @@ def api_cancel_request():
         return jsonify({"error": "اختر طاولة"}), 400
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     if not order_id:
         row = c.execute("SELECT id FROM orders WHERE table_id=? AND status IN ('active','sent','ready')", (table_id,)).fetchone()
         if row:
@@ -1720,6 +1749,8 @@ def api_cancel_approve():
         return jsonify({"error": "request_id مطلوب"}), 400
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     _ensure_schema(conn, c)
     row = c.execute("SELECT * FROM cancellation_requests WHERE id=? AND status='pending'", (req_id,)).fetchone()
     if not row:
@@ -2495,6 +2526,8 @@ def api_credit_settle():
         return jsonify({"error": "معرف الرصيد مطلوب"}), 400
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     row = c.execute("SELECT * FROM credit_ledger WHERE id=? AND status='open'", (lid,)).fetchone()
     if not row:
         conn.close()
@@ -2664,6 +2697,8 @@ def api_supplier_pay(lid):
     method = str(data.get("method") or "نقدي")
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     row = c.execute("SELECT * FROM supplier_ledger WHERE id=? AND status='open'", (lid,)).fetchone()
     if not row:
         conn.close()
@@ -2731,6 +2766,8 @@ def api_expenses_add():
     if err:
         return jsonify({"error": err}), code
     data = request.json or {}
+    if _day_closed(c):
+        return _day_closed_response(conn)
     description = str(data.get("description", "")).strip()
     amount = _amount(data, "amount", 0)
     category = str(data.get("category") or "عام").strip() or "عام"
@@ -2741,6 +2778,8 @@ def api_expenses_add():
     exp_date = str(data.get("date") or "").strip() or _now_sql()
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     c.execute("INSERT INTO expenses (date, category, description, amount, added_by) VALUES (?,?,?,?,?)",
               (exp_date, category, description, amount, u["name"]))
     eid = c.lastrowid
@@ -4205,6 +4244,8 @@ def api_order_save():
     now = _now_sql()
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     num, section = _table_ref(c, table_id)
     oid = _open_order_id(c, table_id, order_id, bool(data.get("new_order")))
     if oid:
@@ -4245,6 +4286,8 @@ def api_order_send():
     now = _now_sql()
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     num, section = _table_ref(c, table_id)
     oid = _open_order_id(c, table_id, order_id, bool(data.get("new_order")))
     if oid:
@@ -4404,7 +4447,9 @@ def _do_pay(u, data):
     paid = _amount(data, "paid")
     manual_discount = _amount(data, "manual_discount")
     promo_code = str(data.get("promo_code") or "").strip().upper()
-    payment_method = str(data.get("payment_method", "نقدي"))
+    payment_method = _canon_method(str(data.get("payment_method", "نقدي")).strip() or "نقدي")
+    if payment_method not in ALLOWED_PAYMENT_METHODS:
+        return jsonify({"error": "طريقة الدفع غير معتمدة"}), 400
     try:
         guests = int(data.get("guests", 1))
     except (TypeError, ValueError):
@@ -4416,7 +4461,7 @@ def _do_pay(u, data):
     if transfer_ref in ("", "0", "None", "null"):
         transfer_ref = None
     transfer_name = str(data.get("transfer_name") or "").strip() or None
-    if payment_method in ("BCA", "مانديري", "كيروس") and not transfer_ref:
+    if payment_method in TRANSFER_PAYMENT_METHODS and not transfer_ref:
         return jsonify({"error": "التحويل البنكي يتطلب رقم مرجع التحويل"}), 400
     subtotal = round(sum(float(i["price"]) * int(i["qty"]) for i in items), 2)
     tax = round(subtotal * get_tax_rate(), 2)
@@ -4460,6 +4505,8 @@ def _do_pay(u, data):
     # المجموع: ~4-5 رحلات بدلاً من ~15
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     _ensure_schema(conn, c)
     is_new = bool(data.get("new_order"))
     num, section = _table_ref(c, table_id)
@@ -5272,6 +5319,8 @@ def api_deposit_voucher_create():
 
     conn = get_db()
     c = conn.cursor()
+    if _day_closed(c):
+        return _day_closed_response(conn)
     _ensure_schema(conn, c)
 
     try:
