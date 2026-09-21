@@ -5920,7 +5920,6 @@ async function checkCancelRequests(preCount) {
     cancelPollInterval = setInterval(checkCancelRequests, 30000);
   }
 }
-init();
 
 
 /* MOBILE_POS_PANEL_NAV_V2 */
@@ -5992,3 +5991,6 @@ window.addEventListener('resize', function() {
 if (window.innerWidth <= 768) {
   switchPanel('menu');
 }
+
+// Start POS only after all mobile handlers are defined.
+init();
