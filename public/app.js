@@ -1205,10 +1205,10 @@ function renderFloorPlan() {
 
   /* ── مناطق الأقسام ── */
   const zoneLayout = {
-    families: { label: "👨‍👩‍👧 العائلات", x: 10, y: 55, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 30, y: 80 } },
-    vip:      { label: "⭐ VIP",       x: 350, y: 55, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 370, y: 80 } },
-    hall:     { label: "🛋️ الصالة",    x: 10, y: 260, cols: 4, gapX: 100, gapY: 95, startOffset: { x: 30, y: 285 } },
-    takeaway: { label: "🛍️ تيك أواي",  x: 420, y: 260, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 440, y: 285 } },
+    families: { label: `👨‍👩‍👧 ${t("families")}`, x: 10, y: 55, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 30, y: 80 } },
+    vip:      { label: `⭐ ${t("vip")}`,       x: 350, y: 55, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 370, y: 80 } },
+    hall:     { label: `🛋️ ${t("hall")}`,    x: 10, y: 260, cols: 4, gapX: 100, gapY: 95, startOffset: { x: 30, y: 285 } },
+    takeaway: { label: `🛍️ ${t("takeaway")}`,  x: 420, y: 260, cols: 4, gapX: 85, gapY: 95, startOffset: { x: 440, y: 285 } },
   };
 
   for (const sec of TABLE_SECTIONS.map(s => s.id)) {
