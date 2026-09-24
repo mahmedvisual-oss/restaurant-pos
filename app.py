@@ -4451,173 +4451,192 @@ def _do_pay(u, data):
     emp_name = _sql_lit(u["name"])
     emp_id = _sql_lit(u["id"])
 
-    # ── Batch save: كل الكتابات في executescript واحد (رحلة HTTP واحدة) ──
-    # الخطوات: pre-query → INSERT/UPDATE orders → executescript لكل الباقي → payload
-    # المجموع: ~4-5 رحلات بدلاً من ~15
+    # ── Transactional save: كل الكتابات المالية داخل Transaction واحدة ──
+    # executescript() غير مناسب هنا لأنه يقوم بعمل COMMIT لأي transaction معلقة
+    # قبل تنفيذ sequence؛ لذلك ننفذ كل statement منفرداً داخل transaction صريحة.
     conn = get_db()
     c = conn.cursor()
-    _ensure_schema(conn, c)
-    is_new = bool(data.get("new_order"))
-    num, section = _table_ref(c, table_id)
-    oid = _open_order_id(c, table_id, order_id, is_new)
+    try:
+        _ensure_schema(conn, c)
+        # _ensure_schema قد ينفذ COMMIT داخلياً؛ نبدأ Transaction الدفع بعده مباشرة.
+        conn.execute("BEGIN")
+        is_new = bool(data.get("new_order"))
+        num, section = _table_ref(c, table_id)
+        oid = _open_order_id(c, table_id, order_id, is_new)
 
-    # التحقق النهائي من الكود الترويجي على الخادم.
-    if promo_code:
-        promo_row = c.execute(
-            "SELECT id, code, discount_type, discount_value, min_order, max_uses, used_count, active, expires_at "
-            "FROM promo_codes WHERE code=? AND active=1",
-            (promo_code,)
-        ).fetchone()
+        # التحقق النهائي من الكود الترويجي على الخادم.
+        if promo_code:
+            promo_row = c.execute(
+                "SELECT id, code, discount_type, discount_value, min_order, max_uses, used_count, active, expires_at "
+                "FROM promo_codes WHERE code=? AND active=1",
+                (promo_code,)
+            ).fetchone()
 
-        if not promo_row:
-            conn.close()
-            return jsonify({"error": "كود الخصم غير صالح"}), 400
+            if not promo_row:
+                return jsonify({"error": "كود الخصم غير صالح"}), 400
 
-        max_uses = int(promo_row["max_uses"] or 0)
-        used_count = int(promo_row["used_count"] or 0)
-        if max_uses > 0 and used_count >= max_uses:
-            conn.close()
-            return jsonify({"error": "تم استنفاد استخدامات كود الخصم"}), 400
+            max_uses = int(promo_row["max_uses"] or 0)
+            used_count = int(promo_row["used_count"] or 0)
+            if max_uses > 0 and used_count >= max_uses:
+                return jsonify({"error": "تم استنفاد استخدامات كود الخصم"}), 400
 
-        if promo_row["expires_at"] and promo_row["expires_at"] < _now().strftime("%Y-%m-%d"):
-            conn.close()
-            return jsonify({"error": "انتهت صلاحية كود الخصم"}), 400
+            if promo_row["expires_at"] and promo_row["expires_at"] < _now().strftime("%Y-%m-%d"):
+                return jsonify({"error": "انتهت صلاحية كود الخصم"}), 400
 
-        min_order = float(promo_row["min_order"] or 0)
-        if subtotal < min_order:
-            conn.close()
-            return jsonify({"error": f"الحد الأدنى للطلب {min_order:.2f}"}), 400
+            min_order = float(promo_row["min_order"] or 0)
+            if subtotal < min_order:
+                return jsonify({"error": f"الحد الأدنى للطلب {min_order:.2f}"}), 400
 
-        if promo_row["discount_type"] == "fixed":
-            promo_discount = float(promo_row["discount_value"] or 0)
+            if promo_row["discount_type"] == "fixed":
+                promo_discount = float(promo_row["discount_value"] or 0)
+            else:
+                promo_discount = subtotal * float(promo_row["discount_value"] or 0) / 100.0
+
+            promo_discount = round(max(0.0, min(promo_discount, max_discount)), 2)
+
+        # الخصم النهائي يحسب بالكامل على الخادم.
+        discount = round(manual_discount + promo_discount, 2)
+        if discount > max_discount:
+            discount = max_discount
+
+        total = round(subtotal + tax - discount, 2)
+        if total < 0:
+            total = 0
+        if paid < total and payment_method != "آجل":
+            return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
+
+        # 1) INSERT/UPDATE orders → oid
+        if oid:
+            c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
+                      "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=?, table_num=?, table_section=? WHERE id=?",
+                      (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
+                       now_str, credit_name, transfer_ref, transfer_name, num, section, oid))
         else:
-            promo_discount = subtotal * float(promo_row["discount_value"] or 0) / 100.0
+            c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (num, section, table_id, items_str, subtotal, tax, discount, paid, payment_method, u["name"],
+                       "completed", guests, now_str, credit_name, transfer_ref, transfer_name))
+            oid = c.lastrowid
 
-        promo_discount = round(max(0.0, min(promo_discount, max_discount)), 2)
+        # 2) قراءة روابط المخزون مرة واحدة.
+        menu_ids = []
+        for it in items:
+            mid = int(it.get("menu_id") or 0)
+            if mid and mid not in menu_ids:
+                menu_ids.append(mid)
+        inv_links = []
+        if menu_ids:
+            placeholders = ",".join("?" * len(menu_ids))
+            try:
+                inv_links = c.execute(
+                    f"SELECT menu_id, inventory_id, qty_per FROM menu_inventory WHERE menu_id IN ({placeholders})",
+                    menu_ids
+                ).fetchall()
+            except Exception:
+                inv_links = []
 
-    # الخصم النهائي يحسب بالكامل على الخادم.
-    discount = round(manual_discount + promo_discount, 2)
-    if discount > max_discount:
-        discount = max_discount
-
-    total = round(subtotal + tax - discount, 2)
-    if total < 0:
-        total = 0
-    if paid < total and payment_method != "آجل":
-        return jsonify({"error": f"المبلغ المدفوع أقل من الإجمالي ({total:.2f})"}), 400
-
-    # 1) INSERT/UPDATE orders → oid
-    if oid:
-        c.execute("UPDATE orders SET items=?, subtotal=?, tax=?, discount=?, total=?, paid=?, payment_method=?, "
-                  "status='completed', guests=?, employee=?, date=?, credit_name=?, transfer_ref=?, transfer_name=?, table_num=?, table_section=? WHERE id=?",
-                  (items_str, subtotal, tax, discount, total, paid, payment_method, guests, u["name"],
-                   now_str, credit_name, transfer_ref, transfer_name, num, section, oid))
-    else:
-        c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
-                  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
-                   "completed", guests, now_str, credit_name, transfer_ref, transfer_name))
-        oid = c.lastrowid
-
-    # 2) قراءة روابط المخزون مرة واحدة (رحلة HTTP واحدة بدلاً من loops)
-    menu_ids = []
-    for it in items:
-        mid = int(it.get("menu_id") or 0)
-        if mid and mid not in menu_ids:
-            menu_ids.append(mid)
-    inv_links = []
-    if menu_ids:
-        placeholders = ",".join("?" * len(menu_ids))
-        try:
-            inv_links = c.execute(
-                f"SELECT menu_id, inventory_id, qty_per FROM menu_inventory WHERE menu_id IN ({placeholders})",
-                menu_ids
-            ).fetchall()
-        except Exception:
-            inv_links = []
-
-    # 3) بناء السكربت المجمّع (كل الكتابات المتبقية في رحلة HTTP واحدة)
-    S = []
-    # 3a) إغلاق طلبات قديمة في نفس الطاولة (وضع التقسيم)
-    if is_new:
-        S.append(f"UPDATE orders SET status='closed', kitchen_status='ready' WHERE table_id={_sql_lit(int(table_id))} AND status IN ('active','sent','ready') AND id != {oid};")
-    # 3b) سجل الخصومات
-    if discount > 0:
-        S.append(
-            f"INSERT INTO discount_log (employee, employee_id, order_id, table_num, table_section, subtotal, tax, discount, limit_pct, date) "
-            f"VALUES ({emp_name},{emp_id},{oid},{_sql_lit(num)},{_sql_lit(section)},{subtotal},{tax},{discount},{emp_limit_pct},{_sql_lit(now_str)});"
-        )
-    # 3c) نظام الآجل: credit_ledger + credit_payments
-    if payment_method == "آجل":
-        cname = _sql_lit((credit_name or "").strip() or "عميل آجل")
-        # ربط/إنشاء عميل تلقائياً في قاعدة بيانات العملاء
-        cid_lit = "NULL"
-        try:
-            cname_raw = (credit_name or "").strip() or "عميل آجل"
-            cph = str(data.get("credit_phone") or "").strip() or None
-            cust = None
-            if cph:
-                cust = c.execute("SELECT id FROM customers WHERE phone=?", (cph,)).fetchone()
-            if not cust:
-                cust = c.execute("SELECT id FROM customers WHERE lower(name)=lower(?) LIMIT 1", (cname_raw,)).fetchone()
-            if not cust:
-                c.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (cname_raw, cph))
-                cust = {"id": c.lastrowid}
-            cid_lit = str(int(cust["id"]))
-        except Exception:
-            cid_lit = "NULL"
-        ledger_paid = min(paid, total)
-        overpaid = paid > total
-        S.append(
-            f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
-            f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},'{("settled" if ledger_paid >= total else "open")}' ,{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
-        )
-        credit_cname = (credit_name or "").strip() or "عميل آجل"
-        audit_details = f"فتح رصيد آجل للعميل {credit_cname} - متبقي {round(total - ledger_paid, 2):.2f}"
-        S.append(
-            f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_open',{_sql_lit(audit_details)});"
-        )
-        if overpaid:
-            overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
+        # 3) تجهيز الكتابات المتبقية كـ statements منفردة.
+        S = []
+        if is_new:
+            S.append(f"UPDATE orders SET status='closed', kitchen_status='ready' WHERE table_id={_sql_lit(int(table_id))} AND status IN ('active','sent','ready') AND id != {oid};")
+        if discount > 0:
             S.append(
-                f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
+                f"INSERT INTO discount_log (employee, employee_id, order_id, table_num, table_section, subtotal, tax, discount, limit_pct, date) "
+                f"VALUES ({emp_name},{emp_id},{oid},{_sql_lit(num)},{_sql_lit(section)},{subtotal},{tax},{discount},{emp_limit_pct},{_sql_lit(now_str)});"
             )
-    # 3d) خصم المخزون تلقائياً عند البيع
-    for it in items:
-        mid = int(it.get("menu_id") or 0)
-        qty_sold = int(it.get("qty") or 0)
-        if not mid or qty_sold <= 0:
-            continue
-        for link in inv_links:
-            if link["menu_id"] == mid:
-                consume = link["qty_per"] * qty_sold
+        if payment_method == "آجل":
+            cname = _sql_lit((credit_name or "").strip() or "عميل آجل")
+            cid_lit = "NULL"
+            try:
+                cname_raw = (credit_name or "").strip() or "عميل آجل"
+                cph = str(data.get("credit_phone") or "").strip() or None
+                cust = None
+                if cph:
+                    cust = c.execute("SELECT id FROM customers WHERE phone=?", (cph,)).fetchone()
+                if not cust:
+                    cust = c.execute("SELECT id FROM customers WHERE lower(name)=lower(?) LIMIT 1", (cname_raw,)).fetchone()
+                if not cust:
+                    c.execute("INSERT INTO customers (name, phone) VALUES (?,?)", (cname_raw, cph))
+                    cust = {"id": c.lastrowid}
+                cid_lit = str(int(cust["id"]))
+            except Exception:
+                cid_lit = "NULL"
+            ledger_paid = min(paid, total)
+            overpaid = paid > total
+            S.append(
+                f"INSERT INTO credit_ledger (customer_name, order_id, table_id, table_num, table_section, total, paid, status, created_at, due_date, customer_id) "
+                f"VALUES ({cname},{oid},{_sql_lit(int(table_id))},{_sql_lit(num)},{_sql_lit(section)},{total},{ledger_paid},{'settled' if ledger_paid >= total else 'open'!r},{_sql_lit(now_str)},{_sql_lit(due_str)},{cid_lit});"
+            )
+            credit_cname = (credit_name or "").strip() or "عميل آجل"
+            audit_details = f"فتح رصيد آجل للعميل {credit_cname} - متبقي {round(total - ledger_paid, 2):.2f}"
+            S.append(
+                f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_open',{_sql_lit(audit_details)});"
+            )
+            if overpaid:
+                overpay_details = f"دفع زائد على رصيد آجل: المدفوع {paid:.2f} أكبر من الإجمالي {total:.2f} - الفرق {round(paid - total, 2):.2f} رُدّ كباقي"
                 S.append(
-                    f"UPDATE inventory SET quantity = MAX(0, quantity - {_sql_lit(consume)}) WHERE id={_sql_lit(link['inventory_id'])};"
+                    f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'credit_overpaid',{_sql_lit(overpay_details)});"
                 )
-    # 3e) سجل العملية في audit_log
-    place_details = f"دفع طلب #{oid} - طاولة {num} - {payment_method} - إجمالي {total:.2f}"
-    S.append(
-        f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
-    )
-
-    # 3f) احتساب استخدام كود الخصم داخل نفس عملية الحفظ.
-    if promo_row:
+        for it in items:
+            mid = int(it.get("menu_id") or 0)
+            qty_sold = int(it.get("qty") or 0)
+            if not mid or qty_sold <= 0:
+                continue
+            for link in inv_links:
+                if link["menu_id"] == mid:
+                    consume = link["qty_per"] * qty_sold
+                    S.append(
+                        f"UPDATE inventory SET quantity = MAX(0, quantity - {_sql_lit(consume)}) WHERE id={_sql_lit(link['inventory_id'])};"
+                    )
+        place_details = f"دفع طلب #{oid} - طاولة {num} - {payment_method} - إجمالي {total:.2f}"
         S.append(
-            f"UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 WHERE id={_sql_lit(promo_row['id'])};"
+            f"INSERT INTO audit_log (employee, action, details) VALUES ({emp_name},'place_order',{_sql_lit(place_details)});"
         )
 
-    # تنفيذ السكربت المجمّع (رحلة HTTP واحدة عبر pipeline)
-    if S:
-        script = "\n".join(S)
-        c.executescript(script)
+        # 3f) تحديث استخدام Promo بشكل مشروط لمنع تجاوز max_uses عند التزامن.
+        if promo_row:
+            S.append(
+                f"UPDATE promo_codes SET used_count=COALESCE(used_count,0)+1 "
+                f"WHERE id={_sql_lit(promo_row['id'])} "
+                f"AND (COALESCE(max_uses,0)=0 OR COALESCE(used_count,0)<COALESCE(max_uses,0));"
+            )
 
-    # 4) جلب بيانات الفاتورة النهائية (رحلة واحدة)
-    payload = _order_payload(c, oid)
-    conn.close()
-    if not payload:
-        print(f"ORDER SAVE LOST: oid={oid} table={num}")
-        raise RuntimeError("connection lost during save: stream not found")
-    return jsonify(payload)
+        # تنفيذ كل statement داخل نفس Transaction؛ لا نستخدم executescript().
+        for statement in S:
+            statement = statement.strip()
+            if statement.endswith(";"):
+                statement = statement[:-1].rstrip()
+            if statement:
+                c.execute(statement)
+
+        # إذا سبق طلب آخر واستهلك آخر استخدام للكود أثناء انتظار الكتابة،
+        # يجب إلغاء العملية كاملة وليس حفظ الطلب بدون الخصم.
+        if promo_row:
+            pcheck = c.execute(
+                "SELECT used_count, max_uses FROM promo_codes WHERE id=?",
+                (promo_row["id"],)
+            ).fetchone()
+            if not pcheck:
+                raise RuntimeError("promo code disappeared during payment")
+            pmax = int(pcheck["max_uses"] or 0)
+            pused = int(pcheck["used_count"] or 0)
+            if pmax > 0 and pused > pmax:
+                raise RuntimeError("promo code usage exceeded max_uses")
+
+        # 4) جلب بيانات الفاتورة قبل COMMIT، ثم نثبت كل العملية كوحدة واحدة.
+        payload = _order_payload(c, oid)
+        if not payload:
+            raise RuntimeError(f"connection lost during save: stream not found (oid={oid} table={num})")
+        conn.commit()
+        return jsonify(payload)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
 
 
 @app.route("/api/reports")
