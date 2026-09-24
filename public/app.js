@@ -477,7 +477,7 @@ function _renderMenuCards() {
   const grid = document.getElementById("menu-cards-grid");
   const filtered = _menuCatFilter === "all" ? _menuItemsCache : _menuItemsCache.filter(it => it.category === _menuCatFilter);
   if (!filtered.length) {
-    grid.innerHTML = `<div style="text-align:center;color:var(--muted);padding:30px" data-i18n="noItems">لا أصناف</div>`;
+    grid.innerHTML = `<div style="text-align:center;color:var(--muted);padding:30px" data-i18n="noItems">${t("noItems")}</div>`;
     return;
   }
   grid.innerHTML = `<div class="menu-cards-grid">${filtered.map(it => `
@@ -542,7 +542,7 @@ function _pickEmoji(e) {
 document.addEventListener("click", function(ev) {
   const picker = document.getElementById("emoji-picker");
   const opened = document.getElementById("menu-editor").querySelector('div[style*="position:relative"]');
-  if (picker && picker.style.display === "block" && !ev.target.closest("#mi-emoji") && !ev.target.closest(".emoji-opt") && !ev.target.closest('[title="اختيار إيموجي"]')) {
+  if (picker && picker.style.display === "block" && !ev.target.closest("#mi-emoji") && !ev.target.closest(".emoji-opt") && !ev.target.closest('[title="${t("emojiPickerTitle")}"]')) {
     picker.style.display = "none";
   }
 });
@@ -632,7 +632,7 @@ let _catInlineMode = "";
 function showAddCategoryInline() {
   _catInlineMode = "add";
   document.getElementById("cat-inline-input").value = "";
-  document.getElementById("cat-inline-input").placeholder = t("categoryPh") || "اسم القسم الجديد";
+  document.getElementById("cat-inline-input").placeholder = t("newCategoryPlaceholder");
   document.getElementById("cat-inline-form").style.display = "";
   document.getElementById("cat-inline-input").focus();
 }
@@ -2764,13 +2764,13 @@ function applyDiscount(pct) {
     discount = pct > 0 ? sub * pct / 100 : 0;
     closeDiscountDropdown();
     renderCart();
-    logAudit("discount", `${pct > 0 ? "تطبيق خصم " + pct + "%" : "إلغاء الخصم"} (= ${fmtCur(discount)})`);
+    logAudit("discount", `${pct > 0 ? t("discountApplied") + " " + pct + "%" : t("discountCancelled")} (= ${fmtCur(discount)})`);
   };
   const myLimit = user && user.role !== "manager" ? (parseFloat(user.discount_limit) || 0) : 100;
   if (user && user.role === "manager") { doIt(); return; }
   if (pct > 0 && pct <= myLimit) { doIt(); return; }
   const overMsg = pct > myLimit
-    ? `<br><span style="font-size:12px;color:var(--warn)">⚠️ الخصم ${pct}% يتجاوز حدك (${myLimit}%) — يتطلب موافقة المدير</span>`
+    ? `<br><span style="font-size:12px;color:var(--warn)">⚠️ ${t("discountOverLimit").replace("{pct}", pct).replace("{limit}", myLimit)}</span>`
     : "";
   requireManager(`🏷️ <b>${pct > 0 ? t("applyDiscount") + " " + pct + "%" : t("cancelDiscount")}</b><br><span style="font-size:13px;color:var(--text)">${t("discountAmount")} ${fmtCur(pct > 0 ? sub * pct / 100 : discount)}</span>${overMsg}`, doIt);
 }
@@ -2978,7 +2978,7 @@ async function addInventory() {
     document.getElementById("inv-new-qty").value = "";
     document.getElementById("inv-new-min").value = "";
     document.getElementById("inv-new-cost").value = "";
-    toast("✅ " + t("toast.itemAdded") || "تمت الإضافة");
+    toast("✅ " + (t("toast.itemAdded") || t("added")));
     loadInventoryList();
   } catch (e) { toast(e.message); }
 }
@@ -5875,7 +5875,7 @@ function confirmRefundModal() {
 function approveCancelNext(id, sensitive, refund) {
   if (sensitive) {
     managerCallback = () => doApproveCancel(id, refund);
-    document.getElementById("manager-pin-action-info").innerHTML = t("cancelSensitiveTitle") || "🔒 إلغاء بحماية المدير";
+    document.getElementById("manager-pin-action-info").innerHTML = t("cancelSensitiveTitle");
     document.getElementById("manager-pin-input").value = "";
     document.getElementById("manager-pin-error").textContent = "";
     openModal("modal-manager-pin");
@@ -5889,7 +5889,7 @@ async function doApproveCancel(id, refund) {
     const res = await api("/api/cancel-approve", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: id, pin: managerPinEntered, refund_method: refund ? refund.refund_method : undefined, refund_ref: refund ? refund.refund_ref : undefined }) });
     managerPinEntered = "";
     if (res.ok) {
-      toast("✅ تمت الموافقة على الإلغاء" + (res.sensitive ? " (بحماية PIN)" : "") + (res.refund_receipt ? " — سند مردودات " + res.refund_receipt.receipt_no : ""));
+      toast("✅ " + t("cancelApprovedWithPin") + (res.sensitive ? " (" + t("protected") + ")" : "") + (res.refund_receipt ? " — " + t("refundReceipt") + " " + res.refund_receipt.receipt_no : ""));
       if (res.refund_receipt) printRefundReceipt(res.refund_receipt);
       showCancelRequests(); loadTables(); checkCancelRequests();
     }
