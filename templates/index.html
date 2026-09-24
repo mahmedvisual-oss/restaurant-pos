@@ -28,7 +28,7 @@
     </div>
     <button class="btn btn-secondary" id="btn-theme" onclick="toggleTheme()" data-i18n="theme" title="الوضع الليلي/النهاري">🌙</button>
     <div class="lang-dropdown" id="lang-dropdown">
-      <button class="btn btn-secondary" onclick="toggleLangDropdown()" id="btn-lang" title="اللغة">🇮🇩</button>
+      <button class="btn btn-secondary" onclick="toggleLangDropdown()" id="btn-lang" data-i18n-title="language" title="اللغة">🇮🇩</button>
       <div class="lang-dropdown-menu" id="lang-menu">
         <button class="lang-option" onclick="setLang('ar'); closeLangDropdown();">🇸🇦 العربية</button>
         <button class="lang-option" onclick="setLang('en'); closeLangDropdown();">🇬🇧 English</button>
@@ -118,7 +118,7 @@
     <div class="summary">
       <div class="summary-header">
         <span data-i18n="invoiceSummary">📋 ملخص الفاتورة</span>
-        <span id="item-count" class="summary-count">0 أصناف</span>
+        <span id="item-count" class="summary-count" data-i18n="items">0 أصناف</span>
       </div>
       <div class="summary-row"><span data-i18n="subtotal">المجموع الفرعي</span><span id="subtotal">Rp 0</span></div>
       <div class="summary-row"><span data-i18n="tax">الضريبة (3%)</span><span id="tax">Rp 0</span></div>
@@ -166,8 +166,8 @@
     <div class="col-header" style="display:flex;justify-content:space-between;align-items:center">
       <span data-i18n="tables">🪑 الطاولات</span>
       <div class="table-view-toggle">
-        <button class="btn btn-sm" id="btn-list-view" onclick="setTableView('list')" title="قائمة">📋</button>
-        <button class="btn btn-sm" id="btn-floor-view" onclick="setTableView('floor')" title="خريطة">🗺️</button>
+        <button class="btn btn-sm" id="btn-list-view" onclick="setTableView('list')" data-i18n-title="tableList" title="قائمة">📋</button>
+        <button class="btn btn-sm" id="btn-floor-view" onclick="setTableView('floor')" data-i18n-title="tableMap" title="خريطة">🗺️</button>
       </div>
     </div>
     <div class="stats">
@@ -184,7 +184,7 @@
   <div class="modal-content">
     <div class="modal-header" data-i18n="payment">💳 عملية الدفع</div>
     <div class="modal-body">
-      <div class="pay-table" id="pay-table">🪑 طاولة -</div>
+      <div class="pay-table" id="pay-table">🪑 <span data-i18n="table">طاولة</span> -</div>
       <div class="pay-breakdown">
         <div class="pay-breakdown-row"><span data-i18n="subtotal">المجموع الفرعي</span><span id="pay-sub">Rp 0</span></div>
         <div class="pay-breakdown-row"><span data-i18n="tax">الضريبة (3%)</span><span id="pay-tax">Rp 0</span></div>
@@ -212,7 +212,7 @@
       </div>
       <div class="pay-label" data-i18n="paidAmount">المبلغ المدفوع:</div>
       <input id="paid" type="number" class="pay-input" value="0">
-      <div class="change" id="change">المتبقي: Rp 0</div>
+      <div class="change" id="change"><span data-i18n="remaining">المتبقي</span>: Rp 0</div>
       <div class="modal-actions">
         <button class="btn" onclick="closeModal('pay-modal')" data-i18n="cancel">✕ إلغاء</button>
         <button class="btn btn-success" onclick="confirmPayment()" data-i18n="confirmPay">✅ تأكيد الدفع</button>
@@ -332,10 +332,10 @@
       <div id="menu-editor" style="display:none;padding:10px;border-bottom:1px solid var(--border);background:var(--input);flex-shrink:0">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
           <div style="display:flex;flex-direction:column;gap:2px;position:relative">
-            <label style="font-size:10px;color:var(--muted)">إيموجي</label>
+            <label style="font-size:10px;color:var(--muted)" data-i18n="emojiPh">إيموجي</label>
             <div style="display:flex;gap:4px">
               <input id="mi-emoji" class="login-input" maxlength="4" placeholder="🍽️" style="width:60px;text-align:center;font-size:20px" readonly onclick="toggleEmojiPicker()">
-              <button class="btn btn-sm" onclick="toggleEmojiPicker()" title="اختيار إيموجي">😊</button>
+              <button class="btn btn-sm" onclick="toggleEmojiPicker()" data-i18n-title="emojiPickerTitle" title="اختيار إيموجي">😊</button>
             </div>
             <div id="emoji-picker" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;width:280px;max-width:90vw;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px;z-index:100;box-shadow:0 8px 24px rgba(0,0,0,.35)"></div>
           </div>
@@ -377,9 +377,9 @@
       <!-- أزرار الأقسام -->
       <div style="padding:10px;border-top:1px solid var(--border);flex-shrink:0">
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn btn-sm" onclick="showAddCategoryInline()">➕ قسم</button>
-          <button class="btn btn-sm" onclick="showRenameCategoryInline()">✏️ تعديل قسم</button>
-          <button class="btn btn-sm btn-danger" onclick="showDeleteCategoryInline()">🗑️ حذف قسم</button>
+          <button class="btn btn-sm" onclick="showAddCategoryInline()" data-i18n="addCategory">➕ قسم</button>
+          <button class="btn btn-sm" onclick="showRenameCategoryInline()" data-i18n="edit">✏️ تعديل قسم</button>
+          <button class="btn btn-sm btn-danger" onclick="showDeleteCategoryInline()" data-i18n="delete">🗑️ حذف قسم</button>
         </div>
         <div id="cat-inline-form" style="display:none;margin-top:8px">
           <div style="display:flex;gap:6px">
@@ -396,10 +396,10 @@
 <!-- نافذة إعادة تسمية القسم -->
 <div id="modal-rename-cat" class="modal">
   <div class="modal-content" style="width:340px">
-    <div class="modal-header">✏️ إعادة تسمية القسم</div>
+    <div class="modal-header" data-i18n="renameCategoryTitle">✏️ إعادة تسمية القسم</div>
     <div class="modal-body">
-      <div class="pay-label">الاسم الحالي: <b id="rename-old-name"></b></div>
-      <input id="rename-new-name" class="login-input" placeholder="الاسم الجديد بالإنجليزية" style="margin:8px 0;text-transform:none">
+      <div class="pay-label"><span data-i18n="currentName">الاسم الحالي:</span> <b id="rename-old-name"></b></div>
+      <input id="rename-new-name" class="login-input" data-i18n="newNameEnglish" placeholder="الاسم الجديد بالإنجليزية" style="margin:8px 0;text-transform:none">
       <div class="modal-actions">
         <button class="btn" onclick="closeModal('modal-rename-cat')">✕ إلغاء</button>
         <button class="btn btn-success" onclick="confirmRenameCategory()">✅ حفظ</button>
@@ -441,8 +441,8 @@
           <div>
             <label class="settings-label" data-i18n="backupFreqLabel">تكرار النسخ الاحتياطي</label>
             <select id="set-backup-freq" class="login-input">
-              <option value="daily">اليومي</option>
-              <option value="weekly">الأسبوعي</option>
+              <option value="daily" data-i18n="daily">اليومي</option>
+              <option value="weekly" data-i18n="weekly">الأسبوعي</option>
             </select>
           </div>
           <div>
@@ -542,18 +542,18 @@
   <div class="settings-grid">
 
     <div>
-      <label class="settings-label">معرف القسم</label>
-      <input id="section-id" class="login-input" placeholder="مثال: garden">
+      <label class="settings-label" data-i18n="sectionId">معرف القسم</label>
+      <input id="section-id" class="login-input" data-i18n="sectionIdPh" placeholder="مثال: garden">
     </div>
 
     <div>
-      <label class="settings-label">اسم القسم</label>
-      <input id="section-name" class="login-input" placeholder="مثال: الحديقة">
+      <label class="settings-label" data-i18n="sectionName">اسم القسم</label>
+      <input id="section-name" class="login-input" data-i18n="sectionNamePh" placeholder="مثال: الحديقة">
     </div>
 
     <div>
-      <label class="settings-label">الأيقونة</label>
-      <input id="section-icon" class="login-input" placeholder="🌳">
+      <label class="settings-label" data-i18n="sectionIcon">الأيقونة</label>
+      <input id="section-icon" class="login-input" data-i18n="sectionIconPh" placeholder="🌳">
     </div>
 
   </div>
