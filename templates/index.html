@@ -363,7 +363,7 @@
           <div id="mi-inv-links" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <select id="mi-inv-select" class="login-input" style="flex:1;min-width:140px"></select>
-            <input id="mi-inv-qty" type="number" step="0.01" min="0" class="login-input" value="1" style="width:70px" title="الكمية المستهلكة لكل وحدة بيع">
+            <input id="mi-inv-qty" type="number" step="0.01" min="0" class="login-input" value="1" style="width:70px" data-i18n-title="consumptionQtyTitle" title="الكمية المستهلكة لكل وحدة بيع">
             <button class="btn btn-sm btn-success" onclick="addMenuInvLink()" data-i18n="addLink">➕</button>
           </div>
         </div>
@@ -383,7 +383,7 @@
         </div>
         <div id="cat-inline-form" style="display:none;margin-top:8px">
           <div style="display:flex;gap:6px">
-            <input id="cat-inline-input" class="login-input" style="flex:1;margin:0" placeholder="اسم القسم">
+            <input id="cat-inline-input" class="login-input" style="flex:1;margin:0" data-i18n="sectionName" placeholder="اسم القسم">
             <button class="btn btn-success btn-sm" id="cat-inline-btn" onclick="confirmCatInline()">✅</button>
             <button class="btn btn-sm" onclick="document.getElementById('cat-inline-form').style.display='none'">✕</button>
           </div>
@@ -401,8 +401,8 @@
       <div class="pay-label"><span data-i18n="currentName">الاسم الحالي:</span> <b id="rename-old-name"></b></div>
       <input id="rename-new-name" class="login-input" data-i18n="newNameEnglish" placeholder="الاسم الجديد بالإنجليزية" style="margin:8px 0;text-transform:none">
       <div class="modal-actions">
-        <button class="btn" onclick="closeModal('modal-rename-cat')">✕ إلغاء</button>
-        <button class="btn btn-success" onclick="confirmRenameCategory()">✅ حفظ</button>
+        <button class="btn" onclick="closeModal('modal-rename-cat')" data-i18n="cancelEdit">✕ إلغاء</button>
+        <button class="btn btn-success" onclick="confirmRenameCategory()" data-i18n="save">✅ حفظ</button>
       </div>
     </div>
   </div>
@@ -428,7 +428,7 @@
           </div>
           <div>
             <label class="settings-label" data-i18n="currencyLabel">العملة</label>
-            <input id="set-currency" class="login-input" maxlength="5" placeholder="ر.س">
+            <input id="set-currency" class="login-input" maxlength="5" data-i18n="currencyPlaceholder" placeholder="ر.س">
           </div>
           <div>
             <label class="settings-label" data-i18n="autoBackupLabel">النسخ الاحتياطي التلقائي</label>
@@ -507,7 +507,7 @@
 <div style="display:flex;gap:6px;margin-bottom:12px">
 
   <button class="btn btn-info" onclick="showTableSectionsManager()" data-i18n="manageSections">
-  ⚙️ إدارة الأقسام
+  <span data-i18n="categoryManagement">⚙️ إدارة الأقسام</span>
 </button>
 
 </div>
@@ -536,7 +536,7 @@
 <div id="table-sections-manager" style="display:none;margin-top:18px">
 
   <div class="settings-section" data-i18n="tableSectionsManage">
-    🗂️ إدارة أقسام الطاولات
+    <span data-i18n="tableSectionManagement">🗂️ إدارة أقسام الطاولات</span>
   </div>
 
   <div class="settings-grid">
@@ -559,7 +559,7 @@
   </div>
 
   <button class="btn btn-success" onclick="addTableSection()" data-i18n="addSection">
-    ➕ إضافة قسم
+    <span data-i18n="addSection">➕ إضافة قسم</span>
   </button>
 
   <div id="table-sections-list" class="menu-manage-list" style="margin-top:12px"></div>
@@ -841,7 +841,7 @@
     <div class="modal-body" id="modifier-body"></div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="confirmModifiers()">✓ <span data-i18n="addModifier">إضافة</span></button>
-      <button class="btn" onclick="closeModal('modifier-modal')">✕ إلغاء</button>
+      <button class="btn" onclick="closeModal('modifier-modal')" data-i18n="cancel">✕ إلغاء</button>
     </div>
   </div>
 </div>
@@ -855,7 +855,7 @@
     </div>
     <div class="modal-body" id="transfer-body"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeModal('transfer-modal')">✕ إلغاء</button>
+      <button class="btn" onclick="closeModal('transfer-modal')" data-i18n="cancel">✕ إلغاء</button>
     </div>
   </div>
 </div>
@@ -870,7 +870,7 @@
     <div class="modal-body" id="split-body"></div>
     <div class="modal-actions">
       <button class="btn btn-success" id="split-confirm" onclick="confirmSplit()" style="display:none">✅ <span data-i18n="confirmSplit">تأكيد التقسيم</span></button>
-      <button class="btn" onclick="closeModal('split-modal')">✕ إغلاق</button>
+      <button class="btn" onclick="closeModal('split-modal')" data-i18n="close">✕ إغلاق</button>
     </div>
   </div>
 </div>
@@ -911,7 +911,7 @@
     </div>
     <div class="modal-body" id="cancel-requests-body"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeModal('cancel-requests-modal')">✕ إغلاق</button>
+      <button class="btn" onclick="closeModal('cancel-requests-modal')" data-i18n="close">✕ إغلاق</button>
     </div>
   </div>
 </div>
