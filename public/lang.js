@@ -808,6 +808,12 @@ const I18N = {
     advTopItems: "🏆 أكثر الأصناف مبيعاً",
     advByMethod: "💰 حسب طريقة الدفع",
     advByHour: "🕐 حسب الساعة",
+    edit: "تعديل",
+    item: "الصنف",
+    "unit_piece": "قطعة",
+    "unit_kg": "كيلو",
+    "unit_liter": "لتر",
+    "unit_box": "علبة",
   },
 
   en: {
@@ -1617,6 +1623,12 @@ const I18N = {
     advTopItems: "🏆 Top Selling Items",
     advByMethod: "💰 By Payment Method",
     advByHour: "🕐 By Hour",
+    edit: "Edit",
+    item: "Item",
+    "unit_piece": "piece",
+    "unit_kg": "kg",
+    "unit_liter": "liter",
+    "unit_box": "box",
   },
 
   id: {
@@ -2426,6 +2438,12 @@ const I18N = {
     advTopItems: "🏆 Item Terlaris",
     advByMethod: "💰 Berdasarkan Metode Pembayaran",
     advByHour: "🕐 Berdasarkan Jam",
+    edit: "Edit",
+    item: "Item",
+    "unit_piece": "buah",
+    "unit_kg": "kg",
+    "unit_liter": "liter",
+    "unit_box": "kotak",
   },
 };
 
@@ -2462,6 +2480,9 @@ function t(key, params) {
 }
 
 function applyLang() {
+  document.querySelectorAll("[data-i18n-title]").forEach(el => {
+    try { el.setAttribute("title", t(el.getAttribute("data-i18n-title"))); } catch (e) {}
+  });
   document.querySelectorAll("[data-i18n]").forEach(el => {
     try {
       const v = t(el.getAttribute("data-i18n"));
