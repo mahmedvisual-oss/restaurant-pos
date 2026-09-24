@@ -214,7 +214,6 @@ async function poll(force) {
 
 async function init() {
   try { if (typeof setLang === "function") setLang(localStorage.getItem("pos_lang") || "id"); } catch (e) {}
-  try { if (typeof applyLang === "function") applyLang(); } catch (e) {}
 
   // إذا كانت جلسة POS موجودة بالفعل، افتح المطبخ مباشرة بدون تسجيل دخول ثانٍ.
   try {
