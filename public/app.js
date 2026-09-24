@@ -756,20 +756,48 @@ function renderCats() {
     ? [...new Set(MENU.map(m => m.category).filter(Boolean))].sort((a, b) => (CATEGORY_ORDER[a] ?? 999) - (CATEGORY_ORDER[b] ?? 999))
     : [...new Set(MENU.map(m => m.category).filter(Boolean))]];
   const cont = document.getElementById("cats");
+  if (!cont) return;
+  if (!cats.includes(currentCategory)) currentCategory = "__ALL__";
+
+  // Mobile-safe category navigation: use real DOM listeners instead of inline
+  // onclick strings, so Arabic/Indonesian names containing quotes never break.
   cont.innerHTML = "";
+  cont.style.overflowX = "auto";
+  cont.style.overflowY = "hidden";
+  cont.style.webkitOverflowScrolling = "touch";
+  cont.style.touchAction = "pan-x";
+
   for (const c of cats) {
     const isAll = c === "__ALL__";
     const label = isAll ? t("all") : c;
     const color = isAll ? "#6366f1" : (CAT_COLORS[c] || "#6366f1");
-    cont.innerHTML += `<button class="cat-btn ${c === currentCategory ? "active" : ""}" onclick="selectCat('${c}')" style="${c === currentCategory ? "background:" + color + ";border-color:" + color : ""}">${label}</button>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cat-btn" + (c === currentCategory ? " active" : "");
+    btn.textContent = label;
+    btn.dataset.category = c;
+    btn.style.touchAction = "manipulation";
+    if (c === currentCategory) {
+      btn.style.background = color;
+      btn.style.borderColor = color;
+    }
+    btn.addEventListener("click", () => selectCat(c));
+    btn.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      selectCat(c);
+    }, { passive: false });
+    cont.appendChild(btn);
   }
-  if (!cats.includes(currentCategory)) currentCategory = "__ALL__";
 }
 
 function selectCat(c) {
   currentCategory = c;
   renderCats();
   renderMenu();
+
+  // Keep the selected category visible on a narrow phone screen.
+  const btn = document.querySelector('#cats .cat-btn[data-category="' + CSS.escape(c) + '"]');
+  if (btn) btn.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
 }
 
 function renderMenu() {
@@ -1785,10 +1813,32 @@ async function saveOrder() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ table_id: selectedTable, items: cart, discount, guests, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
-    existingOrderId = res.order_id;
-    if (splitInvoices) { splitInvoices[splitCurrent].existingOrderId = res.order_id; renderInvoiceTabs(); }
-    toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
+    const savedOrderId = res.order_id;
+
+    // A normal Save finishes this invoice and starts a fresh invoice.
+    // The saved order remains in the cloud; only the local editor is reset.
+    if (splitInvoices) {
+      existingOrderId = savedOrderId;
+      splitInvoices[splitCurrent].existingOrderId = savedOrderId;
+      renderInvoiceTabs();
+    } else {
+      cart = [];
+      discount = 0;
+      promoDiscount = 0;
+      promoCode = "";
+      existingOrderId = null;
+      const promoInput = document.getElementById("promo-code");
+      const promoRemove = document.getElementById("promo-remove");
+      const guestsInput = document.getElementById("guests");
+      if (promoInput) promoInput.value = "";
+      if (promoRemove) promoRemove.style.display = "none";
+      if (guestsInput) guestsInput.value = 1;
+      renderCart();
+    }
+
+    toast("💾 " + t("toast.saved") + " #" + savedOrderId + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
     loadTables();
+    if (!splitInvoices && window.innerWidth <= 768) switchPanel("menu");
   } catch (e) { toast(e.message); }
 }
 
