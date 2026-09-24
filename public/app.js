@@ -313,7 +313,7 @@ async function loadEmployees() {
     const emps = await api("/api/employees");
     const sel = document.getElementById("login-employee");
     sel.innerHTML = emps.map(e => `<option value="${e.id}">${e.name} — ${e.role === "manager" ? t("managerRole") : t("cashierRole")}</option>`).join("");
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function doLogin() {
@@ -443,7 +443,7 @@ async function _loadMenuEditor() {
     document.getElementById("cat-list").innerHTML = _menuCatsCache.map(c => `<option value="${c}">`).join("");
     _renderCatTabs();
     _renderMenuCards();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function _renderCatTabs() {
@@ -464,7 +464,7 @@ async function resetMenuToDefault() {
     const r = await api("/api/menu/reset-default", { method: "POST", body: "{}" });
     toast(`✅ ${t("temporaryMenuActivated")} (${r.count})`);
     await _loadMenuEditor();
-  } catch (e) { toast("❌ " + e.message); }
+  } catch (e) { toast("❌ " + terr(e.message)); }
 }
 
 function _setMenuCatFilter(cat) {
@@ -567,7 +567,7 @@ async function saveMenuItem() {
     closeMenuEditor();
     await _loadMenuEditor();
     await reloadMenu();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function loadMenuInvSelect() {
@@ -605,14 +605,14 @@ async function addMenuInvLink() {
   try {
     await api("/api/menu-inventory/" + menuId, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ inventory_id: parseInt(sel.value), qty_per: qty }) });
     await loadMenuInvLinks(menuId);
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function removeMenuInvLink(menuId, inventoryId) {
   try {
     await api("/api/menu-inventory/" + menuId + "/" + inventoryId, { method: "DELETE" });
     await loadMenuInvLinks(menuId);
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function _toggleMenuCard(id, active) {
@@ -625,7 +625,7 @@ async function _toggleMenuCard(id, active) {
     }
     await _loadMenuEditor();
     await reloadMenu();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 let _catInlineMode = "";
@@ -681,7 +681,7 @@ async function confirmCatInline() {
     document.getElementById("cat-inline-form").style.display = "none";
     await _loadMenuEditor();
     await reloadMenu();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function moveCategory(cat, dir) {
@@ -689,7 +689,7 @@ async function moveCategory(cat, dir) {
     await api("/api/categories/reorder", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({category:cat,direction:dir}) });
     await _loadMenuEditor();
     await reloadMenu();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 let _renameCatOld = "";
@@ -715,7 +715,7 @@ async function confirmRenameCategory() {
     toast("✅ " + t("categoryRenamedTo") + " " + newName);
     await _loadMenuEditor();
     await reloadMenu();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function reloadMenu() {
@@ -770,7 +770,7 @@ async function showAudit() {
           </div>`).join("")
       : "<p style='text-align:center;color:var(--muted)'>" + t("noRecords") + "</p>";
     openModal("modal-audit");
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== القائمة =====
@@ -1310,7 +1310,7 @@ function autoLayoutFloor() {
     }
     toast("📐 " + t("toast.arranged"));
     renderFloorPlan();
-  }).catch(e => toast(e.message));
+  }).catch(e => toast(terr(e.message)));
 }
 
 function toggleFloorEdit() {
@@ -1385,7 +1385,7 @@ async function saveFloorPositions() {
     }
     floorEdit = false;
     renderFloorPlan();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function deleteFloorTable(id) {
@@ -1395,7 +1395,7 @@ async function deleteFloorTable(id) {
     toast("✅ " + t("tableDeleted"));
     await loadTables();
     renderFloorPlan();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function selectTable(id) {
@@ -1808,7 +1808,7 @@ async function saveOrder() {
     if (splitInvoices) { splitInvoices[splitCurrent].existingOrderId = res.order_id; renderInvoiceTabs(); }
     toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (${t("invoice")} ${splitCurrent + 1})` : ""));
     loadTables();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== الدفع =====
@@ -1973,7 +1973,7 @@ async function confirmPayment() {
     renderCart();
     loadTables();
   } catch (e) {
-    toast(e.message);
+    toast(terr(e.message));
   }
 }
 
@@ -2063,7 +2063,7 @@ async function reprintInvoice(oid) {
       printWindow.close();
     } catch (_) {}
 
-    toast(e.message);
+    toast(terr(e.message));
   }
 }
 // ===== سند مردودات (استرداد) =====
@@ -2792,7 +2792,7 @@ async function applyPromoCode() {
     document.getElementById("promo-remove").style.display = "";
     toast("✅ " + t("promoApplied") + ": -" + fmtCur(res.discount));
     renderCart();
-  } catch (e) { toast("⚠️ " + e.message); }
+  } catch (e) { toast("⚠️ " + terr(e.message)); }
 }
 
 function removePromoCode() {
@@ -2841,7 +2841,7 @@ async function loadPromoList() {
         </div>`;
       }).join("")
       : "<p style='text-align:center;color:var(--muted)'>" + t("noRecords") + "</p>";
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function editPromo(id, code, type, value, minOrder, maxUses, expires, active) {
@@ -2880,7 +2880,7 @@ async function savePromoEdit(id) {
     });
     toast("✅ " + t("rptSaved"));
     loadPromoList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function togglePromo(id, active) {
@@ -2892,7 +2892,7 @@ async function togglePromo(id, active) {
     });
     toast("✅ " + t(active ? "promoActive" : "promoInactive"));
     loadPromoList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function addPromo() {
@@ -2915,7 +2915,7 @@ async function addPromo() {
     document.getElementById("promo-new-code").value = "";
     document.getElementById("promo-new-value").value = "";
     loadPromoList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function deletePromo(id) {
@@ -2925,7 +2925,7 @@ async function deletePromo(id) {
     await api("/api/promo/" + id, { method: "DELETE" });
     toast("✅ " + t("toast.deleted"));
     loadPromoList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== المخزون =====
@@ -2957,7 +2957,7 @@ async function loadInventoryList() {
         </div>
       </div>`;
     }).join("");
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function addInventory() {
@@ -2980,7 +2980,7 @@ async function addInventory() {
     document.getElementById("inv-new-cost").value = "";
     toast("✅ " + (t("toast.itemAdded") || t("added")));
     loadInventoryList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function deleteInventory(id) {
@@ -2990,7 +2990,7 @@ async function deleteInventory(id) {
     await api("/api/inventory/" + id, { method: "DELETE" });
     toast("✅ " + t("toast.deleted"));
     loadInventoryList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== نقاط الولاء =====
@@ -3017,7 +3017,7 @@ async function lookupCustomer() {
     document.getElementById("loyalty-cust-phone").textContent = c.phone;
     document.getElementById("loyalty-cust-points").textContent = c.points;
     document.getElementById("loyalty-customer-info").style.display = "block";
-  } catch (e) { toast("⚠️ " + e.message); }
+  } catch (e) { toast("⚠️ " + terr(e.message)); }
 }
 
 async function addLoyaltyPoints() {
@@ -3035,7 +3035,7 @@ async function addLoyaltyPoints() {
     document.getElementById("loyalty-add-points").value = "";
     toast("✅ " + t("toast.loyaltyPointsAdded"));
     loadCustomerList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function createCustomer() {
@@ -3052,7 +3052,7 @@ async function createCustomer() {
     document.getElementById("loyalty-new-phone").value = "";
     toast("✅ " + t("toast.customerAdded"));
     loadCustomerList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function loadCustomerList() {
@@ -3069,7 +3069,7 @@ async function loadCustomerList() {
         <span style="color:var(--primary);font-weight:700">${c.points} ${t("points")}</span>
       </div>
     </div>`).join("");
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== قاعدة بيانات العملاء =====
@@ -3100,7 +3100,7 @@ async function loadCustomersDb() {
     const dl = document.getElementById("credit-customers");
     if (dl) dl.innerHTML = `<option value="${d.customers.map(c => String(c.name).replace(/"/g, "&quot;")).join('"></option><option value="')}"></option>`;
     renderCustomersDb(d.totals || {});
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function renderCustomersDb(totals) {
@@ -3199,7 +3199,7 @@ async function confirmCustomerPay(btn, lid, remaining) {
     toast("✅ " + t("toast.custPaymentDone") + (res.receipt ? " — " + t("rptReceiptNo") + " " + res.receipt.receipt_no : ""));
     if (res.receipt) printCreditReceipt(res.receipt);
     loadCustomersDb();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function addCustomerDb() {
@@ -3212,7 +3212,7 @@ async function addCustomerDb() {
     document.getElementById("cust-new-phone").value = "";
     toast("✅ " + t("toast.customerAdded"));
     loadCustomersDb();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function editCustomerDb(cid, curName, curPhone) {
@@ -3224,7 +3224,7 @@ async function editCustomerDb(cid, curName, curPhone) {
     await api("/api/customer/" + cid, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim(), phone: phone.trim(), points: 0 }) });
     toast("✅ " + t("toast.customerUpdated"));
     loadCustomersDb();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function showReservationManager() {
@@ -3268,7 +3268,7 @@ async function loadReservationList() {
       ${actions}
     </div>`;
     }).join("");
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function showReservationBar(id) {
@@ -3306,7 +3306,7 @@ async function arriveReservation() {
     if (el) el.style.display = "none";
     loadTables();
     loadReservationList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function dismissReservationBar() {
@@ -3337,7 +3337,7 @@ async function createReservation() {
     toast("✅ " + t("toast.reservationCreated"));
     loadReservationList();
     loadTables();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function updateReservation(id, status) {
@@ -3351,7 +3351,7 @@ async function updateReservation(id, status) {
     toast("✅ " + t("toast.reservationUpdated"));
     loadReservationList();
     loadTables();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== تقارير متقدمة =====
@@ -3426,7 +3426,7 @@ async function sendToKitchen() {
     if (window.innerWidth <= 768) { switchPanel("tables"); }
   } catch (e) {
     if (w) w.close();
-    toast(e.message);
+    toast(terr(e.message));
   }
 }
 
@@ -3641,7 +3641,7 @@ async function loadReportData() {
     populateReportFilters();
     await waitReportLoad();
     await loadReportDetail();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function loadReportDetail() {
@@ -4346,7 +4346,7 @@ async function saveSupplier(btn) {
     btn.closest("div[style]").remove();
     toast("✅ " + t("rptSaved"));
     switchReportTab("ap");
-  } catch(e) { toast(e.message); }
+  } catch(e) { toast(terr(e.message)); }
 }
 
 async function paySupplier(lid, total, paid) {
@@ -4362,7 +4362,7 @@ async function paySupplier(lid, total, paid) {
     });
     toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })));
     switchReportTab("ap");
-  } catch(e) { toast(e.message); }
+  } catch(e) { toast(terr(e.message)); }
 }
 
 async function renderCancelled(c) {
@@ -4581,7 +4581,7 @@ async function showCreditPayments(lid) {
       <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeCreditPayments(this)">${t("rptClose")}</button></div>
     </div>`;
     document.body.appendChild(d);
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function closeCreditPayments(btn) {
@@ -4603,7 +4603,7 @@ async function settleCredit(lid, total, paid) {
     toast("✅ " + (res.status === "settled" ? t("rptFullySettled") : t("rptRemainingNow", { amt: fmtCur(res.remaining) })) + (res.receipt ? " — " + t("rptReceiptNo") + " " + res.receipt.receipt_no : ""));
     if (res.receipt) printCreditReceipt(res.receipt);
     loadCreditReport();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 // ===== سند قبض مستقل (دفعة مقدمة للحفلات الخاصة) =====
@@ -4643,7 +4643,7 @@ async function confirmDepositVoucher() {
       closeModal("modal-sandqabd");
       printDepositVoucher(res.voucher);
     }
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 function renderExpenses(c) {
@@ -4693,7 +4693,7 @@ async function addExpense() {
     await api("/api/expenses", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ description, amount, category }) });
     toast(t("rptExpenseAdded"));
     loadExpenseList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function delExpense(id) {
@@ -4702,7 +4702,7 @@ async function delExpense(id) {
     await api("/api/expenses/" + id, { method: "DELETE" });
     toast(t("rptExpenseDeleted"));
     loadExpenseList();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function renderIncome(c) {
@@ -5517,7 +5517,7 @@ async function onDayButton() {
       toast("📆 " + t("toast.dayStarted"));
       await updateDayButton();
       checkDayReminder();
-    } catch (e) { toast(e.message); }
+    } catch (e) { toast(terr(e.message)); }
   } else {
     showDayClose();
   }
@@ -5818,7 +5818,7 @@ async function submitCancelRequest() {
     } else {
       toast("❌ " + (res.error || t("errorGeneric")));
     }
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function showCancelRequests() {
@@ -5852,7 +5852,7 @@ async function showCancelRequests() {
     }
     openModal("cancel-requests-modal");
     checkCancelRequests();
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 let pendingRefund = null;
@@ -5904,7 +5904,7 @@ async function doApproveCancel(id, refund) {
       showCancelRequests(); loadTables(); checkCancelRequests();
     }
     else toast("❌ " + (res.error || t("errorGeneric")));
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 async function rejectCancel(id) {
@@ -5912,7 +5912,7 @@ async function rejectCancel(id) {
     const res = await api("/api/cancel-reject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: id }) });
     if (res.ok) { toast("✕ " + t("cancelRejected")); showCancelRequests(); checkCancelRequests(); }
     else toast("❌ " + (res.error || t("errorGeneric")));
-  } catch (e) { toast(e.message); }
+  } catch (e) { toast(terr(e.message)); }
 }
 
 let cancelPollInterval = null;
