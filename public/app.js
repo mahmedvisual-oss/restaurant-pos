@@ -576,7 +576,7 @@ async function loadMenuInvSelect() {
     const sel = document.getElementById("mi-inv-select");
     if (!sel) return;
     _menuInvCache = inv;
-    sel.innerHTML = `<option value="">-- ${t("chooseInv") || "اختر المادة"} --</option>` + inv.map(i => `<option value="${i.id}">${escapeHtml(i.item_name)}</option>`).join("");
+    sel.innerHTML = `<option value="">-- ${t("selectItem")} --</option>` + inv.map(i => `<option value="${i.id}">${escapeHtml(i.item_name)}</option>`).join("");
   } catch (e) { /* تجاهل */ }
 }
 
@@ -592,7 +592,7 @@ async function loadMenuInvLinks(menuId) {
       <div class="inv-link-row">
         <span style="flex:1">${escapeHtml(l.item_name)} <small style="color:var(--muted)">(${l.qty_per} ${l.unit || ""})</small></span>
         <button class="btn btn-sm btn-danger" onclick="removeMenuInvLink(${menuId},${l.inventory_id})">🗑️</button>
-      </div>`).join("") : `<span style="color:var(--muted);font-size:11px">${t("noLinks") || "لا روابط"}</span>`;
+      </div>`).join("") : `<span style="color:var(--muted);font-size:11px">${t("noLinks")}</span>`;
   } catch (e) { box.innerHTML = `<span style="color:#ef4444;font-size:11px">${e.message}</span>`; }
 }
 
@@ -601,7 +601,7 @@ async function addMenuInvLink() {
   const sel = document.getElementById("mi-inv-select");
   const qty = parseFloat(document.getElementById("mi-inv-qty").value) || 1;
   if (!menuId) return;
-  if (!sel.value) { toast("⚠️ " + (t("chooseInv") || "اختر المادة")); return; }
+  if (!sel.value) { toast("⚠️ " + (t("selectItem"))); return; }
   try {
     await api("/api/menu-inventory/" + menuId, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ inventory_id: parseInt(sel.value), qty_per: qty }) });
     await loadMenuInvLinks(menuId);
@@ -928,7 +928,7 @@ function confirmModifiers() {
     const required = parseInt(g.dataset.required);
     const checked = g.querySelectorAll("input:checked");
     if (required && checked.length === 0) {
-      toast("⚠️ يرجى اختيار " + g.previousElementSibling.textContent.replace(" *", ""));
+      toast("⚠️ " + t("selectModifier") + " " + g.previousElementSibling.textContent.replace(" *", ""));
       return;
     }
     checked.forEach(inp => {
@@ -1251,7 +1251,7 @@ function renderFloorPlan() {
       const row = Math.floor(idx / z.cols);
       const px = (tb.pos_x != null && tb.pos_x > 0) ? tb.pos_x : z.startOffset.x + col * z.gapX;
       const py = (tb.pos_y != null && tb.pos_y > 0) ? tb.pos_y : z.startOffset.y + row * z.gapY;
-      const orderInfo = tb.active && tb.orders ? `<span class="ft-order">${tb.orders} طلب</span>` : "";
+      const orderInfo = tb.active && tb.orders ? `<span class="ft-order">${tb.orders} ${t("orders")}</span>` : "";
       const timeInfo = tb.active ? `<span class="ft-time">⏱ ${getElapsedTime(tb.started_at)}</span>` : "";
       const rsvInfo = rsv ? `<span class="ft-reserved">📅 ${t("reserved")}</span>` : "";
       fp.innerHTML += `<div class="floor-table ${cls} ${tb.shape || 'round'}" 
@@ -1377,7 +1377,7 @@ async function saveFloorPositions() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ positions })
     });
-    toast("✅ تم حفظ مواقع الطاولات");
+    toast("✅ " + t("saveTablePositions"));
     for (const p of positions) {
       for (const [num, tb] of Object.entries(tableData)) {
         if (tb.id === p.id) { tb.pos_x = p.pos_x; tb.pos_y = p.pos_y; }
@@ -5342,7 +5342,7 @@ async function addTableSection() {
   };
 
   if (!body.section_id || !body.name) {
-    alert("أدخل معرف واسم القسم");
+    alert(t("enterSectionIdName"));
     return;
   }
 
@@ -5366,7 +5366,7 @@ async function addTableSection() {
 
 async function deleteTableSection(id) {
 
-  if (!confirm("حذف القسم؟")) return;
+  if (!confirm(t("deleteSectionConfirm"))) return;
 
   await api("/api/table-sections/" + id,{
     method:"DELETE"
@@ -5778,9 +5778,9 @@ async function init() {
 
 // ===== طلب إلغاء طلب =====
 function showCancelOrderModal() {
-  if (!user) { toast("⚠️ سجل الدخول أولاً"); return; }
-  if (!selectedTable) { toast("⚠️ اختر طاولة أولاً"); return; }
-  if (!existingOrderId) { toast("⚠️ لا يوجد طلب محفوظ لهذه الطاولة"); return; }
+  if (!user) { toast("⚠️ " + t("loginFirst")); return; }
+  if (!selectedTable) { toast("⚠️ " + t("chooseTableFirst")); return; }
+  if (!existingOrderId) { toast("⚠️ " + t("noSavedOrder")); return; }
   document.getElementById("cancel-reason-custom").style.display = "none";
   openModal("cancel-order-modal");
 }
@@ -5803,10 +5803,10 @@ async function submitCancelRequest() {
       body: JSON.stringify({ table_id: selectedTable, order_id: existingOrderId, reason })
     });
     if (res.ok) {
-      toast("📩 تم إرسال طلب الإلغاء — بانتظار موافقة المدير");
+      toast("📩 " + t("cancelRequestSent"));
       closeModal("cancel-order-modal");
     } else {
-      toast("❌ " + (res.error || "خطأ"));
+      toast("❌ " + (res.error || t("errorGeneric")));
     }
   } catch (e) { toast(e.message); }
 }
@@ -5817,7 +5817,7 @@ async function showCancelRequests() {
     const requests = await api("/api/cancel-requests");
     const body = document.getElementById("cancel-requests-body");
     if (!requests.length) {
-      body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">لا توجد طلبات معلقة</div>';
+      body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">${t("noPendingRequests")}</div>';
     } else {
       body.innerHTML = requests.map(r => {
         const items = r.o_items ? JSON.parse(r.o_items) : [];
@@ -5825,17 +5825,17 @@ async function showCancelRequests() {
         const sensitive = (r.o_status === "sent" || r.o_status === "ready" || r.o_status === "completed");
         return `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <b>طلب #${r.order_id}</b>
+            <b>${t("orderNumber")} #${r.order_id}</b>
             <span style="color:var(--muted);font-size:12px">${r.created_at}</span>
           </div>
-          <div style="font-size:13px;margin-bottom:4px">🪑 الطاولة: <b>${r.table_num}</b> — المبلغ: <b>${fmtCur(r.o_total || 0)}</b></div>
-          <div style="font-size:13px;margin-bottom:4px">👤 طلب: <b>${r.requested_by}</b></div>
-          <div style="font-size:13px;margin-bottom:8px">📝 السبب: <b>${r.reason}</b></div>
-          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">الأصناف: ${itemsList || '—'}</div>
-          ${sensitive ? `<div style="font-size:11px;color:var(--danger);background:rgba(239,68,68,.1);border-radius:6px;padding:4px 8px;margin-bottom:8px">🔒 حماية الإلغاء: يتطلب PIN المدير (الطلب بدرجة جاهز/مدفوع)</div>` : ""}
+          <div style="font-size:13px;margin-bottom:4px">🪑 ${t("tableLabel")}: <b>${r.table_num}</b> — ${t("amountLabel")}: <b>${fmtCur(r.o_total || 0)}</b></div>
+          <div style="font-size:13px;margin-bottom:4px">👤 ${t("requestedBy")}: <b>${r.requested_by}</b></div>
+          <div style="font-size:13px;margin-bottom:8px">📝 ${t("reasonLabel")}: <b>${r.reason}</b></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">${t("itemsLabel")}: ${itemsList || '—'}</div>
+          ${sensitive ? `<div style="font-size:11px;color:var(--danger);background:rgba(239,68,68,.1);border-radius:6px;padding:4px 8px;margin-bottom:8px">${t("cancelProtection")}</div>` : ""}
           <div style="display:flex;gap:8px">
-            <button class="btn btn-success btn-sm" onclick="approveCancel(${r.id},${sensitive?1:0},${r.o_status === "completed" ? 1 : 0})">✅ موافقة</button>
-            <button class="btn btn-danger btn-sm" onclick="rejectCancel(${r.id})">✕ رفض</button>
+            <button class="btn btn-success btn-sm" onclick="approveCancel(${r.id},${sensitive?1:0},${r.o_status === "completed" ? 1 : 0})">✅ ${t("approve")}</button>
+            <button class="btn btn-danger btn-sm" onclick="rejectCancel(${r.id})">✕ ${t("reject")}</button>
           </div>
         </div>`;
       }).join("");
@@ -5851,7 +5851,7 @@ async function approveCancel(id, sensitive, isPaid) {
   if (isPaid) {
     pendingRefund = { request_id: id, sensitive, refund: null };
     const info = document.getElementById("refund-info");
-    if (info) info.innerHTML = "هذه الفاتورة مدفوعة — سيسجّل النظام <b>سند مردودات</b> مرقّماً عند الإلغاء. حدّد طريقة رد المبلغ للعميل:";
+    if (info) info.innerHTML = t("paidRefundInfo");
     document.getElementById("refund-method").value = "نقدي";
     document.getElementById("refund-ref").value = "";
     toggleRefundRef();
@@ -5865,7 +5865,7 @@ function confirmRefundModal() {
   if (!pendingRefund) return;
   const method = document.getElementById("refund-method").value;
   const ref = (document.getElementById("refund-ref").value || "").trim();
-  if (TRANSFER_METHODS.has(method) && !ref) { toast("⚠️ اكتب رقم مرجع التحويل للرد"); document.getElementById("refund-ref").focus(); return; }
+  if (TRANSFER_METHODS.has(method) && !ref) { toast("⚠️ " + t("refundTransferRef")); document.getElementById("refund-ref").focus(); return; }
   const { request_id, sensitive } = pendingRefund;
   pendingRefund = null;
   closeModal("modal-refund");
@@ -5893,15 +5893,15 @@ async function doApproveCancel(id, refund) {
       if (res.refund_receipt) printRefundReceipt(res.refund_receipt);
       showCancelRequests(); loadTables(); checkCancelRequests();
     }
-    else toast("❌ " + (res.error || "خطأ"));
+    else toast("❌ " + (res.error || t("errorGeneric")));
   } catch (e) { toast(e.message); }
 }
 
 async function rejectCancel(id) {
   try {
     const res = await api("/api/cancel-reject", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ request_id: id }) });
-    if (res.ok) { toast("✕ تم رفض طلب الإلغاء"); showCancelRequests(); checkCancelRequests(); }
-    else toast("❌ " + (res.error || "خطأ"));
+    if (res.ok) { toast("✕ " + t("cancelRejected")); showCancelRequests(); checkCancelRequests(); }
+    else toast("❌ " + (res.error || t("errorGeneric")));
   } catch (e) { toast(e.message); }
 }
 
