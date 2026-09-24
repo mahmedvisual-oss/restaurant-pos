@@ -18,7 +18,7 @@
   </div>
   <div class="top-actions">
     <div class="lang-dropdown" id="size-dropdown">
-      <button class="btn btn-secondary" onclick="toggleSizeDropdown()" id="btn-size" title="حجم الخط">🔍 <span id="size-label">100%</span></button>
+      <button class="btn btn-secondary" onclick="toggleSizeDropdown()" id="btn-size" data-i18n="fontSize" title="حجم الخط">🔍 <span id="size-label">100%</span></button>
       <div class="lang-dropdown-menu" id="size-menu">
         <button class="lang-option" onclick="setSize('sm'); closeSizeDropdown();">100%</button>
         <button class="lang-option" onclick="setSize('md'); closeSizeDropdown();">115%</button>
@@ -26,7 +26,7 @@
         <button class="lang-option" onclick="setSize('xl'); closeSizeDropdown();">140%</button>
       </div>
     </div>
-    <button class="btn btn-secondary" id="btn-theme" onclick="toggleTheme()" title="الوضع الليلي/النهاري">🌙</button>
+    <button class="btn btn-secondary" id="btn-theme" onclick="toggleTheme()" data-i18n="theme" title="الوضع الليلي/النهاري">🌙</button>
     <div class="lang-dropdown" id="lang-dropdown">
       <button class="btn btn-secondary" onclick="toggleLangDropdown()" id="btn-lang" title="اللغة">🇮🇩</button>
       <div class="lang-dropdown-menu" id="lang-menu">
@@ -205,10 +205,10 @@
         <datalist id="credit-customers"></datalist>
       </div>
       <div id="transfer-row" style="display:none;margin-top:8px">
-        <div class="pay-label">🏦 رقم مرجع التحويل <span style="color:var(--danger)">*</span>:</div>
-        <input id="transfer-ref" type="text" class="pay-input" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
-        <div class="pay-label">👤 اسم المحوّل:</div>
-        <input id="transfer-name" type="text" class="pay-input" placeholder="اختياري" maxlength="50" style="text-transform:none">
+        <div class="pay-label"><span data-i18n="transferRefLabel">🏦 رقم مرجع التحويل</span> <span style="color:var(--danger)">*</span>:</div>
+        <input id="transfer-ref" type="text" class="pay-input" data-i18n="exampleTransferRef" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+        <div class="pay-label"><span data-i18n="transferNameLabel">👤 اسم المحوّل:</span></div>
+        <input id="transfer-name" type="text" class="pay-input" data-i18n="optional" placeholder="اختياري" maxlength="50" style="text-transform:none">
       </div>
       <div class="pay-label" data-i18n="paidAmount">المبلغ المدفوع:</div>
       <input id="paid" type="number" class="pay-input" value="0">
@@ -835,12 +835,12 @@
 <div id="modifier-modal" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>⚙️ تعديلات الصنف</span>
+      <span data-i18n="modifierTitle">⚙️ تعديلات الصنف</span>
       <span class="modal-x" onclick="closeModal('modifier-modal')">✕</span>
     </div>
     <div class="modal-body" id="modifier-body"></div>
     <div class="modal-actions">
-      <button class="btn btn-success" onclick="confirmModifiers()">✓ إضافة</button>
+      <button class="btn btn-success" onclick="confirmModifiers()">✓ <span data-i18n="addModifier">إضافة</span></button>
       <button class="btn" onclick="closeModal('modifier-modal')">✕ إلغاء</button>
     </div>
   </div>
@@ -850,7 +850,7 @@
 <div id="transfer-modal" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>🔄 نقل الطلب</span>
+      <span data-i18n="transferBtn">🔄 نقل الطلب</span>
       <span class="modal-x" onclick="closeModal('transfer-modal')">✕</span>
     </div>
     <div class="modal-body" id="transfer-body"></div>
@@ -864,12 +864,12 @@
 <div id="split-modal" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>👥 تقسيم الفاتورة</span>
+      <span data-i18n="splitInvoice">👥 تقسيم الفاتورة</span>
       <span class="modal-x" onclick="closeModal('split-modal')">✕</span>
     </div>
     <div class="modal-body" id="split-body"></div>
     <div class="modal-actions">
-      <button class="btn btn-success" id="split-confirm" onclick="confirmSplit()" style="display:none">✅ تأكيد التقسيم</button>
+      <button class="btn btn-success" id="split-confirm" onclick="confirmSplit()" style="display:none">✅ <span data-i18n="confirmSplit">تأكيد التقسيم</span></button>
       <button class="btn" onclick="closeModal('split-modal')">✕ إغلاق</button>
     </div>
   </div>
@@ -906,7 +906,7 @@
 <div id="cancel-requests-modal" class="modal">
   <div class="modal-content" style="width:550px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>🔔 طلبات الإلغاء المعلقة</span>
+      <span data-i18n="cancelRequests">🔔 طلبات الإلغاء المعلقة</span>
       <span class="modal-x" onclick="closeModal('cancel-requests-modal')">✕</span>
     </div>
     <div class="modal-body" id="cancel-requests-body"></div>
@@ -917,7 +917,7 @@
 </div>
 
 <!-- زر إشعارات المدير -->
-<button id="btn-cancel-notify" class="btn btn-danger" style="position:fixed;top:60px;left:16px;z-index:999;display:none;border-radius:50%;width:44px;height:44px;font-size:18px;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.3)" onclick="showCancelRequests()" title="طلبات الإلغاء المعلقة">
+<button id="btn-cancel-notify" class="btn btn-danger" style="position:fixed;top:60px;left:16px;z-index:999;display:none;border-radius:50%;width:44px;height:44px;font-size:18px;padding:0;box-shadow:0 2px 8px rgba(0,0,0,.3)" onclick="showCancelRequests()" data-i18n="cancelNotify" title="طلبات الإلغاء المعلقة">
   🔔 <span id="cancel-notify-badge" style="position:absolute;top:-2px;right:-2px;background:#fbbf24;color:#000;font-size:11px;font-weight:700;border-radius:50%;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg)">0</span>
 </button>
 
@@ -925,27 +925,27 @@
 <div id="modal-refund" class="modal">
   <div class="modal-content" style="width:420px;max-width:94vw">
     <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center">
-      <span>🧾 سند المردودات — إلغاء فاتورة مدفوعة</span>
+      <span data-i18n="refundTitle">🧾 سند المردودات — إلغاء فاتورة مدفوعة</span>
       <span class="modal-x" onclick="closeModal('modal-refund')">✕</span>
     </div>
     <div class="modal-body">
       <div id="refund-info" style="font-size:13px;color:var(--muted);margin-bottom:10px"></div>
-      <div class="pay-label">طريقة الرد:</div>
+      <div class="pay-label" data-i18n="refundMethodLabel">طريقة الرد:</div>
       <select id="refund-method" class="pay-input" onchange="toggleRefundRef()" style="margin-bottom:10px">
-        <option value="نقدي">💵 نقدي</option>
-        <option value="BCA">🏦 تحويل BCA</option>
-        <option value="مانديري">💳 تحويل مانديري</option>
-        <option value="كيروس">🧾 كيروس</option>
+        <option value="نقدي" data-i18n="refundMethodCash">💵 نقدي</option>
+        <option value="BCA" data-i18n="refundMethodBCA">🏦 تحويل BCA</option>
+        <option value="مانديري" data-i18n="refundMethodMandiri">💳 تحويل مانديري</option>
+        <option value="كيروس" data-i18n="refundMethodQris">🧾 كيروس</option>
       </select>
       <div id="refund-ref-row" style="display:none;margin-bottom:10px">
-        <div class="pay-label">رقم مرجع التحويل <span style="color:var(--danger)">*</span>:</div>
-        <input id="refund-ref" type="text" class="pay-input" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+        <div class="pay-label"><span data-i18n="transferRefLabel">رقم مرجع التحويل</span> <span style="color:var(--danger)">*</span>:</div>
+        <input id="refund-ref" type="text" class="pay-input" data-i18n="exampleTransferRef" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
       </div>
-      <div class="pay-label">صرف المبلغ: إرجاع نقداً للعميل / إعادة تحويل للمحوّل</div>
+      <div class="pay-label" data-i18n="refundPayout">صرف المبلغ: إرجاع نقداً للعميل / إعادة تحويل للمحوّل</div>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modal-refund')" data-i18n="cancel">✕ إلغاء</button>
-      <button class="btn btn-success" onclick="confirmRefundModal()">✅ تأكيد الرد وإنشاء السند</button>
+      <button class="btn btn-success" onclick="confirmRefundModal()">✅ <span data-i18n="confirmRefund">تأكيد الرد وإنشاء السند</span></button>
     </div>
   </div>
 </div>
@@ -977,7 +977,7 @@
       </select>
       <div id="dv-ref-row" style="display:none;margin-bottom:10px">
         <div class="pay-label"><span data-i18n="dvRef">رقم مرجع التحويل</span> <span style="color:var(--danger)">*</span>:</div>
-        <input id="dv-ref" type="text" class="pay-input" data-i18n="dvRefPh" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
+        <input id="dv-ref" type="text" class="pay-input" data-i18n="dvRefPh" data-i18n="exampleTransferRef" placeholder="مثال: 1234567890" maxlength="40" style="text-transform:none">
       </div>
     </div>
     <div class="modal-actions">
@@ -989,17 +989,17 @@
 
 <!-- شريط اختصارات لوحة المفاتيح -->
 <div class="shortcut-bar" id="shortcut-bar" style="display:none">
-  <span class="shortcut-key">F1</span><span class="shortcut-label">التقارير</span>
-  <span class="shortcut-key">F2</span><span class="shortcut-label">القائمة</span>
-  <span class="shortcut-key">F3</span><span class="shortcut-label">بحث</span>
-  <span class="shortcut-key">F4</span><span class="shortcut-label">دفع</span>
-  <span class="shortcut-key">F5</span><span class="shortcut-label">حفظ</span>
-  <span class="shortcut-key">F6</span><span class="shortcut-label">المطبخ</span>
-  <span class="shortcut-key">F7</span><span class="shortcut-label">حذف</span>
-  <span class="shortcut-key">F8</span><span class="shortcut-label">نقل</span>
-  <span class="shortcut-key">F9</span><span class="shortcut-label">تقسيم</span>
-  <span class="shortcut-key">F11</span><span class="shortcut-label">ثيم</span>
-  <span class="shortcut-key">Esc</span><span class="shortcut-label">إغلاق</span>
+  <span class="shortcut-key">F1</span><span class="shortcut-label" data-i18n="shortcutReports">التقارير</span>
+  <span class="shortcut-key">F2</span><span class="shortcut-label" data-i18n="shortcutMenu">القائمة</span>
+  <span class="shortcut-key">F3</span><span class="shortcut-label" data-i18n="shortcutSearch">بحث</span>
+  <span class="shortcut-key">F4</span><span class="shortcut-label" data-i18n="shortcutPay">دفع</span>
+  <span class="shortcut-key">F5</span><span class="shortcut-label" data-i18n="shortcutSave">حفظ</span>
+  <span class="shortcut-key">F6</span><span class="shortcut-label" data-i18n="shortcutKitchen">المطبخ</span>
+  <span class="shortcut-key">F7</span><span class="shortcut-label" data-i18n="shortcutDelete">حذف</span>
+  <span class="shortcut-key">F8</span><span class="shortcut-label" data-i18n="shortcutTransfer">نقل</span>
+  <span class="shortcut-key">F9</span><span class="shortcut-label" data-i18n="shortcutSplit">تقسيم</span>
+  <span class="shortcut-key">F11</span><span class="shortcut-label" data-i18n="shortcutTheme">ثيم</span>
+  <span class="shortcut-key">Esc</span><span class="shortcut-label" data-i18n="shortcutClose">إغلاق</span>
 </div>
 
 <!-- شريط تنقل الموبايل -->
@@ -1011,7 +1011,7 @@
   <button class="mobile-nav-btn" onclick="saveOrder()">💾<span data-i18n="save">حفظ</span></button>
   <button class="mobile-nav-btn" onclick="sendToKitchen()">🍳<span data-i18n="sendKitchen">مطبخ</span></button>
   <button class="mobile-nav-btn" onclick="showReservationManager()">📅<span data-i18n="reservationTitle">الحجوزات</span></button>
-  <button class="mobile-nav-btn" id="mobile-mgr-btn" style="display:none" onclick="showMobileMgrMenu()">🛠️<span>المدير</span></button>
+  <button class="mobile-nav-btn" id="mobile-mgr-btn" style="display:none" onclick="showMobileMgrMenu()">🛠️<span data-i18n="manager">المدير</span></button>
 </div>
 
 <!-- قائمة المدير للموبايل -->
