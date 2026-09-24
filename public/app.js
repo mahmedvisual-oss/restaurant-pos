@@ -61,7 +61,30 @@ function tableSectionLabel(tb) {
   const raw = tb.section_name ?? tb.sectionName ?? tb.section ?? tb.area_name ?? tb.area ?? tb.group ?? tb.room ?? "";
   if (!raw) return "";
   const key = String(raw).trim().toLowerCase();
-  return TABLE_SECTION_NAMES[key] || TABLE_SECTION_NAMES[String(raw).trim()] || String(raw).trim();
+  const canonical = {
+    family: "families", families: "families", "family-room": "families", "family_room": "families",
+    عائلات: "families", العائلات: "families",
+    vip: "vip",
+    hall: "hall", main: "hall", dining: "hall", restaurant: "hall", الصالة: "hall",
+    takeaway: "takeaway", "take-away": "takeaway", "take_away": "takeaway", تيك_أواي: "takeaway", "طلبات خارجية": "takeaway"
+  }[key] || TABLE_SECTION_NAMES[key] ? ({
+    "العائلات":"families","عائلات":"families","families":"families","family":"families",
+    "vip":"vip","الصالة":"hall","hall":"hall","main":"hall","dining":"hall","restaurant":"hall",
+    "تيك أواي":"takeaway","تيك_أواي":"takeaway","takeaway":"takeaway","take-away":"takeaway","take_away":"takeaway","طلبات خارجية":"takeaway"
+  }[key] || key) : key;
+  return t(canonical);
+}
+
+const CATEGORY_I18N = {
+  "مشروبات": "drinksCategory",
+  "أطباق رئيسية": "mainDishesCategory",
+  "مقبلات": "appetizersCategory",
+  "حلويات": "dessertsCategory"
+};
+
+function categoryLabel(category) {
+  const key = CATEGORY_I18N[String(category || "").trim()];
+  return key ? t(key) : String(category || "");
 }
 
 function applyUiPrefs() {
@@ -759,7 +782,7 @@ function renderCats() {
   cont.innerHTML = "";
   for (const c of cats) {
     const isAll = c === "__ALL__";
-    const label = isAll ? t("all") : c;
+    const label = isAll ? t("all") : categoryLabel(c);
     const color = isAll ? "#6366f1" : (CAT_COLORS[c] || "#6366f1");
     cont.innerHTML += `<button class="cat-btn ${c === currentCategory ? "active" : ""}" onclick="selectCat('${c}')" style="${c === currentCategory ? "background:" + color + ";border-color:" + color : ""}">${label}</button>`;
   }
@@ -796,7 +819,7 @@ function renderMenu() {
       </button>`).join("");
     cont.innerHTML += `<div class="acc-group ${forcedOpen ? "open" : ""}" data-cat="${escapeHtml(cat)}">
       <button class="acc-head" style="--mcat:${color}" data-action="toggle-acc">
-        <span class="acc-cat">${escapeHtml(cat)}</span>
+        <span class="acc-cat">${escapeHtml(categoryLabel(cat))}</span>
         <span class="acc-count">${groups[cat].length}</span>
         <span class="acc-chev">▾</span>
       </button>
