@@ -449,7 +449,7 @@ async function _loadMenuEditor() {
 function _renderCatTabs() {
   const bar = document.getElementById("cat-tabs-bar");
   const total = _menuItemsCache.length;
-  let html = `<button class="btn btn-sm" onclick="resetMenuToDefault()" title="استبدال القائمة بقائمة مؤقتة جاهزة">♻️ قائمة مؤقتة</button>`;
+  let html = `<button class="btn btn-sm" onclick="resetMenuToDefault()" title="${t("temporaryMenuTitle")}">${t("temporaryMenu")}</button>`;
   html += `<button class="btn btn-sm ${_menuCatFilter==='all'?'btn-success':''}" onclick="_setMenuCatFilter('all')">${t("all")} (${total})</button>`;
   _menuCatsCache.forEach(c => {
     const cnt = _menuItemsCache.filter(it => it.category === c).length;
@@ -459,10 +459,10 @@ function _renderCatTabs() {
 }
 
 async function resetMenuToDefault() {
-  if (!confirm("سيتم تعطيل الأصناف الحالية وإضافة قائمة مؤقتة جاهزة (20 صنف). هل تريد المتابعة؟")) return;
+  if (!confirm(t("temporaryMenuConfirm"))) return;
   try {
     const r = await api("/api/menu/reset-default", { method: "POST", body: "{}" });
-    toast(`✅ تم تفعيل القائمة المؤقتة (${r.count} صنف)`);
+    toast(`✅ ${t("temporaryMenuActivated")} (${r.count})`);
     await _loadMenuEditor();
   } catch (e) { toast("❌ " + e.message); }
 }
@@ -637,46 +637,46 @@ function showAddCategoryInline() {
   document.getElementById("cat-inline-input").focus();
 }
 function showRenameCategoryInline() {
-  if (!_menuCatsCache.length) { toast("⚠️ لا أقسام"); return; }
+  if (!_menuCatsCache.length) { toast("⚠️ " + t("noCategories")); return; }
   _catInlineMode = "rename";
   document.getElementById("cat-inline-input").value = "";
-  document.getElementById("cat-inline-input").placeholder = "اختر قسم ثم اكتب الاسم الجديد (مثال: OldName=NewName)";
+  document.getElementById("cat-inline-input").placeholder = t("renameCategoryPlaceholder");
   document.getElementById("cat-inline-form").style.display = "";
   document.getElementById("cat-inline-input").focus();
 }
 function showDeleteCategoryInline() {
-  if (!_menuCatsCache.length) { toast("⚠️ لا أقسام"); return; }
+  if (!_menuCatsCache.length) { toast("⚠️ " + t("noCategories")); return; }
   _catInlineMode = "delete";
   document.getElementById("cat-inline-input").value = "";
-  document.getElementById("cat-inline-input").placeholder = "اكتب اسم القسم للحذف";
+  document.getElementById("cat-inline-input").placeholder = t("deleteCategoryPlaceholder");
   document.getElementById("cat-inline-form").style.display = "";
   document.getElementById("cat-inline-input").focus();
 }
 
 async function confirmCatInline() {
   const val = document.getElementById("cat-inline-input").value.trim();
-  if (!val) { toast("⚠️ اكتب الاسم"); return; }
+  if (!val) { toast("⚠️ " + t("toast.enterName")); return; }
   try {
     if (_catInlineMode === "add") {
-      if (_menuCatsCache.includes(val)) { toast("⚠️ القسم موجود"); return; }
+      if (_menuCatsCache.includes(val)) { toast("⚠️ " + t("categoryExists")); return; }
       await api("/api/menu/item", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({emoji:"📂",name:"—",category:val,price:0}) });
-      toast("✅ تمت إضافة القسم");
+      toast("✅ " + t("categoryAdded"));
     } else if (_catInlineMode === "delete") {
       const items = _menuItemsCache.filter(it => it.category === val);
       for (const it of items) {
         await api("/api/menu/item/" + it.id, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({category:""}) });
       }
-      toast("✅ تم حذف القسم");
+      toast("✅ " + t("categoryDeleted"));
     } else if (_catInlineMode === "rename") {
       const parts = val.split("=");
-      if (parts.length !== 2) { toast("⚠️ الصيغة: OldName=NewName"); return; }
+      if (parts.length !== 2) { toast("⚠️ " + t("categoryRenameFormat")); return; }
       const [oldN, newN] = parts.map(s => s.trim());
-      if (!oldN || !newN) { toast("⚠️ اكتب الاسمين"); return; }
+      if (!oldN || !newN) { toast("⚠️ " + t("enterBothNames")); return; }
       const items = _menuItemsCache.filter(it => it.category === oldN);
       for (const it of items) {
         await api("/api/menu/item/" + it.id, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({emoji:it.emoji,name:it.name,category:newN,price:it.price}) });
       }
-      toast("✅ تم التعديل إلى: " + newN);
+      toast("✅ " + t("categoryRenamedTo") + " " + newN);
     }
     document.getElementById("cat-inline-form").style.display = "none";
     await _loadMenuEditor();
@@ -703,7 +703,7 @@ function renameCategory(oldName) {
 
 async function confirmRenameCategory() {
   const newName = (document.getElementById("rename-new-name").value || "").trim();
-  if (!newName) { toast("⚠️ اكتب الاسم الجديد"); return; }
+  if (!newName) { toast("⚠️ " + t("toast.enterName")); return; }
   if (newName === _renameCatOld) { closeModal("modal-rename-cat"); return; }
   try {
     const items = await api("/api/menu/all");
@@ -712,7 +712,7 @@ async function confirmRenameCategory() {
       await api("/api/menu/item/" + it.id, { method: "PUT", headers: {"Content-Type":"application/json"}, body: JSON.stringify({emoji:it.emoji,name:it.name,category:newName,price:it.price}) });
     }
     closeModal("modal-rename-cat");
-    toast("✅ تم تعديل القسم إلى: " + newName);
+    toast("✅ " + t("categoryRenamedTo") + " " + newName);
     await _loadMenuEditor();
     await reloadMenu();
   } catch (e) { toast(e.message); }
@@ -1113,7 +1113,7 @@ function renderTables() {
       const capacity = tb.capacity || 4;
       const orderInfo = tb.active && tb.order_total ? `<span class="table-order-total">${fmtCur(tb.order_total)}</span>` : "";
       const timeInfo = tb.active && tb.started_at ? `<span class="table-time">${getElapsedTime(tb.started_at)}</span>` : "";
-      block += `<button class="table-btn ${cls}" onclick="selectTable(${tb.id})" title="طاولة ${i} - ${capacity} أشخاص">
+      block += `<button class="table-btn ${cls}" onclick="selectTable(${tb.id})" title="${t("tablePeople").replace("{table}", i).replace("{capacity}", capacity)}">
         <span class="table-num">${i}</span>
         <span class="table-capacity">👥 ${capacity}</span>
         <span class="table-status"><span class="status-dot">${dot}</span>${status}</span>
@@ -1185,10 +1185,10 @@ function renderFloorPlan() {
 
   /* ── أزرار تعديل المواقع ── */
   if (isMgr) {
-    fp.innerHTML += `<div class="floor-edit-hint">${floorEdit ? "💡 اسحب الطاولات لتغيير مواقعها • اضغط ⚡ لحفظ" : "💡 اضغط ✏️ لتعديل مواقع الطاولات"}</div>`;
-    fp.innerHTML += `<button class="btn btn-sm" style="position:absolute;top:36px;right:8px;z-index:30;font-size:11px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.15)" onclick="toggleFloorEdit()">${floorEdit ? "⚡ حفظ" : "✏️ تعديل"}</button>`;
+    fp.innerHTML += `<div class="floor-edit-hint">${floorEdit ? "💡 " + t("floorDragHint") : "💡 " + t("floorEditHint")}</div>`;
+    fp.innerHTML += `<button class="btn btn-sm" style="position:absolute;top:36px;right:8px;z-index:30;font-size:11px;background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.15)" onclick="toggleFloorEdit()">${floorEdit ? "⚡ " + t("save") : "✏️ " + t("edit")}</button>`;
     if (!floorEdit) {
-      fp.innerHTML += `<button class="btn btn-sm" style="position:absolute;top:36px;right:75px;z-index:30;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)" onclick="autoLayoutFloor()">📐 ترتيب</button>`;
+      fp.innerHTML += `<button class="btn btn-sm" style="position:absolute;top:36px;right:75px;z-index:30;font-size:11px;background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3)" onclick="autoLayoutFloor()">📐 ${t("arrange")}</button>`;
     }
   }
 
@@ -1308,7 +1308,7 @@ function autoLayoutFloor() {
         if (tb.id === p.id) { tb.pos_x = p.pos_x; tb.pos_y = p.pos_y; }
       }
     }
-    toast("📐 تم ترتيب الطاولات");
+    toast("📐 " + t("toast.arranged"));
     renderFloorPlan();
   }).catch(e => toast(e.message));
 }
@@ -1389,10 +1389,10 @@ async function saveFloorPositions() {
 }
 
 async function deleteFloorTable(id) {
-  if (!confirm("حذف هذه الطاولة؟")) return;
+  if (!confirm(t("deleteTableConfirm"))) return;
   try {
     await api("/api/tables/" + id, { method: "DELETE" });
-    toast("✅ تم الحذف");
+    toast("✅ " + t("tableDeleted"));
     await loadTables();
     renderFloorPlan();
   } catch (e) { toast(e.message); }
@@ -1806,7 +1806,7 @@ async function saveOrder() {
     });
     existingOrderId = res.order_id;
     if (splitInvoices) { splitInvoices[splitCurrent].existingOrderId = res.order_id; renderInvoiceTabs(); }
-    toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
+    toast("💾 " + t("toast.saved") + " #" + res.order_id + " — " + t("table") + " " + (tableData[selectedTable] ? tableData[selectedTable].num : selectedTable) + (splitInvoices ? ` (${t("invoice")} ${splitCurrent + 1})` : ""));
     loadTables();
   } catch (e) { toast(e.message); }
 }
@@ -1884,14 +1884,14 @@ function calcChange() {
   const el = document.getElementById("change");
   if (change >= 0) {
     if (payMethod === "آجل" && change > 0) {
-      el.textContent = "⚠️ دفع زائد: يُسجَّل آجل بقيمة الإجمالي فقط (" + fmtCur(total) + ") والفرق " + fmtCur(change) + " يُردّ للعميل";
+      el.textContent = t("overpaymentCredit").replace("{total}", fmtCur(total)).replace("{change}", fmtCur(change));
       el.style.color = "#ef4444";
     } else {
       el.textContent = t("remaining") + ": " + fmtCur(change);
       el.style.color = "#10b981";
     }
   } else if (payMethod === "آجل") {
-    el.textContent = "📝 آجل: يُدفع الآن " + fmtCur(paid) + " والمتبقي " + fmtCur(Math.abs(change)) + " على العميل";
+    el.textContent = "📝 " + t("creditPartial").replace("{paid}", fmtCur(paid)).replace("{remaining}", fmtCur(Math.abs(change)));
     el.style.color = "#f59e0b";
   } else {
     el.textContent = t("shortfall") + ": " + fmtCur(Math.abs(change));
@@ -1907,12 +1907,12 @@ async function confirmPayment() {
   if (paid < total && payMethod !== "آجل") { toast("⚠️ " + t("toast.insufficient")); return; }
   if (payMethod === "آجل") {
     const creditName = (document.getElementById("credit-name").value || "").trim();
-    if (!creditName) { toast("⚠️ اكتب اسم صاحب الآجل"); document.getElementById("credit-name").focus(); return; }
+    if (!creditName) { toast("⚠️ " + t("creditNameRequired")); document.getElementById("credit-name").focus(); return; }
   }
   let transferRef = null, transferName = null;
   if (TRANSFER_METHODS.has(payMethod)) {
     transferRef = (document.getElementById("transfer-ref").value || "").trim();
-    if (!transferRef) { toast("⚠️ اكتب رقم مرجع التحويل البنكي"); document.getElementById("transfer-ref").focus(); return; }
+    if (!transferRef) { toast("⚠️ " + t("transferRefRequired")); document.getElementById("transfer-ref").focus(); return; }
     transferName = (document.getElementById("transfer-name").value || "").trim() || null;
   }
   const guests = parseInt(document.getElementById("guests").value) || 1;
@@ -1924,7 +1924,7 @@ async function confirmPayment() {
       body: JSON.stringify({ table_id: selectedTable, items: cart, paid, discount: discount + promoDiscount, manual_discount: discount, promo_code: promoCode, payment_method: payMethod, guests, credit_name: creditName, credit_phone: (creditName && typeof window.customerDbByPhone === "function" && window.customerDbByPhone(creditName)) || "", transfer_ref: transferRef, transfer_name: transferName, order_id: existingOrderId || null, new_order: !!(splitInvoices && !existingOrderId) })
     });
     closeModal("pay-modal");
-    toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (فاتورة ${splitCurrent + 1})` : ""));
+    toast("✅ " + t("toast.paid") + " #" + res.order_id + " | " + t("toast.remaining") + ": " + fmtCur(res.change) + (splitInvoices ? ` (${t("invoice")} ${splitCurrent + 1})` : ""));
     printReceipt(res);
     if (splitInvoices) {
       /* إنهاء هذه الفاتورة: إفراغ عناصرها */
@@ -2037,7 +2037,7 @@ function printReceipt(o, existingWindow = null) {
         existingWindow.print();
       } catch (e) {
         console.error("PRINT ERROR:", e);
-        toast("⚠️ PRINT ERROR: " + (e && e.message ? e.message : String(e)));
+        toast("⚠️ " + t("printError").replace("{error}", e && e.message ? e.message : String(e)));
       }
     }, 100);
 
@@ -2051,7 +2051,7 @@ async function reprintInvoice(oid) {
   const printWindow = window.open("", "_blank", "width=420,height=700");
 
   if (!printWindow) {
-    toast("⚠️ اسمح بالنوافذ المنبثقة لإعادة الطباعة");
+    toast("⚠️ " + t("allowPopups"));
     return;
   }
 
@@ -5645,7 +5645,7 @@ function hiddenPrint(html) {
         frame.contentWindow.print();
       } catch (e) {
         console.error("HIDDEN PRINT ERROR:", e);
-        toast("⚠️ PRINT ERROR: " + (e && e.message ? e.message : String(e)));
+        toast("⚠️ " + t("printError").replace("{error}", e && e.message ? e.message : String(e)));
       }
 
       setTimeout(() => {
