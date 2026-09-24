@@ -693,6 +693,8 @@ const I18N = {
       tableAdded: "تمت إضافة الطاولة",
       tableUpdated: "تم تعديل الطاولة",
       tableDeleted: "تم حذف الطاولة",
+      enterName: "اكتب اسم القسم",
+      arranged: "تم ترتيب الطاولات"
     },
     err: {
       generic: "خطأ",
@@ -1521,6 +1523,8 @@ const I18N = {
       tableAdded: "Table added",
       tableUpdated: "Table updated",
       tableDeleted: "Table deleted",
+      enterName: "Enter category name",
+      arranged: "Tables arranged"
     },
     err: {
       generic: "Error",
@@ -2349,6 +2353,8 @@ const I18N = {
       tableAdded: "Meja ditambahkan",
       tableUpdated: "Meja diperbarui",
       tableDeleted: "Meja dihapus",
+      enterName: "Masukkan nama bagian",
+      arranged: "Meja berhasil diatur"
     },
     err: {
       generic: "Error",
