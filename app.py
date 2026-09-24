@@ -4514,7 +4514,7 @@ def _do_pay(u, data):
         else:
             c.execute("INSERT INTO orders (table_num, table_section, table_id, items, subtotal, tax, discount, total, paid, payment_method, employee, status, guests, date, credit_name, transfer_ref, transfer_name) "
                       "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (num, section, table_id, items_str, subtotal, tax, discount, paid, payment_method, u["name"],
+                      (num, section, table_id, items_str, subtotal, tax, discount, total, paid, payment_method, u["name"],
                        "completed", guests, now_str, credit_name, transfer_ref, transfer_name))
             oid = c.lastrowid
 
