@@ -1450,7 +1450,7 @@ function updateStats() {
 // ===== نقل الطلب =====
 function showTransferModal() {
   if (!selectedTable) {
-    toast("⚠ لا يوجد طاولة محددة");
+    toast("⚠ " + t("noSelectedTable"));
     return;
   }
 
@@ -1462,7 +1462,7 @@ function showTransferModal() {
 
   let html = `
     <div style="margin-bottom:12px">
-      نقل/دمج طلب الطاولة <b>${curLabel}</b> إلى:
+      ${t("transferMergeTitle")} <b>${curLabel}</b> ${t("to")}:
     </div>
   `;
 
@@ -1471,7 +1471,7 @@ function showTransferModal() {
   for (const [tid, tb] of Object.entries(tableData)) {
     if (parseInt(tid) === Number(selectedTable)) continue;
 
-    const section = tableSectionLabel(tb) || "بدون قسم";
+    const section = tableSectionLabel(tb) || t("noSection");
 
     if (!grouped[section]) grouped[section] = [];
 
@@ -1502,9 +1502,9 @@ function showTransferModal() {
               style="border-color:#f59e0b;background:#fff7ed"
             >
               <span>
-                طاولة ${tableLabel}
+                ${t("table")} ${tableLabel}
                 <small style="display:block;color:#b45309">
-                  🔗 دمج الطلب
+                  🔗 ${t("mergeOrder")}
                 </small>
               </span>
               <span style="font-size:11px">🔴</span>
@@ -1516,8 +1516,8 @@ function showTransferModal() {
               class="transfer-table-btn"
               onclick="transferOrder(${tid}, false)"
             >
-              <span>طاولة ${tableLabel}</span>
-              <span style="font-size:11px">🟢 نقل</span>
+              <span>${t("table")} ${tableLabel}</span>
+              <span style="font-size:11px">🟢 ${t("transfer")}</span>
             </button>
           `;
         }
@@ -1535,7 +1535,7 @@ async function transferOrder(toTable, merge = false) {
   const destination = Number(toTable);
 
   if (!fromTable || !destination) {
-    toast("⚠️ الطاولة غير صحيحة");
+    toast("⚠️ " + t("invalidTable"));
     return;
   }
 
@@ -1549,11 +1549,7 @@ async function transferOrder(toTable, merge = false) {
       : destination;
 
     const confirmed = confirm(
-      "دمج طلب الطاولة " + fromLabel +
-      " داخل طلب الطاولة " + toLabel +
-      "؟\n\n" +
-      "سيتم جمع الأصناف وعدد الأشخاص، " +
-      "وسيصبح طلب الطاولة المصدر مغلقاً."
+      t("mergeConfirm").replace("{from}", fromLabel).replace("{to}", toLabel) + "\n\n" + t("mergeDesc")
     );
 
     if (!confirmed) return;
@@ -1573,7 +1569,7 @@ async function transferOrder(toTable, merge = false) {
     });
 
     if (!res.ok) {
-      toast("❌ " + (res.error || "تعذر تنفيذ العملية"));
+      toast("❌ " + (res.error || t("operationFailed")));
       return;
     }
 
@@ -1582,9 +1578,9 @@ async function transferOrder(toTable, merge = false) {
       : destination;
 
     if (res.merged) {
-      toast("✅ تم دمج الطلبات في الطاولة " + lb);
+      toast("✅ " + t("mergeSuccess") + " " + lb);
     } else {
-      toast("✅ تم نقل الطلب إلى الطاولة " + lb);
+      toast("✅ " + t("transferSuccess") + " " + lb);
     }
 
     closeModal("transfer-modal");
@@ -1602,10 +1598,10 @@ async function transferOrder(toTable, merge = false) {
 
 // ===== تقسيم الفاتورة =====
 function showSplitModal() {
-  if (splitInvoices) { toast("⚠️ يوجد تقسيم جارٍ، أكمل فاتورة أولاً أو أنهِه"); return; }
-  if (!cart.length) { toast("⚠️ السلة فاضية"); return; }
-  let html = `<div class="split-total">الأصناف: <b>${cart.length}</b> • المجموع: <b>${fmtCur(getCartTotal())}</b></div>`;
-  html += `<div class="split-inputs"><label>عدد الفواتير: <input type="number" id="split-count" min="2" max="10" value="2" onchange="buildSplitTable()" style="width:60px"></label></div>`;
+  if (splitInvoices) { toast("⚠️ " + t("splitInProgress")); return; }
+  if (!cart.length) { toast("⚠️ " + t("cartEmptyShort")); return; }
+  let html = `<div class="split-total">${t("items")}: <b>${cart.length}</b> • ${t("total")}: <b>${fmtCur(getCartTotal())}</b></div>`;
+  html += `<div class="split-inputs"><label>${t("invoicesCount")}: <input type="number" id="split-count" min="2" max="10" value="2" onchange="buildSplitTable()" style="width:60px"></label></div>`;
   html += `<div id="split-items"></div>`;
   html += `<div id="split-preview"></div>`;
   document.getElementById("split-body").innerHTML = html;
@@ -1626,9 +1622,9 @@ function buildSplitTable() {
   const count = Math.max(2, Math.min(10, parseInt(document.getElementById("split-count").value) || 2));
   const itemsDiv = document.getElementById("split-items");
   let table = `<table class="split-table"><thead><tr>
-    <th>الصنف</th><th>السعر</th>`;
-  for (let p = 1; p <= count; p++) table += `<th>فاتورة${p}</th>`;
-  table += `<th>المتبقي</th></tr></thead><tbody>`;
+    <th>${t("item")}</th><th>${t("prices")}</th>`;
+  for (let p = 1; p <= count; p++) table += `<th>${t("invoice")}${p}</th>`;
+  table += `<th>${t("remainingItems")}</th></tr></thead><tbody>`;
 
   cart.forEach((it, idx) => {
     const qty = it.qty;
@@ -1676,12 +1672,12 @@ function updateSplitLive() {
     const perTotal = persons[p - 1] + perTax;
     grand += perTotal;
     result += `<div class="split-person">
-      <span>📄 فاتورة ${p}</span>
+      <span>📄 ${t("invoice")} ${p}</span>
       <span class="split-amount">${fmtCur(persons[p - 1])} <small>+${TAX_RATE * 100}% = <b>${fmtCur(perTotal)}</b></small></span>
     </div>`;
   }
-  result += `<div class="split-grand">المجموع: <b>${fmtCur(grand)}</b> (${fmtCur(getCartTotal())})</div>`;
-  if (!allAssigned) result += `<div style="color:var(--warn);font-size:12px;margin-top:6px">⚠️ بعض الأصناف لم تُوزع على أي فاتورة</div>`;
+  result += `<div class="split-grand">${t("total")}: <b>${fmtCur(grand)}</b> (${fmtCur(getCartTotal())})</div>`;
+  if (!allAssigned) result += `<div style="color:var(--warn);font-size:12px;margin-top:6px">⚠️ ${t("splitUnassigned")}</div>`;
   result += `</div>`;
   preview.innerHTML = result;
 }
@@ -1690,7 +1686,7 @@ function updateSplitLive() {
 function updateSplitPreview() { buildSplitTable(); }
 
 function confirmSplit() {
-  if (splitInvoices) { toast("⚠️ يوجد تقسيم جارٍ بالفعل"); return; }
+  if (splitInvoices) { toast("⚠️ " + t("splitInProgress")); return; }
   if (!document.getElementById("split-count")) return;
   const count = Math.max(2, Math.min(10, parseInt(document.getElementById("split-count").value) || 2));
   const invoices = [];
@@ -1710,12 +1706,12 @@ function confirmSplit() {
   });
 
   let anyNonEmpty = invoices.some(inv => inv.items.length > 0);
-  if (!anyNonEmpty) { toast("⚠️ يجب توزيع الأصناف أولاً"); return; }
+  if (!anyNonEmpty) { toast("⚠️ " + t("splitNeedItems")); return; }
   splitInvoices = invoices;
   splitCurrent = 0;
   closeModal("split-modal");
   _loadInvoice(0);
-  toast("👥 تم التقسيم إلى " + count + " فواتير مستقلة" + (assigned ? "" : " (⚠️ توزيع غير مكتمل)"));
+  toast("👥 " + t("splitSuccess").replace("{count}", count) + (assigned ? "" : " (⚠️ " + t("splitIncomplete") + ")"));
 }
 
 function _loadInvoice(i) {
@@ -1766,8 +1762,8 @@ function renderInvoiceTabs() {
   bar.style.display = "flex";
   bar.innerHTML = splitInvoices.map((inv, i) => {
     const cnt = inv.items.reduce((s, x) => s + x.qty, 0);
-    return `<button class="invoice-tab ${i === splitCurrent ? "active" : ""}" onclick="switchInvoice(${i})">📄 فاتورة ${i + 1}<span class="invoice-tab-cnt">${cnt}</span></button>`;
-  }).join("") + `<button class="invoice-tab-end" onclick="endSplit()">✕ إنهاء</button>`;
+    return `<button class="invoice-tab ${i === splitCurrent ? "active" : ""}" onclick="switchInvoice(${i})">📄 ${t("invoice")} ${i + 1}<span class="invoice-tab-cnt">${cnt}</span></button>`;
+  }).join("") + `<button class="invoice-tab-end" onclick="endSplit()">✕ ${t("finish")}</button>`;
 }
 
 // ===== السلة =====
