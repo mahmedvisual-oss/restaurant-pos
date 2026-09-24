@@ -656,6 +656,10 @@ const I18N = {
     dayCloseRemindHour: "ساعة تنبيه إغلاق اليوم (24)",
     dayStart: "بداية اليوم",
     dayStartConfirm: "📆 بدء اليوم الجديد؟ سيُفتح حساب اليوم للعمل.",
+    consumptionQtyTitle: "الكمية المستهلكة لكل وحدة بيع",
+    currencyPlaceholder: "ر.س",
+    categoryManagement: "⚙️ إدارة الأقسام",
+    tableSectionManagement: "🗂️ إدارة أقسام الطاولات",
     toast: {
       welcome: "مرحباً",
       selectTableFirst: "اختر طاولة أولاً!",
@@ -1486,6 +1490,10 @@ const I18N = {
     dayCloseRemindHour: "Day close reminder hour (24h)",
     dayStart: "Start Day",
     dayStartConfirm: "📆 Start the new day? The day account will be opened for work.",
+    consumptionQtyTitle: "Quantity consumed per unit sold",
+    currencyPlaceholder: "Rp",
+    categoryManagement: "⚙️ Category Management",
+    tableSectionManagement: "🗂️ Table Section Management",
     toast: {
       welcome: "Welcome",
       selectTableFirst: "Select a table first!",
@@ -2316,6 +2324,10 @@ const I18N = {
     dayCloseRemindHour: "Jam pengingat tutup hari (24)",
     dayStart: "Mulai Hari",
     dayStartConfirm: "📆 Mulai hari baru? Akun hari akan dibuka untuk bekerja.",
+    consumptionQtyTitle: "Jumlah yang dikonsumsi per unit terjual",
+    currencyPlaceholder: "Rp",
+    categoryManagement: "⚙️ Kelola Kategori",
+    tableSectionManagement: "🗂️ Kelola Bagian Meja",
     toast: {
       welcome: "Selamat datang",
       selectTableFirst: "Pilih meja terlebih dahulu!",
