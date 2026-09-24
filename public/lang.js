@@ -2063,9 +2063,16 @@ function setLang(l) {
   document.documentElement.lang = l;
   document.documentElement.dir = (l === "ar") ? "rtl" : "ltr";
 
-  if (typeof applyLang === "function") {
-    applyLang();
-  }
+  // Language changes must refresh both static labels and dynamically rendered POS UI.
+  // Keep this safe for pages (such as Kitchen) that do not define all POS renderers.
+  if (typeof applyLang === "function") applyLang();
+  if (typeof updateLangBtn === "function") updateLangBtn();
+  if (typeof renderTables === "function") renderTables();
+  if (typeof updateStats === "function") updateStats();
+  if (typeof renderCats === "function") renderCats();
+  if (typeof renderMenu === "function") renderMenu();
+  if (typeof renderCart === "function") renderCart();
+  if (typeof updateUserBar === "function") updateUserBar();
 }
 
 function t(key, params) {
