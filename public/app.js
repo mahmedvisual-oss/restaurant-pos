@@ -4452,10 +4452,10 @@ function renderEmployees(c) {
 
 function inventoryUnitLabel(unit) {
   const key = {
-    piece: "unit_piece", pcs: "unit_piece",
-    kg: "unit_kg", kilogram: "unit_kg",
-    liter: "unit_liter", litre: "unit_liter",
-    box: "unit_box",
+    piece: "unitPiece", pcs: "unitPiece",
+    kg: "unitKg", kilogram: "unitKg",
+    liter: "unitLiter", litre: "unitLiter",
+    box: "unitBox",
   }[String(unit || "").trim().toLowerCase()];
   return key ? t(key) : String(unit || "");
 }
