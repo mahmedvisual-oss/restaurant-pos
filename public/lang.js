@@ -825,6 +825,8 @@ const I18N = {
     currentName: "الاسم الحالي:",
     newNameEnglish: "الاسم الجديد بالإنجليزية",
     cancelEdit: "✕ إلغاء التعديل",
+    language: "اللغة",
+    renameCategoryTitle: "✏️ إعادة تسمية القسم",
   },
 
   en: {
@@ -1651,6 +1653,8 @@ const I18N = {
     currentName: "Current name:",
     newNameEnglish: "New name in English",
     cancelEdit: "✕ Cancel edit",
+    language: "Language",
+    renameCategoryTitle: "✏️ Rename category",
   },
 
   id: {
@@ -2477,6 +2481,8 @@ const I18N = {
     currentName: "Nama saat ini:",
     newNameEnglish: "Nama baru dalam bahasa Inggris",
     cancelEdit: "✕ Batal edit",
+    language: "Bahasa",
+    renameCategoryTitle: "✏️ Ubah nama kategori",
   },
 };
 
