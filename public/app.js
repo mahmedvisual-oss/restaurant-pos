@@ -1592,7 +1592,7 @@ async function transferOrder(toTable, merge = false) {
     await selectTable(destination);
 
   } catch (e) {
-    toast("❌ " + e.message);
+    toast("❌ " + terr(e.message));
   }
 }
 
@@ -2037,7 +2037,7 @@ function printReceipt(o, existingWindow = null) {
         existingWindow.print();
       } catch (e) {
         console.error("PRINT ERROR:", e);
-        toast("⚠️ " + t("printError").replace("{error}", e && e.message ? e.message : String(e)));
+        toast("⚠️ " + t("printError").replace("{error}", terr(e && e.message ? e.message : String(e))));
       }
     }, 100);
 
