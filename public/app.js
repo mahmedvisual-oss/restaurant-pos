@@ -2946,7 +2946,7 @@ async function loadInventoryList() {
         <div>
           <b>${escapeHtml(i.item_name)}</b>
           <div style="font-size:12px;color:var(--text)">
-            <span data-i18n="quantity">الكمية</span>: ${i.quantity} <span data-i18n="unit_${i.unit}">${i.unit}</span>
+            <span data-i18n="quantity">الكمية</span>: ${i.quantity} ${escapeHtml(inventoryUnitLabel(i.unit))}
             ${i.min_stock > 0 ? ` | <span data-i18n="minStock">الحد الأدنى</span>: ${i.min_stock}` : ""}
             ${i.cost > 0 ? ` | <span data-i18n="cost">التكلفة</span>: ${fmtCur(i.cost)}` : ""}
           </div>
@@ -4448,6 +4448,16 @@ function renderEmployees(c) {
         <tr class="total-row"><td>${t("rptTotal")}</td><td>${d.order_count}</td><td>${fmtCur(d.total_sales)}</td><td>${fmtCur(d.avg_order)}</td></tr>
       </table>
     </div>`;
+}
+
+function inventoryUnitLabel(unit) {
+  const key = {
+    piece: "unit_piece", pcs: "unit_piece",
+    kg: "unit_kg", kilogram: "unit_kg",
+    liter: "unit_liter", litre: "unit_liter",
+    box: "unit_box",
+  }[String(unit || "").trim().toLowerCase()];
+  return key ? t(key) : String(unit || "");
 }
 
 function renderInventory(c) {
